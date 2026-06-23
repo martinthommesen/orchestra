@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+*.lcov
+
+# Logs
+logs/
+log/
+*.log
+
+# Orchestra runtime
+/workspaces/
+symphony_workspaces/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+local.settings.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
