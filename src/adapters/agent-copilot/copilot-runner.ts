@@ -68,7 +68,9 @@ export const makeCopilotRunner = (
         Command.workingDirectory(params.workspacePath),
         Command.env({
           COPILOT_AUTO_UPDATE: "false",
-          ...(ghAuth ? { GITHUB_TOKEN: ghAuth, COPILOT_GITHUB_TOKEN: ghAuth, GH_TOKEN: ghAuth } : {}),
+          ...(ghAuth
+            ? { GITHUB_TOKEN: ghAuth, COPILOT_GITHUB_TOKEN: ghAuth, GH_TOKEN: ghAuth }
+            : {}),
         }),
         Command.stdout("pipe"),
         Command.stderr("inherit"),
