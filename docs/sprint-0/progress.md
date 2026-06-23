@@ -9,10 +9,10 @@
 |---|------|--------|-------|
 | 1 | pnpm monorepo scaffold | ✅ Done | pnpm workspace + strict tsconfig + Biome. `src/`+`test/` per brief §5. |
 | 2 | Effect baseline + run loop skeleton | ✅ Done | `src/cli/main.ts` boots, logs one logfmt "started" line, exits 0; missing arg → exit 1. |
-| 3 | Domain model as Schema | ⬜ Not started | Phase 2 |
-| 4 | Tagged errors | ⬜ Not started | Phase 2 |
-| 5 | Port interfaces | ⬜ Not started | Phase 2 |
-| 6 | WORKFLOW.md loader + Schema validation | ⬜ Not started | Phase 2 |
+| 3 | Domain model as Schema | ✅ Done | `src/core/domain/`: Issue (+IssueStateRef), AgentEvent union, ServiceConfig/WorkflowDefinition, Workspace, RunAttempt, LiveSession, RetryEntry, OrchestratorState. Normalization baked in (label lowercasing transform). |
+| 4 | Tagged errors | ✅ Done | `src/core/errors.ts`: every §5.5/§10.6/§11.4 class + §9.4/§9.5 workspace-safety errors. PascalCase `_tag`, snake_case category in doc comments. 29 unit tests (each constructs + `_tag`-discriminable + exhaustive switch). |
+| 5 | Port interfaces | ✅ Done | `src/core/ports/`: IssueTracker, AgentRunner, WorkspaceManager, Clock as `Context.Tag` services (signatures only). |
+| 6 | WORKFLOW.md loader + Schema validation | ✅ Done | `src/core/workflow/`: split → YAML → Schema decode (defaults) → `$VAR` → path coercion; strict Liquid (unknown var/filter = error). Pure `parseWorkflow` + IO `loadWorkflow` (FileSystem). 16 tests. |
 | 7 | Copilot integration SPIKE | 🔄 In progress | Investigation + live PoC DONE; decision = subprocess. Spike doc written in Phase 3. |
 | 8 | Status design system | ⬜ Not started | Phase 3 |
 | 9 | Effect onboarding guide | ⬜ Not started | Phase 3 |
@@ -46,6 +46,28 @@
   Verified green: `pnpm typecheck`, `pnpm lint` (biome check), `pnpm test`
   (5 passing, harness proof), `pnpm build` (tsup), `pnpm dev ./WORKFLOW.example.md`
   (exit 0, one logfmt line), missing-arg (exit 1). Checkpoint commit made.
+- **Phase 2 (Tasks 3–6) — complete.** Domain Schema, tagged errors, ports, WORKFLOW
+  loader + strict Liquid. Verified green: typecheck, lint, 67 tests pass. Decisions
+  noted: spec `codex` block → `copilot`; spec `linear`/`project_slug` → GitHub
+  `github`/`repo`; `codex_*` domain/error fields → `agent_*`/`Agent*`; `Tracker*`
+  generalization of `linear_*` errors. Schema decode failures map to
+  `WorkflowParseError` (no dedicated SPEC class for config-validation). Checkpoint commit.
+
+## Decisions (Phase 2 adaptations of the Symphony spec → Orchestra)
+
+- **GitHub tracker, not Linear:** `tracker.kind` default value `github`; spec's
+  `project_slug` → `repo` (`owner/name`); canonical api-key env `GITHUB_TOKEN`;
+  endpoint default `https://api.github.com`. Supported-kind / repo / api-key presence
+  are validated at dispatch preflight (Sprint 1), not at parse (decode stays lenient
+  per §5.5) — they surface as `UnsupportedTrackerKind` / `MissingTrackerRepo` /
+  `MissingTrackerApiKey`.
+- **Copilot agent, not Codex:** spec `codex` front-matter block → `copilot`
+  (`command` default `copilot`, `+model`); Codex-only sandbox/approval fields dropped.
+  `LiveSession.codex_*` / `OrchestratorState.codex_*` fields → `agent_*`.
+- **Workspace default root:** `<system-temp>/orchestra_workspaces` (spec
+  `symphony_workspaces`).
+- **Error names generalized:** `linear_*` → `Tracker*`, `codex_*` → `Agent*`
+  (e.g. `port_exit` → `AgentProcessExit`). Spec snake_case kept in doc comments.
 
 ## Notes
 
