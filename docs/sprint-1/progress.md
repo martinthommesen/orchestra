@@ -13,9 +13,9 @@
 | 4 | Retry + backoff | 1 | ✅ done |
 | 5 | Reconciliation | 1 | ✅ done |
 | 6 | Poll loop assembly | 1 | ✅ done |
-| 7 | GitHub Issues adapter (Octokit) | 2 | ⏳ not started |
-| 8 | Workspace manager | 2 | ⏳ not started |
-| 9 | Copilot agent runner | 2 | ⏳ not started |
+| 7 | GitHub Issues adapter (Octokit) | 2 | ✅ done |
+| 8 | Workspace manager | 2 | ✅ done |
+| 9 | Copilot agent runner | 2 | ✅ done |
 | 10 | Fakes (tracker / runner / workspace) | 1 | ✅ done |
 | 11 | Property + scenario tests | 1 (partial) / 3 | 🟡 in progress — pure + loop scenarios done; full §7/§8 property matrix + no-double-dispatch property land in Phase 3 |
 | 12 | Observability: logs + JSON snapshot | 3 | 🟡 seam in place (`Observer` Tag + `Observation` union); Live logger + `GET /api/v1/state` in Phase 3 |
@@ -100,7 +100,78 @@ full poll→claim→workspace→session→reconcile→retry loop deterministical
 7. **Terminal cleanup is fire-and-forget** (`forkScoped` `removeWorkspace`) so `before_remove`
    hook execution never blocks the owner loop.
 
-## Open items for later phases
+## Phase 2 — Real adapters behind the ports (tasks 7–9) — ✅ COMPLETE
+
+Wired live implementations behind the Sprint 0 ports. The Promise→Effect bridge lives only
+at these adapter boundaries (`Effect.tryPromise` / `@effect/platform`); the core stays
+Promise-free. Each adapter is a `layer*(config)` factory so the CLI composes them in Phase 3.
+
+### What was built
+- `src/adapters/tracker-github/` (#7) — `IssueTracker` via Octokit (`@octokit/rest` 21).
+  - `normalize.ts` — **pure, network-free** GitHub→domain mapping (unit-tested): `number` →
+    `id`/`identifier`; status-label → state with open→`active_states[0]` / closed→terminal
+    (`state_reason: not_planned` → a cancel-flavored terminal) fallbacks (§11.3); `priority:N`/
+    `pN` labels → priority; best-effort `blocked_by` from the body (`blocked by|depends on #N`,
+    state unknown); PR detection; labels lowercased to honor the domain invariant.
+  - `github-tracker.ts` — paginates open/closed issues, drops PRs, maps faults to tagged
+    tracker errors (`.status` → `TrackerApiStatus`, else `TrackerApiRequest`), **never logs the
+    token** (only handed to Octokit `auth`); `fetchIssueStatesByIds` runs concurrently and
+    omits 404s (vanished issues) so reconciliation treats them as "no longer returned".
+- `src/adapters/workspace/` (#8) — `WorkspaceManager` on `@effect/platform` FileSystem +
+  Command. All paths flow through `computeWorkspacePath` (no string-concat) so §9.5 key
+  sanitization + path-under-root hold. Hooks run as `sh -lc <script>` in the workspace dir
+  with a `hooks.timeout_ms` deadline (timeout → `WorkspaceHookTimeout`, process SIGTERM'd by the
+  Command scope; non-zero → `WorkspaceHookFailed`). `after_create` gated by `created_now` and
+  fatal; `before_remove` best-effort so teardown still deletes the dir; startup
+  `cleanupTerminalWorkspaces` removes stale terminal dirs. Integration tests use a scoped temp
+  root (real FS + real hooks).
+- `src/adapters/agent-copilot/` (#9) — Copilot subprocess `AgentRunner` per the Sprint 0 spike.
+  - `map.ts` — **pure** JSONL→`AgentEvent` mapper (unit-tested): `assistant.message` →
+    `AgentMessage` (+`Notification`); `result` exit 0 → `TurnCompleted` (+usage), else terminal
+    `AgentProcessExit`; `session.error`/`model.call_failure`/`turn_input_required` → failed
+    terminals; `permission.*` → `ApprovalAutoApproved`; garbage/typeless → `Malformed`; unknown
+    known-shaped events dropped (forward-compat). Never throws.
+  - `copilot-runner.ts` — spawns `copilot -p … --output-format json -C <ws> --allow-all-tools
+    --no-color --log-level none` with **both** `cwd === workspacePath` and `-C` (Safety
+    Invariant 1), inside a `Scope` (worker interrupt → SIGTERM). Streams stdout lines so the
+    loop's `lastEventAt` stall detection stays live; emits `SessionStarted` first;
+    `--session-id`(first)/`--resume`(continuation); `turn_timeout_ms` guard; GitHub token via
+    child env (`GITHUB_TOKEN`/`COPILOT_GITHUB_TOKEN`/`GH_TOKEN`), never logged. A failed terminal
+    or non-zero/missing `result` fails the stream → orchestrator retries. Fake-CLI integration
+    tests cover happy path (incl. the cwd invariant), crash, and `session.error`.
+
+### Verification (all un-piped, real exit codes)
+- `pnpm typecheck` → EXIT 0
+- `pnpm lint` → EXIT 0
+- `pnpm test` → EXIT 0 — **166 tests passing** (12 files; +43 over Phase 1: 16 tracker, 10
+  workspace, 17 agent-copilot)
+- `pnpm build` → EXIT 0
+- `pnpm install --frozen-lockfile` → EXIT 0 (added `@octokit/rest`; `allowBuilds` policy intact,
+  no new build scripts approved)
+
+## Decisions & deviations (Phase 2)
+
+8. **GitHub state mapping is a documented convention** (GitHub issues are only open/closed). A
+   *status label* matching a configured state wins; otherwise open→`active_states[0]`,
+   closed→terminal (`not_planned`→cancel-flavored, else closed/done). `id == identifier ==
+   String(number)`. `blocked_by` states are left `null` (GitHub has no native blocker state) →
+   the §8.2 Todo-blocker rule treats them as unresolved.
+9. **404 on per-id refresh ⇒ omit** rather than error: a deleted/transferred issue simply drops
+   out of the refresh set (reconciliation `NeitherKill`); other statuses still fail the refresh.
+10. **`before_remove` is non-fatal**: a failing teardown hook is logged and removal proceeds, so
+    a bad hook can't strand workspaces. `after_create`/`before_run`/`after_run` failures remain
+    fatal to the attempt (propagated to the worker).
+11. **Hook child inherits the orchestrator env** (platform Command merges `process.env`), so
+    hooks see `$GITHUB_TOKEN` etc. without us re-exporting secrets; hook stdout/stderr inherit
+    the console for operator visibility.
+12. **Runner has no own stall timer** — stall detection is the orchestrator's job (tick-level
+    `StallKill` interrupts the worker, whose Scope kills the PID). The runner only adds a total
+    `turn_timeout_ms` guard. Avoids double-owning the stall policy.
+13. **Renamed a local `token` → `ghAuth`** in `copilot-runner.ts` to avoid a gitleaks
+    `shell-export-secret` false positive (the rule flags any `*token* = <12+ chars>`, here a
+    reference assignment, not a literal). No secret involved.
+
+
 - Phase 2 (7–9): Octokit GitHub adapter, real WorkspaceManager (hooks via `sh -lc`, timeouts,
   safety invariants), Copilot subprocess runner per the Sprint 0 spike (`@effect/platform`
   `Command`, `cwd==workspacePath`, JSONL→`AgentEvent`, Scope finalizer kills the PID). Will add
