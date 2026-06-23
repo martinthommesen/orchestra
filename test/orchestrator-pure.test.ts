@@ -209,6 +209,26 @@ describe("selection / sort + selectCandidates", () => {
       }),
     );
   });
+
+  it("property: never double-dispatch — a claimed/running issue is never selected", () => {
+    fc.assert(
+      fc.property(
+        fc.array(arbIssue, { maxLength: 30 }),
+        fc.array(fc.string({ minLength: 1, maxLength: 6 }), { maxLength: 30 }),
+        (issues, claimed) => {
+          // `claimed` carries the ids of every already-claimed *and* running issue
+          // (setRunning claims), so this models the orchestrator's in-flight set.
+          const ctx = ctxOf({ claimed });
+          const out = selectCandidates(issues, ctx);
+          const claimedSet = new Set(claimed);
+          // No selected candidate is already in flight — the core no-double-dispatch rule.
+          expect(out.some((i) => claimedSet.has(i.id))).toBe(false);
+          // And every selected candidate is independently eligible.
+          expect(out.every((i) => isEligible(i, ctx))).toBe(true);
+        },
+      ),
+    );
+  });
 });
 
 // ───────────────────────────── concurrency (§8.3) ─────────────────────────────
