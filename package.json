@@ -1,0 +1,43 @@
+{
+  "name": "orchestra",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end type-safe TypeScript reimplementation of OpenAI's Symphony, on Effect.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "orchestra": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/main.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.96.2",
+    "@effect/platform-node": "^0.107.0",
+    "effect": "^3.21.4",
+    "liquidjs": "^10.27.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@effect/vitest": "^0.29.0",
+    "@types/node": "^26.0.0",
+    "fast-check": "^4.8.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.6"
+  }
+}

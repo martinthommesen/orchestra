@@ -1,0 +1,24 @@
+# Orchestra is a pnpm-workspace monorepo. v1 keeps a single root package (lean
+# package set per docs/brainstorm/05-summary.md decision #9). Additional packages
+# (e.g. a future Linear adapter or Ink TUI) drop into packages/* without a rewrite.
+packages:
+  - "packages/*"
+
+# Build-script policy (pnpm 11 reads these from pnpm-workspace.yaml, not package.json).
+# None of these install scripts are needed in Sprint 0: esbuild works via its
+# prebuilt @esbuild/<platform> binary (powers tsup/tsx/vitest), and the native
+# watcher deps are only exercised by Sprint 1's hot-reload. Explicitly ignore them
+# so `pnpm install` is clean and runs zero third-party install scripts (supply-chain
+# hygiene). Revisit when hot-reload lands.
+ignoredBuiltDependencies:
+  - esbuild
+  - "@parcel/watcher"
+  - msgpackr-extract
+
+# Don't auto-verify/auto-install deps before every `pnpm <script>` run. CI installs
+# explicitly with --frozen-lockfile; this keeps `pnpm dev`/`pnpm test` deterministic.
+verifyDepsBeforeRun: false
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  esbuild: set this to true or false
+  msgpackr-extract: set this to true or false

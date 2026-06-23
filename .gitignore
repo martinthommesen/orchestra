@@ -26,6 +26,9 @@ symphony_workspaces/
 !.env.example
 local.settings.json
 
+# Sprint 0 Copilot spike throwaway PoC (never committed)
+/.spike-copilot/
+
 # Editor / OS
 .DS_Store
 .idea/
