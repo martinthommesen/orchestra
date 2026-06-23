@@ -35,6 +35,28 @@ describe("parseArgs", () => {
     Effect.gen(function* () {
       const args = yield* parseArgs(["./WORKFLOW.example.md"]);
       expect(args.workflowPath).toBe("./WORKFLOW.example.md");
+      expect(args.port).toBeNull();
+    }),
+  );
+
+  it.effect("parses --port N and --port=N into a numeric port", () =>
+    Effect.gen(function* () {
+      const spaced = yield* parseArgs(["./WORKFLOW.md", "--port", "8080"]);
+      expect(spaced.port).toBe(8080);
+      expect(spaced.workflowPath).toBe("./WORKFLOW.md");
+
+      const equals = yield* parseArgs(["--port=9091", "./WORKFLOW.md"]);
+      expect(equals.port).toBe(9091);
+      expect(equals.workflowPath).toBe("./WORKFLOW.md");
+    }),
+  );
+
+  it.effect("rejects out-of-range or non-integer ports", () =>
+    Effect.gen(function* () {
+      for (const bad of ["0", "70000", "abc", "-1"]) {
+        const error = yield* Effect.flip(parseArgs(["./WORKFLOW.md", "--port", bad]));
+        expect(error._tag).toBe("CliUsageError");
+      }
     }),
   );
 

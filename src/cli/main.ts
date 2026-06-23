@@ -1,30 +1,52 @@
-import { NodeRuntime } from "@effect/platform-node";
+import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, Logger } from "effect";
+import { layerCopilotRunner } from "../adapters/agent-copilot";
+import { layerGitHubTracker } from "../adapters/tracker-github";
+import { layerWorkspaceManager } from "../adapters/workspace";
+import { ClockLive } from "../core/clock/live";
+import type { ServiceConfig } from "../core/domain/workflow";
+import { ObserverLive } from "../core/observability/live-observer";
+import { runSnapshotServer } from "../core/observability/snapshot-server";
+import { runOrchestrator } from "../core/orchestrator/loop";
+import { layerOrchestratorStore } from "../core/orchestrator/state";
+import { loadWorkflow } from "../core/workflow/loader";
 import { parseArgs } from "./args";
 
 /**
  * Orchestra CLI / daemon entry point.
  *
- * Sprint 0 scope: prove the Effect wiring end-to-end — parse the WORKFLOW.md path
- * argument, build the (currently minimal) application `Layer` graph, emit a
- * structured "started" line, and exit cleanly. No orchestration yet; Sprint 1
- * grows {@link AppLive} with the IssueTracker / AgentRunner / WorkspaceManager /
- * Clock layers and the poll loop. The shape here is intentionally the one the
- * orchestrator slots into: a single program effect, all dependencies provided as
- * Layers, run by `NodeRuntime.runMain`.
+ * Boots the control loop: parse the WORKFLOW.md path (+ optional `--port`), load and
+ * validate the workflow into a typed {@link ServiceConfig}, build the application
+ * `Layer` graph (store + GitHub tracker + Copilot runner + workspace manager + clock +
+ * live observer over the Node platform), announce startup, and hand off to the single
+ * state-owning orchestrator fiber via {@link runOrchestrator}. Everything stays inside
+ * Effect — `NodeRuntime.runMain` installs SIGINT/SIGTERM handlers that interrupt the
+ * root fiber, tearing down the orchestrator scope (and with it every worker, retry
+ * timer, and the optional snapshot server).
  */
 
 const VERSION = process.env.npm_package_version ?? "0.0.0";
 
 /**
- * The application Layer graph. Empty in Sprint 0 beyond logging; this is the seam
- * where Sprint 1 provides the orchestrator's service implementations.
+ * Build the application Layer graph from a loaded workflow's {@link ServiceConfig}. The
+ * platform-dependent layers (workspace manager, Copilot runner) take their
+ * `FileSystem`/`CommandExecutor` from the ambient {@link NodeContext.layer}, provided
+ * once at the program root.
  */
-export const AppLive = Layer.empty;
+export const appLayer = (config: ServiceConfig) =>
+  Layer.mergeAll(
+    layerOrchestratorStore(config),
+    layerGitHubTracker(config),
+    layerCopilotRunner(config),
+    layerWorkspaceManager(config),
+    ClockLive,
+    ObserverLive,
+  );
 
-/** The top-level program: wire dependencies, announce startup, hand off to the loop. */
+/** The top-level program: parse args, load workflow, wire layers, run the loop. */
 const program = Effect.gen(function* () {
-  const { workflowPath } = yield* parseArgs(process.argv.slice(2));
+  const { workflowPath, port } = yield* parseArgs(process.argv.slice(2));
+  const def = yield* loadWorkflow(workflowPath);
 
   yield* Effect.logInfo("orchestra started").pipe(
     Effect.annotateLogs({
@@ -32,13 +54,21 @@ const program = Effect.gen(function* () {
       version: VERSION,
       workflow_path: workflowPath,
       pid: String(process.pid),
+      ...(port === null ? {} : { snapshot_port: String(port) }),
     }),
   );
 
-  // Sprint 1 replaces this with the orchestrator poll loop. For now, a clean exit
-  // after announcing startup proves the boot path and Layer wiring.
-  yield* Effect.logDebug("no orchestration configured yet (Sprint 0 scaffold)");
-}).pipe(Effect.provide(AppLive));
+  const run = Effect.scoped(
+    Effect.gen(function* () {
+      if (port !== null) {
+        yield* Effect.forkScoped(runSnapshotServer(port));
+      }
+      yield* runOrchestrator(def);
+    }),
+  );
+
+  yield* run.pipe(Effect.provide(appLayer(def.config)));
+}).pipe(Effect.provide(NodeContext.layer));
 
 /** logfmt logger → stable `key=value` lines per PROJECT_BRIEF §13.1. */
 const LoggerLive = Logger.logFmt;
