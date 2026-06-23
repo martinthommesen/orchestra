@@ -17,9 +17,9 @@
 | 8 | Workspace manager | 2 | ✅ done |
 | 9 | Copilot agent runner | 2 | ✅ done |
 | 10 | Fakes (tracker / runner / workspace) | 1 | ✅ done |
-| 11 | Property + scenario tests | 1 (partial) / 3 | 🟡 in progress — pure + loop scenarios done; full §7/§8 property matrix + no-double-dispatch property land in Phase 3 |
-| 12 | Observability: logs + JSON snapshot | 3 | 🟡 seam in place (`Observer` Tag + `Observation` union); Live logger + `GET /api/v1/state` in Phase 3 |
-| 13 | Fake end-to-end + docs | 3 | ⏳ not started |
+| 11 | Property + scenario tests | 1 / 3 | ✅ done — pure + loop scenarios (Phase 1) + explicit no-double-dispatch property (Phase 3) |
+| 12 | Observability: logs + JSON snapshot | 3 | ✅ done — Live Observer (logfmt + glyphs) + loopback `GET /api/v1/state` behind `--port` |
+| 13 | Fake end-to-end + docs | 3 | ✅ done — combined fake e2e, `AppLive` wired in `src/cli/main.ts`, README run section |
 
 ## Phase 1 — State machine on fakes (tasks 1–6, 10) — ✅ COMPLETE
 
@@ -181,3 +181,63 @@ Promise-free. Each adapter is a `layer*(config)` factory so the CLI composes the
   Observer (structured `key=value` logs with glyphs), `GET /api/v1/state` snapshot (loopback,
   `--port`), fake e2e wiring `AppLive` in `src/cli/main.ts`, README run section, then
   PROJECT_BRIEF §5/§7/§8 + `docs/sprint-1/done.md`.
+
+## Phase 3 — Observability, e2e, docs (tasks 11–13) — ✅ COMPLETE
+
+Closed the sprint by making the loop observable, wiring the real entrypoint, and proving
+the whole pipeline end-to-end without a network.
+
+- **#11 — no-double-dispatch property.** Added the explicit "a claimed/running issue is
+  never selected" property over `selectCandidates` (random issue set × random claimed set →
+  output never intersects the in-flight set, every output independently eligible). The other
+  two properties (concurrency never exceeds global/per-state caps; backoff monotonic & capped)
+  and all five fake scenario tests (success+continuation, failure→backoff retry,
+  terminal→kill+clean, stall→kill+retry, slots-full→requeue) were already in place from
+  Phase 1.
+- **#12 — observability.** `src/core/observability/live-observer.ts`: pure
+  `formatObservation(obs) → { level, message, annotations }` (exhaustive over the `Observation`
+  union, uses Milo's status glyphs + `truncate`, carries `issue_id`/`issue_identifier`/
+  `session_id`), plus `ObserverLive` that logs each line via `Effect.logInfo/logWarning` +
+  `Effect.annotateLogs` (logfmt-compatible with the CLI's `Logger.logFmt`).
+  `src/core/observability/snapshot-server.ts`: pure `toSnapshot(state)` projection + a
+  loopback-only (`127.0.0.1`) `GET /api/v1/state` server via `@effect/platform`
+  (`HttpRouter`/`HttpServer.serveEffect` + `NodeHttpServer.layer`), forked into the
+  orchestrator scope when `--port N` is given. `src/cli/args.ts` gained `--port` (and
+  `--port=N`) parsing with 1..65535 validation.
+- **#13 — fake e2e + wiring + docs.** `src/cli/main.ts` now wires `AppLive`: parse args →
+  `loadWorkflow` → build the Layer graph (`layerOrchestratorStore` | `layerGitHubTracker` |
+  `layerCopilotRunner` | `layerWorkspaceManager` | `ClockLive` | `ObserverLive`) over
+  `NodeContext.layer` (for `FileSystem`/`CommandExecutor`) → announce startup → run the single
+  `runOrchestrator` fiber, forking `runSnapshotServer` alongside when `--port` is set.
+  `test/e2e-fake.test.ts` drives two priority-ordered issues through the real loop under
+  `TestClock` (select → dispatch → workspace+hooks → session → complete) and asserts the
+  authoritative store **and** the `toSnapshot` projection. README updated with run/usage,
+  configuration, and gate sections.
+
+### Verification (Phase 3, all un-piped, `; echo $?`)
+
+- `pnpm typecheck` → EXIT 0
+- `pnpm lint` → EXIT 0
+- `pnpm test` → EXIT 0 — **178 tests passing** (15 files; +12 over Phase 2: 5 live-observer,
+  3 snapshot-server, 2 args `--port`, 1 no-double-dispatch property, 1 fake e2e)
+- `pnpm build` → EXIT 0
+- `pnpm install --frozen-lockfile` → EXIT 0 (no new deps in Phase 3; `allowBuilds` policy intact)
+- **Daemon smoke (network-free):** ran the built bundle against a WORKFLOW pointed at a refused
+  loopback endpoint — emitted the logfmt `started` line, Live Observer `tick_start`/`reconciled`/
+  `tick_end`/`tracker_error` lines (degraded mode keeps looping), and `curl http://127.0.0.1:PORT/api/v1/state`
+  returned the JSON snapshot. The safe CLI error paths (no args → usage; bad `--port`; missing
+  workflow) all exit non-zero with a structured cause.
+
+## Decisions & deviations (Phase 3)
+
+14. **`HttpServer.serveEffect` returns after install; the listener lives for the layer scope.**
+    `serveEffect` completes immediately (it forks the server into the provided layer's scope),
+    so `Effect.provide(serveEffect, NodeHttpServer.layer)` alone tears the server down at once.
+    Fix: `serveEffect.pipe(Effect.zipRight(Effect.never), Effect.provide(layer))` keeps the
+    layer scope open for the orchestrator's lifetime; interrupting the fiber closes it cleanly.
+15. **Snapshot bind failure is non-fatal.** A `ServeError` (e.g. port in use) is caught, logged,
+    and the fiber idles (`Effect.never`) rather than taking down orchestration — a bad `--port`
+    degrades observability only.
+16. **Snapshot is a read-only projection of the authoritative `OrchestratorStore`.** The server
+    calls `store.get` (a serialized `Ref.get`) — no mutation, no race with the owner fiber.
+    `Date` fields serialize to ISO automatically via `HttpServerResponse.json`.
