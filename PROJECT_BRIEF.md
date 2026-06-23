@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — Orchestra
 
-> Last updated: 2026-06-23 | Sprint 0 | Status: In Progress
+> Last updated: 2026-06-23 | Sprint 0 complete | Status: Foundations ready for Sprint 1
 >
 > **This file is the single source of truth across all team chats.** Each chat is a
 > fresh context — this file and `docs/sprint-N/progress.md` are the only things that
@@ -97,25 +97,29 @@ necessarily `Done`.
 
 ## 5. Key Files Map
 
-| Area | Path | Contents |
-|------|------|----------|
-| CLI / daemon entry | `src/cli/main.ts` *(planned)* | Arg parsing, Layer wiring, run loop |
-| Domain model | `src/core/domain/` *(planned)* | `Schema` types: Issue, Workflow, Session, RetryEntry, OrchestratorState |
-| Ports | `src/core/ports/` *(planned)* | `IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock` interfaces |
-| Orchestrator | `src/core/orchestrator/` *(planned)* | Poll loop, dispatch, reconciliation, retry/backoff, state machine |
-| Errors | `src/core/errors.ts` *(planned)* | Tagged errors for every SPEC.md error class |
-| GitHub adapter | `src/adapters/tracker-github/` *(planned)* | Octokit client + normalization |
-| Copilot runner | `src/adapters/agent-copilot/` *(planned)* | Subprocess/SDK runner → AgentEvent stream |
-| Workflow config | `src/core/workflow/` *(planned)* | WORKFLOW.md loader, front-matter Schema, Liquid render, watcher |
-| Workspace | `src/core/workspace/` *(planned)* | Dir lifecycle, sanitization, hooks, safety invariants |
-| Observability | `src/core/observability/` *(planned)* | Logger config, snapshot, optional JSON API |
-| Test fakes | `test/fakes/` *(planned)* | `FakeTracker`, `FakeAgentRunner` |
-| Sprint docs | `docs/sprint-N/` | Plans, progress, done |
-| Brainstorm | `docs/brainstorm/` | Architecture debate that set these decisions |
-| Reference spec | (external) | https://github.com/openai/symphony/blob/main/SPEC.md |
+| Area | Path | Status | Contents |
+|------|------|--------|----------|
+| CLI / daemon entry | `src/cli/main.ts`, `src/cli/args.ts` | ✅ created | Arg parsing (`args.ts`), `Layer` wiring (`AppLive` seam), logfmt logger, `runMain`. Run loop lands Sprint 1. |
+| Domain model | `src/core/domain/` | ✅ created | `Schema` types: Issue, AgentEvent (union), ServiceConfig + **front-matter schema** (`workflow.ts`), Workspace, RunAttempt, LiveSession, RetryEntry, OrchestratorState |
+| Ports | `src/core/ports/` | ✅ created | `IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock` as `Context.Tag` (signatures only) |
+| Errors | `src/core/errors.ts` | ✅ created | Tagged error for every SPEC error class + workspace-safety errors; unioned |
+| Workflow config | `src/core/workflow/` | ✅ created | WORKFLOW.md loader, `$VAR`, path resolution, strict Liquid render (front-matter `Schema` lives in `domain/workflow.ts`); watcher is Sprint 1 |
+| Workspace | `src/core/workspace/` | 🟡 partial | `safety.ts` (sanitization, path-under-root) created; dir lifecycle + hooks Sprint 1 |
+| Observability | `src/core/observability/` | 🟡 partial | `glyphs.ts` status design system created; logger config + JSON snapshot Sprint 1+ |
+| Util | `src/core/util/` | ✅ created | Small shared helpers (e.g. `errorMessage`) |
+| Orchestrator | `src/core/orchestrator/` | 📋 planned | Poll loop, dispatch, reconciliation, retry/backoff, state machine (Sprint 1) |
+| GitHub adapter | `src/adapters/tracker-github/` | 📋 planned | Octokit client + normalization (Sprint 1) |
+| Copilot runner | `src/adapters/agent-copilot/` | 📋 planned | Subprocess runner → AgentEvent stream (Sprint 1; spike: `docs/sprint-0/spike-copilot.md`) |
+| Test fakes | `test/fakes/` | 📋 planned | `FakeTracker`, `FakeAgentRunner` (Sprint 1) |
+| CI | `.github/workflows/ci.yml` | ✅ created | typecheck + lint + test + build on Node 22+24 |
+| Sprint docs | `docs/sprint-N/` | ✅ | Plans, progress, done, spike |
+| Brainstorm | `docs/brainstorm/` | ✅ | Architecture debate that set these decisions |
+| Reference spec | (external) | — | https://github.com/openai/symphony/blob/main/SPEC.md |
 
-> Source layout is the **planned** v1 target ratified in the brainstorm; Sprint 0
-> creates the actual scaffold and may refine paths. Update this table when it does.
+> Layout reflects the **actual** Sprint 0 scaffold. Deviations from the original plan:
+> the front-matter `Schema` lives in `core/domain/workflow.ts` (not `core/workflow/`),
+> and a small `core/util/` was added. `adapters/`, `orchestrator/`, and `test/fakes/`
+> arrive in Sprint 1.
 
 ## 6. Team Roles
 
@@ -133,20 +137,42 @@ necessarily `Done`.
 
 | Sprint | Name | Status | Scope |
 |--------|------|--------|-------|
-| 0 | Architecture & Foundations | 🔨 In Progress | pnpm monorepo scaffold, Effect setup, domain `Schema` types, ports, WORKFLOW.md loader, tagged errors, CI, **Copilot integration spike** |
+| 0 | Architecture & Foundations | ✅ Done | pnpm monorepo scaffold, Effect setup, domain `Schema` types, ports, WORKFLOW.md loader, tagged errors, CI, **Copilot integration spike** |
 | 1 | Core Orchestrator Loop | 📋 Planned | Poll/dispatch/concurrency/retry/reconcile state machine, GitHub Issues adapter, Copilot subprocess runner, fakes + property tests |
 
 ## 8. Current State (rewrite every sprint)
 
-**What works:**
-- Planning artifacts only: brainstorm (`docs/brainstorm/`), this brief, sprint plans.
+**What works (Sprint 0 complete):**
+- pnpm-workspace TS monorepo on **Effect** with strict `tsconfig` + **Biome**
+  (lint/format/import-sort). `pnpm install/typecheck/lint/test/build` all green;
+  **84 tests** across 7 files (vitest + @effect/vitest + fast-check).
+- CLI boots: `pnpm dev ./WORKFLOW.example.md` logs one logfmt "started" line and exits 0;
+  missing arg exits 1.
+- **Domain model** (`src/core/domain/`) as `Schema` with SPEC defaults + normalization;
+  **a tagged error for every SPEC error class** (`src/core/errors.ts`).
+- **Four ports** (`IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock`) as
+  `Context.Tag` services (signatures only — impls are Sprint 1).
+- **WORKFLOW.md loader**: YAML front matter → `Schema` (defaults), `$VAR` indirection,
+  path resolution, strict Liquid render (unknown var/filter = tagged error). §9.5
+  workspace-safety helpers encoded.
+- **Status design system** (`core/observability/glyphs.ts` + `docs/design-system.md`),
+  **Effect onboarding guide** (`docs/effect-guide.md`), and a documented, validated
+  `WORKFLOW.example.md`.
+- **CI merge gate** (`.github/workflows/ci.yml`) on Node 22 + 24.
+- **Copilot integration pinned:** v1 = headless `copilot` subprocess (JSONL →
+  `AgentEvent`); rationale + mapping + Schema sketch in `docs/sprint-0/spike-copilot.md`.
 
-**What doesn't work yet:**
-- No application code, no `package.json`, no build — Sprint 0 creates the scaffold.
-- Copilot integration surface (SDK vs headless CLI) not yet pinned — Sprint 0 spike.
+**What doesn't work yet (Sprint 1+):**
+- No orchestrator loop (poll/claim/dispatch/concurrency/retry/reconcile) yet.
+- No real adapters: GitHub Issues (Octokit) and the Copilot runner are ports only — no
+  network or subprocess calls. Workspace dir lifecycle + hook execution not implemented.
+- No test fakes (`FakeTracker`/`FakeAgentRunner`) or property/e2e suites beyond the
+  harness proof.
 
 **What's next:**
-- Execute Sprint 0: scaffold + foundations + spike (see `docs/sprint-0/plan.md`).
+- Execute Sprint 1 (`docs/sprint-1/plan.md`): build the single state-owning orchestrator
+  fiber and the GitHub + Copilot adapters on these foundations.
+- After the first push, mark the CI `check` job **required** in branch protection.
 
 ## 9. Security Rules
 
