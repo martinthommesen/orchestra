@@ -5,20 +5,20 @@ packages:
   - "packages/*"
 
 allowBuilds:
-  '@parcel/watcher': set this to true or false
-  esbuild: set this to true or false
-  msgpackr-extract: set this to true or false
+  '@parcel/watcher': false
+  esbuild: false
+  msgpackr-extract: false
 
-# Build-script policy (pnpm 11 reads these from pnpm-workspace.yaml, not package.json).
-# None of these install scripts are needed in Sprint 0: esbuild works via its
-# prebuilt @esbuild/<platform> binary (powers tsup/tsx/vitest), and the native
-# watcher deps are only exercised by Sprint 1's hot-reload. Explicitly ignore them
-# so `pnpm install` is clean and runs zero third-party install scripts (supply-chain
-# hygiene). Revisit when hot-reload lands.
-ignoredBuiltDependencies:
-  - esbuild
-  - "@parcel/watcher"
-  - msgpackr-extract
+# Build-script policy (pnpm 11 reads this from pnpm-workspace.yaml, NOT the package.json
+# `pnpm` field). pnpm 11.8 requires an explicit true/false decision for every dependency
+# that ships an install script; an *undecided* entry makes `pnpm install` exit 1 with
+# ERR_PNPM_IGNORED_BUILDS (this bit CI on PR #14). We deny all of them (`false`) — none
+# are needed: esbuild runs from its prebuilt @esbuild/<platform> binary (powers
+# tsup/tsx/vitest) and the native watcher deps are only exercised by Sprint 1's
+# hot-reload. Result: `pnpm install --frozen-lockfile` is deterministic (exit 0) and runs
+# zero third-party build scripts (supply-chain hygiene). Flip an entry to `true` (and
+# refresh the lockfile) if/when we actually need its native build. NOTE: the older
+# `ignoredBuiltDependencies` key is NOT honored by pnpm 11.8 — `allowBuilds` is.
 
 # Don't auto-verify/auto-install deps before every `pnpm <script>` run. CI installs
 # explicitly with --frozen-lockfile; this keeps `pnpm dev`/`pnpm test` deterministic.

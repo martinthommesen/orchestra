@@ -23,7 +23,7 @@
 
 | # | Description | Severity | Status | Fix |
 |---|-------------|----------|--------|-----|
-| — | `pnpm-workspace.yaml` carried a stray `allowBuilds:` block with literal placeholder values (`set this to true or false`) — a dead key (not recognized by pnpm; policy already lives in `ignoredBuiltDependencies`). | trivial | ✅ Fixed | Removed the block in Phase 3; `pnpm install --frozen-lockfile` behavior unchanged (still clean, same cosmetic `ERR_PNPM_IGNORED_BUILDS` notice, exit 0). |
+| 1 | **CI red on PR #14 (blocker):** `pnpm install --frozen-lockfile` exits **1** on a clean runner (both Node 22 & 24) with `[ERR_PNPM_IGNORED_BUILDS]`, before typecheck/test even run. Two compounding mistakes: (a) my Phase-3 "removal" of the placeholder `allowBuilds` block did **not** stick — the very next `pnpm install` **rewrites** `pnpm-workspace.yaml`, re-inserting `allowBuilds:` with literal `set this to true or false` placeholders; an *undecided* entry makes pnpm 11.8 exit 1. (b) `ignoredBuiltDependencies` is **not honored** by pnpm 11.8 (verified: it does not suppress the error). I also reported it green locally via a false positive — `pnpm install 2>&1 \| tail` captured `tail`'s exit code (0), not pnpm's, and node_modules was already populated. | **blocker** | ✅ Fixed | `allowBuilds` IS the real pnpm 11.8 key — set each entry to **`false`** (explicit "don't run this build script"). Removed the dead `ignoredBuiltDependencies`. Verified the REAL exit code un-piped on a clean tree: `rm -rf node_modules && pnpm install --frozen-lockfile; echo $?` → **EXIT=0**, zero build scripts run, pnpm no longer rewrites the file. Then `typecheck`/`lint`/`test` (84)/`build` all **0** (esbuild works via its prebuilt @esbuild/<platform> binary despite the skipped script). **Lesson: never validate success through a pipe (`\| tail`/`\| head`) — it hides the real exit code; use `; echo $?` / `${PIPESTATUS[0]}`.** |
 
 ## Decisions
 
@@ -59,6 +59,17 @@
   `pnpm-workspace.yaml`. Verified green end-to-end: `pnpm typecheck`, `pnpm lint`
   (37 files), `pnpm test` (**84 tests, 7 files**), `pnpm build` (tsup), `pnpm dev
   ./WORKFLOW.example.md` (exit 0, one logfmt line), missing-arg (exit 1). Checkpoint commit.
+- **Post-review fix (PR #14 CI red) — Bug #1.** CI failed at the `pnpm install
+  --frozen-lockfile` step on Node 22 + 24 (`ERR_PNPM_IGNORED_BUILDS`, exit 1). Root cause:
+  pnpm 11.8's `allowBuilds` decision map had unresolved placeholder values (pnpm rewrites
+  the file to re-add them every install), and `ignoredBuiltDependencies` is not honored in
+  11.8. Fix: set `allowBuilds` entries to `false` (deny all third-party build scripts) and
+  drop the dead `ignoredBuiltDependencies`. Verified the **real** exit code un-piped on a
+  clean tree (`rm -rf node_modules && pnpm install --frozen-lockfile; echo $?` → **0**),
+  then `typecheck`/`lint`/`test`(84)/`build` all exit 0; lockfile unchanged so
+  `--frozen-lockfile` still valid. pnpm version stays pinned to 11.8.0 via the
+  `packageManager` field (CI's `pnpm/action-setup@v4` reads it) so local == CI, no drift.
+  Pushed to re-run CI on PR #14.
 
 ## Decisions (Phase 2 adaptations of the Symphony spec → Orchestra)
 

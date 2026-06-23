@@ -15,7 +15,8 @@ CLI boots and logs. Nothing is faked or stubbed past the deliberately impl-free 
 ## Verified commands
 
 ```bash
-pnpm install                       # clean (one cosmetic ERR_PNPM_IGNORED_BUILDS notice, exit 0)
+pnpm install                       # 127 pkgs, zero build scripts run, exit 0
+pnpm install --frozen-lockfile     # CI mode — clean, exit 0
 pnpm typecheck                     # tsc --noEmit — clean
 pnpm lint                          # biome check . — 37 files, clean
 pnpm test                          # vitest — 84 tests across 7 files, all pass
@@ -94,9 +95,13 @@ Codex) — `codex` block→`copilot`, `codex_*`→`agent_*`, `linear_*`/`codex_*
 - Actual file layout differs slightly from the brief §5 *planned* table — see the
   updated §5. Notably: the front-matter `Schema` lives in `core/domain/workflow.ts`
   (not `core/workflow/`), and a small `core/util/` was added. Updated in the brief.
-- `pnpm install` prints a cosmetic `ERR_PNPM_IGNORED_BUILDS` (build scripts intentionally
-  ignored via `pnpm-workspace.yaml` `ignoredBuiltDependencies` for supply-chain hygiene);
-  it exits 0 and is not an error.
+- **Supply-chain hygiene / build scripts:** third-party install scripts are denied via
+  `pnpm-workspace.yaml` → `allowBuilds: { '@parcel/watcher': false, esbuild: false,
+  msgpackr-extract: false }`. This is pnpm 11.8's real decision key — `false` means "do not
+  run this build script." `pnpm install --frozen-lockfile` exits **0** with no notice.
+  (Note: `ignoredBuiltDependencies` is **not** honored in pnpm 11.8 and an *undecided*
+  `allowBuilds` entry makes install exit 1 — see progress.md Bug #1. pnpm is pinned to
+  11.8.0 via `package.json` `packageManager` so local == CI.)
 
 ## Files created / changed
 
@@ -121,6 +126,7 @@ index}.ts`; `core/workflow/{loader,render,var,paths,index}.ts`;
 - `b3613e3` — Phase 1: pnpm + Effect + TypeScript scaffold and run-loop skeleton.
 - `5c992fc` — Phase 2: domain Schema, tagged errors, ports, WORKFLOW loader.
 - `05291fe` — Phase 3: Copilot spike, design system, Effect guide, CI, example workflow.
-- (final) — sprint-0 handoff: done.md + PROJECT_BRIEF §5/§7/§8.
+- `48ef5cf` — sprint-0 handoff: done.md + PROJECT_BRIEF §5/§7/§8.
+- (fix) — CI: `pnpm install --frozen-lockfile` exit 0 via `allowBuilds: false` (unblocks PR #14).
 
 Every commit carries `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
