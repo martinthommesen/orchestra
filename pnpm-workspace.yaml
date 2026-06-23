@@ -4,6 +4,11 @@
 packages:
   - "packages/*"
 
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  esbuild: set this to true or false
+  msgpackr-extract: set this to true or false
+
 # Build-script policy (pnpm 11 reads these from pnpm-workspace.yaml, not package.json).
 # None of these install scripts are needed in Sprint 0: esbuild works via its
 # prebuilt @esbuild/<platform> binary (powers tsup/tsx/vitest), and the native
@@ -18,7 +23,3 @@ ignoredBuiltDependencies:
 # Don't auto-verify/auto-install deps before every `pnpm <script>` run. CI installs
 # explicitly with --frozen-lockfile; this keeps `pnpm dev`/`pnpm test` deterministic.
 verifyDepsBeforeRun: false
-allowBuilds:
-  '@parcel/watcher': set this to true or false
-  esbuild: set this to true or false
-  msgpackr-extract: set this to true or false

@@ -1,0 +1,60 @@
+# Orchestra CI — the merge gate (Sprint 0, Task 10).
+# Installs with pnpm, then runs typecheck + lint + vitest on a Node 22 + 24 matrix.
+# Required to pass before the Producer merges a PR.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One run per ref; cancel superseded runs to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Install pnpm first; version is read from the `packageManager` field in
+      # package.json so it stays in lockstep with local dev.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # --frozen-lockfile fails if the lockfile is out of date (reproducible installs).
+      # Build scripts are governed by pnpm-workspace.yaml (ignoredBuiltDependencies),
+      # so install runs zero third-party postinstall scripts (supply-chain hygiene).
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
