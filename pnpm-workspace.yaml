@@ -1,0 +1,25 @@
+# Orchestra is a pnpm-workspace monorepo. v1 keeps a single root package (lean
+# package set per docs/brainstorm/05-summary.md decision #9). Additional packages
+# (e.g. a future Linear adapter or Ink TUI) drop into packages/* without a rewrite.
+packages:
+  - "packages/*"
+
+allowBuilds:
+  '@parcel/watcher': false
+  esbuild: false
+  msgpackr-extract: false
+
+# Build-script policy (pnpm 11 reads this from pnpm-workspace.yaml, NOT the package.json
+# `pnpm` field). pnpm 11.8 requires an explicit true/false decision for every dependency
+# that ships an install script; an *undecided* entry makes `pnpm install` exit 1 with
+# ERR_PNPM_IGNORED_BUILDS (this bit CI on PR #14). We deny all of them (`false`) — none
+# are needed: esbuild runs from its prebuilt @esbuild/<platform> binary (powers
+# tsup/tsx/vitest) and the native watcher deps are only exercised by Sprint 1's
+# hot-reload. Result: `pnpm install --frozen-lockfile` is deterministic (exit 0) and runs
+# zero third-party build scripts (supply-chain hygiene). Flip an entry to `true` (and
+# refresh the lockfile) if/when we actually need its native build. NOTE: the older
+# `ignoredBuiltDependencies` key is NOT honored by pnpm 11.8 — `allowBuilds` is.
+
+# Don't auto-verify/auto-install deps before every `pnpm <script>` run. CI installs
+# explicitly with --frozen-lockfile; this keeps `pnpm dev`/`pnpm test` deterministic.
+verifyDepsBeforeRun: false
