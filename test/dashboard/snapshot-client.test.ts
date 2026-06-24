@@ -115,14 +115,42 @@ describe("parseSnapshot", () => {
     });
   });
 
-  it("rejects a malformed budget block", () => {
-    expect(() => parseSnapshot(wire({ budget: { limit_tokens: 1000 } }))).toThrow(
+  it("treats an absent restore block as undefined (cold start / older daemon)", () => {
+    expect(parseSnapshot(wire()).restore).toBeUndefined();
+  });
+
+  it("parses the additive restore block when present (#54)", () => {
+    const snap = parseSnapshot(
+      wire({
+        restore: {
+          at: "2026-06-24T10:00:00.000Z",
+          orphaned_running_converted: 1,
+          rearmed_retries: 0,
+          restored_completed: 3,
+        },
+      }),
+    );
+    expect(snap.restore).toEqual({
+      at: "2026-06-24T10:00:00.000Z",
+      orphaned_running_converted: 1,
+      rearmed_retries: 0,
+      restored_completed: 3,
+    });
+  });
+
+  it("rejects a malformed restore block", () => {
+    expect(() => parseSnapshot(wire({ restore: { at: "2026-06-24T10:00:00.000Z" } }))).toThrow(
       SnapshotParseError,
     );
     expect(() =>
       parseSnapshot(
         wire({
-          budget: { limit_tokens: 1000, spent_tokens: 1, remaining_tokens: 1, paused: "yes" },
+          restore: {
+            at: 123,
+            orphaned_running_converted: 1,
+            rearmed_retries: 0,
+            restored_completed: 3,
+          },
         }),
       ),
     ).toThrow(SnapshotParseError);

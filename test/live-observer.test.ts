@@ -85,6 +85,28 @@ describe("formatObservation", () => {
     }),
   );
 
+  it.effect("humanizes the AgentEvent line while keeping the raw event_tag (#55)", () =>
+    Effect.sync(() => {
+      const line = formatObservation(sample.AgentEvent);
+      // Friendly summary in the human-readable message…
+      expect(line.message).toContain("working");
+      expect(line.message).not.toContain("AgentMessage");
+      // …raw tag retained on the wire for fidelity/debugging.
+      expect(line.annotations.event_tag).toBe("AgentMessage");
+
+      // Unknown tag falls back to the raw label, never blank.
+      const unknown = formatObservation({
+        _tag: "AgentEvent",
+        issueId: "1",
+        identifier: "#1",
+        sessionId: null,
+        eventTag: "SomeFutureTag",
+      });
+      expect(unknown.message).toContain("SomeFutureTag");
+      expect(unknown.annotations.event_tag).toBe("SomeFutureTag");
+    }),
+  );
+
   it.effect("never overflows: long messages are truncated", () =>
     Effect.sync(() => {
       const line = formatObservation({

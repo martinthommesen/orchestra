@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import { Observer } from "../orchestrator/observer";
+import { humanizeAgentEvent } from "./humanize";
 import { LiveActivity, LiveActivityLive } from "./live-activity";
 import { logObservation } from "./live-observer";
 import { RecentEvents, RecentEventsLive, toEventDraft } from "./recent-events";
@@ -26,9 +27,12 @@ export const observerTee: Layer.Layer<Observer, never, RecentEvents | LiveActivi
         Effect.gen(function* () {
           // 1) Preserve the canonical structured log line, byte-for-byte.
           yield* logObservation(obs);
-          // 2) Record per-session activity (AgentEvent carries no message → omitted).
+          // 2) Record per-session activity, keeping the raw tag and a humanized summary.
           if (obs._tag === "AgentEvent") {
-            yield* activity.set(obs.issueId, { event_tag: obs.eventTag });
+            yield* activity.set(obs.issueId, {
+              event_tag: obs.eventTag,
+              message: humanizeAgentEvent(obs.eventTag),
+            });
           }
           // 3) Tee a display-safe envelope into the feed (cadence/chatter → null → skip).
           const draft = toEventDraft(obs);

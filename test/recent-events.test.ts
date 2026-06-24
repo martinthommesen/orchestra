@@ -189,10 +189,12 @@ describe("observerTee", () => {
         expect(list.map((e) => e.seq)).toEqual([1, 2]);
         expect(list[1]?.level).toBe("warn");
 
-        // The AgentEvent is teed into LiveActivity instead of the feed (#37).
+        // The AgentEvent is teed into LiveActivity instead of the feed (#37), carrying the
+        // raw tag for fidelity AND the humanized one-line summary (#55).
         const activity = yield* LiveActivity;
         const map = yield* activity.snapshot;
         expect(map.get("42")?.event_tag).toBe("AgentMessage");
+        expect(map.get("42")?.message).toBe("working");
       }).pipe(
         Effect.provide(ObservabilityLive),
         Effect.provide(Logger.replace(Logger.defaultLogger, capturing)),

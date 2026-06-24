@@ -6,6 +6,7 @@ import type {
   CompletedRowVM,
   DashboardViewModel,
   EventRowVM,
+  RestoreVM,
   RetryingRowVM,
   RunningRowVM,
   StatusBadgeVM,
@@ -241,11 +242,28 @@ function Budget({ budget, ascii, color }: { readonly budget: BudgetVM } & Themed
   );
 }
 
+function Restore({ restore, ascii, color }: { readonly restore: RestoreVM } & Themed) {
+  return (
+    <Box marginLeft={2}>
+      <Tinted tone={restore.color} color={color}>
+        {ascii ? restore.ascii : restore.glyph} {restore.stateLabel}
+      </Tinted>
+      <Dim color={color}> · {restore.summary}</Dim>
+    </Box>
+  );
+}
+
 /** The whole dashboard, rendered from a fully-computed view model. */
 export function DashboardView({ vm, ascii, color }: { readonly vm: DashboardViewModel } & Themed) {
   return (
     <Box flexDirection="column">
       <Header vm={vm} color={color} />
+
+      {vm.restore !== null ? (
+        <Section title="RESTORED" color={color}>
+          <Restore restore={vm.restore} ascii={ascii} color={color} />
+        </Section>
+      ) : null}
 
       <Section title="RUNNING" count={vm.running.length} color={color}>
         {vm.running.length === 0 ? (

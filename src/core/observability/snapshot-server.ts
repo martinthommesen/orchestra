@@ -9,6 +9,7 @@ import { OrchestratorStore } from "../orchestrator/state";
 import { type ActivityEntry, LiveActivity } from "./live-activity";
 import { type RecentCompletion, RecentCompletions } from "./recent-completions";
 import { type EventEnvelope, RecentEvents } from "./recent-events";
+import { RestoreStatus, type RestoreSummary } from "./restore-status";
 
 /**
  * Optional JSON snapshot API (Task 12, SPEC §13.3/§13.7). When the CLI is given
@@ -37,6 +38,12 @@ export interface SnapshotExtras {
    * daemon — and every older dashboard — sees no `budget` field at all.
    */
   readonly budget?: BudgetStatus;
+  /**
+   * Restore/durability status (#54). Strictly additive: the projected `restore` block is
+   * emitted ONLY after a real boot-time restore (the loop captured a {@link RestoreSummary}),
+   * so a cold start — and every older dashboard — sees no `restore` field at all.
+   */
+  readonly restore?: RestoreSummary;
 }
 
 /** Project the budget status onto the additive wire block, or null to omit it. */
@@ -50,6 +57,17 @@ const budgetProjection = (budget: BudgetStatus | undefined) =>
       }
     : null;
 
+/** Project the boot-time restore summary onto the additive wire block, or null to omit it. */
+const restoreProjection = (restore: RestoreSummary | undefined) =>
+  restore === undefined
+    ? null
+    : {
+        at: restore.at,
+        orphaned_running_converted: restore.orphanedRunningConverted,
+        rearmed_retries: restore.reArmedRetries,
+        restored_completed: restore.restoredCompleted,
+      };
+
 /** JSON-friendly projection of the authoritative state (Dates → ISO via JSON). */
 export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => {
   const running = Object.values(s.running).map((ra) => {
@@ -59,6 +77,7 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
   });
   const retrying = Object.values(s.retry_attempts);
   const budget = budgetProjection(extra.budget);
+  const restore = restoreProjection(extra.restore);
   return {
     poll_interval_ms: s.poll_interval_ms,
     max_concurrent_agents: s.max_concurrent_agents,
@@ -81,6 +100,8 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
     rate_limits: s.agent_rate_limits,
     // Budget guardrail status (#53), additive — only present when a ceiling is configured.
     ...(budget === null ? {} : { budget }),
+    // Restore/durability status (#54), additive — only present after a real restore.
+    ...(restore === null ? {} : { restore }),
   };
 };
 
@@ -88,7 +109,8 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
  * Build the snapshot router. The `budget` config (#53) is closed over so the read handler
  * can project a display-only budget status from the live totals without ever mutating
  * state. Budget evaluation is pure (`evaluateBudget`); the gate that actually withholds
- * dispatch lives in the loop, not here.
+ * dispatch lives in the loop, not here. The boot-time restore fact (#54) is read from the
+ * {@link RestoreStatus} ring (written once by the loop) — also display-only.
  */
 const makeRouter = (budgetConfig: BudgetConfig) =>
   HttpRouter.empty.pipe(
@@ -99,16 +121,20 @@ const makeRouter = (budgetConfig: BudgetConfig) =>
         const events = yield* RecentEvents;
         const completions = yield* RecentCompletions;
         const activity = yield* LiveActivity;
+        const restoreStatus = yield* RestoreStatus;
         const state = yield* store.get;
         const recentEvents = yield* events.list;
         const recentCompleted = yield* completions.list;
         const activityMap = yield* activity.snapshot;
+        const restore = yield* restoreStatus.get;
         return yield* HttpServerResponse.json(
           toSnapshot(state, {
             recentEvents,
             recentCompleted,
             activity: activityMap,
             budget: evaluateBudget(budgetConfig, state.agent_totals),
+            // Additive (#54): absent until a real restore was captured at boot.
+            ...(restore === null ? {} : { restore }),
           }),
         ).pipe(Effect.orDie);
       }),
@@ -126,7 +152,7 @@ export const runSnapshotServer = (
 ): Effect.Effect<
   void,
   never,
-  Scope.Scope | OrchestratorStore | RecentEvents | RecentCompletions | LiveActivity
+  Scope.Scope | OrchestratorStore | RecentEvents | RecentCompletions | LiveActivity | RestoreStatus
 > =>
   HttpServer.serveEffect(makeRouter(budgetConfig)).pipe(
     // `serveEffect` installs the server and returns; the listener lives for as long as

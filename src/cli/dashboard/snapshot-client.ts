@@ -92,6 +92,18 @@ export interface SnapshotBudget {
   readonly paused: boolean;
 }
 
+/**
+ * Restore/durability status (#54). Present ONLY after a real boot-time restore — absent on
+ * a cold start and on older daemons, so the dashboard simply omits the indicator. `at` is
+ * the wall-clock ISO instant the restore happened; the three counts mirror #41's summary.
+ */
+export interface SnapshotRestore {
+  readonly at: string;
+  readonly orphaned_running_converted: number;
+  readonly rearmed_retries: number;
+  readonly restored_completed: number;
+}
+
 /** The parsed, view-ready snapshot. */
 export interface Snapshot {
   readonly poll_interval_ms: number;
@@ -110,6 +122,8 @@ export interface Snapshot {
   readonly rate_limits: unknown;
   /** Budget guardrail status (#53); absent on older daemons / when no ceiling is set. */
   readonly budget?: SnapshotBudget;
+  /** Restore/durability status (#54); absent on a cold start / older daemons. */
+  readonly restore?: SnapshotRestore;
 }
 
 /** The injectable fetcher signature (real impl + test fakes share this type). */
@@ -351,10 +365,25 @@ const parseBudget = (raw: unknown): SnapshotBudget | undefined => {
   };
 };
 
+/** Parse the additive restore block (#54). Absent → undefined (cold start / older daemon). */
+const parseRestore = (raw: unknown): SnapshotRestore | undefined => {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  const obj = asRecord(raw, "restore");
+  return {
+    at: reqString(obj, "at"),
+    orphaned_running_converted: reqInt(obj, "orphaned_running_converted"),
+    rearmed_retries: reqInt(obj, "rearmed_retries"),
+    restored_completed: reqInt(obj, "restored_completed"),
+  };
+};
+
 /** Validate an unknown JSON body into a typed {@link Snapshot} (throws on mismatch). */
 export const parseSnapshot = (raw: unknown): Snapshot => {
   const obj = asRecord(raw, "<root>");
   const budget = parseBudget(obj.budget);
+  const restore = parseRestore(obj.restore);
   return {
     poll_interval_ms: reqInt(obj, "poll_interval_ms"),
     max_concurrent_agents: reqInt(obj, "max_concurrent_agents"),
@@ -369,6 +398,8 @@ export const parseSnapshot = (raw: unknown): Snapshot => {
     rate_limits: obj.rate_limits ?? null,
     // Additive: only attach the budget block when the daemon sent one (#53).
     ...(budget === undefined ? {} : { budget }),
+    // Additive: only attach the restore block when the daemon sent one (#54).
+    ...(restore === undefined ? {} : { restore }),
   };
 };
 

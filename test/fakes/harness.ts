@@ -3,6 +3,7 @@ import { ClockLive } from "../../src/core/clock/live";
 import { Issue, IssueStateRef } from "../../src/core/domain/issue";
 import { ServiceConfig, type WorkflowDefinition } from "../../src/core/domain/workflow";
 import { RecentCompletionsLive } from "../../src/core/observability/recent-completions";
+import { RestoreStatusLive } from "../../src/core/observability/restore-status";
 import type { OrchestratorDeps } from "../../src/core/orchestrator/loop";
 import type { Observation, Observer } from "../../src/core/orchestrator/observer";
 import { layerOrchestratorStore } from "../../src/core/orchestrator/state";
@@ -118,6 +119,7 @@ export const loopLayer = (
     ClockLive,
     layerOrchestratorStore(def.config),
     RecentCompletionsLive,
+    RestoreStatusLive,
   );
 
 /**

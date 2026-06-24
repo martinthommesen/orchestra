@@ -187,6 +187,25 @@ describe("toViewModel — last-activity line (#38)", () => {
     expect(vm.running[0]?.lastActivityLabel).toBe("TurnCompleted · 1m 00s ago");
   });
 
+  it("prefers the humanized message over the raw event_tag when present (#55)", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        running: [
+          makeRunning({
+            last_activity: {
+              event_tag: "TurnCompleted",
+              at: STARTED_AT,
+              message: "finished turn",
+            },
+          }),
+        ],
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.running[0]?.lastActivityLabel).toBe("finished turn · 1m 00s ago");
+  });
+
   it("is null when no activity has been observed (older daemon)", () => {
     const vm = toViewModel(makeSnapshot(), NOW, opts());
     expect(vm.running[0]?.lastActivityLabel).toBeNull();
@@ -479,5 +498,50 @@ describe("toViewModel — budget panel (#53)", () => {
     expect(vm.budget?.glyph).toBe(statusStyle("blocked").glyph);
     expect(vm.budget?.color).toBe("warn");
     expect(vm.budget?.summary).toBe("1200 / 1000 tokens · 0 left");
+  });
+});
+
+describe("toViewModel — restore indicator (#54)", () => {
+  it("absent restore block → no panel", () => {
+    const vm = toViewModel(makeSnapshot(), NOW, opts());
+    expect(vm.restore).toBeNull();
+  });
+
+  it("present restore → ⟳ glyph (info), counts + relative 'restored Xs ago'", () => {
+    // 30s before NOW → "restored 30s ago".
+    const at = new Date(NOW - 30_000).toISOString();
+    const vm = toViewModel(
+      makeSnapshot({
+        restore: {
+          at,
+          orphaned_running_converted: 1,
+          rearmed_retries: 0,
+          restored_completed: 3,
+        },
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.restore?.glyph).toBe("⟳");
+    expect(vm.restore?.ascii).toBe("*");
+    expect(vm.restore?.color).toBe("info");
+    expect(vm.restore?.stateLabel).toBe("restored after restart");
+    expect(vm.restore?.summary).toBe("1 running · 0 retrying · 3 completed · restored 30s ago");
+  });
+
+  it("degrades an unparseable `at` to '—', never a plausible '0s'", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        restore: {
+          at: "not-a-date",
+          orphaned_running_converted: 0,
+          rearmed_retries: 2,
+          restored_completed: 0,
+        },
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.restore?.summary).toBe("0 running · 2 retrying · 0 completed · restored —");
   });
 });

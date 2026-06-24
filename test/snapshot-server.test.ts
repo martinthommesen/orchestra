@@ -8,6 +8,7 @@ import { BudgetConfig } from "../src/core/domain/workflow";
 import { LiveActivityLive } from "../src/core/observability/live-activity";
 import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
 import { RecentEventsLive } from "../src/core/observability/recent-events";
+import { RestoreStatusLive } from "../src/core/observability/restore-status";
 import { runSnapshotServer, toSnapshot } from "../src/core/observability/snapshot-server";
 import {
   initialState,
@@ -22,6 +23,7 @@ const ObservabilityRings = Layer.mergeAll(
   RecentEventsLive,
   RecentCompletionsLive,
   LiveActivityLive,
+  RestoreStatusLive,
 );
 
 /**
