@@ -3,7 +3,7 @@
 Live tracker for cross-chat recovery. Update after each phase. See `plan.md` for
 full task detail and `done.md` (written at sprint end) for the handoff.
 
-## Status: IN PROGRESS — #29 approved, #30 done
+## Status: IN PROGRESS — #29 approved, #30–#31 done
 
 Branch: `feature/sprint-2` (from `main` @ 5d84402).
 
@@ -13,7 +13,7 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
 |----|------|-----------|--------|
 | #29 | Ink toolchain spike & gate (BLOCKING) | — | ✅ done (Producer-approved) |
 | #30 | CLI dispatcher + `dashboard` subcommand | #29 | ✅ done |
-| #31 | Snapshot client + polling hook | #29 | pending |
+| #31 | Snapshot client + polling hook | #29 | ✅ done |
 | #32 | Dashboard view-model + Ink rendering | #29, #31 | pending |
 | #33 | Test suite (view-model + hook + light render) | #29, #31, #32 | pending |
 | #34 | Apache-2.0 license + dashboard docs + handoff | (docs ← #32) | pending |
@@ -33,6 +33,15 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
   the #29 spike test removed (its purpose was served) and replaced by
   `test/dashboard/args.test.ts`. Placeholder Ink shell (`src/cli/dashboard/app.tsx`)
   renders + exits on q/Ctrl-C; the live fleet view lands in #32.
+- **#31**: read-only data layer. `snapshot-client.ts` — typed `Snapshot` view +
+  defensive `parseSnapshot` (throws `SnapshotParseError` on malformed bytes; keeps
+  `rate_limits` opaque) + `makeFetchSnapshot(timeoutMs)` (combines caller signal with
+  `AbortSignal.timeout`). `poller.ts` — framework-agnostic `SnapshotPoller`:
+  non-overlapping (next poll scheduled only after the current settles), keeps the last
+  good snapshot on failure (`connecting`→`live`→`stale`), `stop()` aborts in-flight +
+  clears timer. `use-snapshot.ts` — thin React hook over the poller (injected fetcher;
+  effect cleanup `stop()`s on unmount). Shipped with `snapshot-client.test.ts`; the
+  fake-timer poller/hook tests land in #33 per the plan. Not yet wired into the UI.
 
 ## Decisions (from the Sprint 2 design review)
 - **Operational status, not history.** MVP = live fleet view; event feed / ring
