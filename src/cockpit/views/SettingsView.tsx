@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { ApiError } from "../api/client";
 import { COCKPIT_POLL_MS, client } from "../api/instance";
 import type { EditableSettingsWire } from "../api/types";
 import { ConnectionBanner } from "../components/ConnectionBanner";
 import { Panel } from "../components/Panel";
+import { derivePauseControl, messageOf } from "../model/pause-control";
 import {
   type FieldId,
   type SettingsFormModel,
@@ -27,9 +27,6 @@ type SaveState =
   | { phase: "saved" }
   | { phase: "error"; message: string };
 
-const messageOf = (err: unknown): string =>
-  err instanceof ApiError || err instanceof Error ? err.message : String(err);
-
 export const SettingsView = () => {
   const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
   const control = poll.data?.control ?? null;
@@ -42,6 +39,9 @@ export const SettingsView = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>({ phase: "idle" });
   const [pauseBusy, setPauseBusy] = useState(false);
+  // A pause/resume failure (401 missing dev token, 503 command timeout, network) must SURFACE —
+  // mirrors the Save/Kanban error pattern instead of becoming a silent unhandled rejection.
+  const [pauseError, setPauseError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -81,15 +81,15 @@ export const SettingsView = () => {
   // Only the operator latch is clearable from here: `ResumeDispatch` clears ONLY the operator
   // pause, so offering "Resume" while dispatch is held by the BUDGET gate would be a no-op
   // (confusing UX). When paused by budget we render guidance instead of a dead button.
-  const dispatchPaused = control?.dispatch_paused ?? false;
-  const pausedBy = control?.paused_by ?? null;
-  const canResume = dispatchPaused && pausedBy === "operator";
-  const pausedByBudget = dispatchPaused && pausedBy === "budget";
+  const pause = derivePauseControl(control);
 
   const togglePause = async () => {
     setPauseBusy(true);
+    setPauseError(null);
     try {
-      await (dispatchPaused ? client.resume() : client.pause());
+      await (pause.action === "resume" ? client.resume() : client.pause());
+    } catch (err) {
+      setPauseError(messageOf(err));
     } finally {
       setPauseBusy(false);
     }
@@ -106,28 +106,33 @@ export const SettingsView = () => {
         <div className="pause-toggle">
           <div>
             <strong>
-              {dispatchPaused
-                ? `Dispatch is paused${pausedBy ? ` (by ${pausedBy})` : ""}`
+              {pause.dispatchPaused
+                ? `Dispatch is paused${pause.pausedBy ? ` (by ${pause.pausedBy})` : ""}`
                 : "Dispatch is running"}
             </strong>
             <p className="muted">
-              {pausedByBudget
+              {pause.pausedByBudget
                 ? "Paused by the budget gate — raise or clear the token ceiling below to resume."
                 : "Pausing withholds new sessions only — in-flight work keeps running."}
             </p>
           </div>
-          {pausedByBudget ? null : (
+          {pause.showToggle ? (
             <button
               type="button"
               className="btn"
               disabled={pauseBusy}
               onClick={togglePause}
-              aria-pressed={dispatchPaused}
+              aria-pressed={pause.dispatchPaused}
             >
-              {pauseBusy ? "…" : canResume ? "Resume dispatch" : "Pause dispatch"}
+              {pauseBusy ? "…" : pause.buttonLabel}
             </button>
-          )}
+          ) : null}
         </div>
+        {pauseError !== null ? (
+          <p className="card__error" role="alert">
+            Dispatch control failed: {pauseError}
+          </p>
+        ) : null}
       </Panel>
 
       <Panel
