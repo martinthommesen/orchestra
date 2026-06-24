@@ -8,7 +8,7 @@ Design of record: `docs/sprint-3/durability-spike.md`.
 |---|------|--------|
 | 40 | Persistence layer (versioned, atomic, debounced) | ✅ done |
 | 41 | Restore + reconcile on boot + retry re-arm | ✅ done |
-| 42 | Session continuity (persist session_id / resume) | pending |
+| 42 | Session continuity (persist session_id / resume) | ✅ done |
 | 43 | Tests + docs + handoff | pending |
 
 ## Carry-over context
@@ -148,3 +148,62 @@ aside).
 
 **Gates:** typecheck 0 · lint 0 · build 0 · **284 tests** (275 baseline + 9 new: 8 restore/reconcile
 scenarios + 1 recent-events draft), full suite green.
+
+### #42 — Session continuity (opt-in, self-healing resume) (done)
+**Files changed:**
+- `src/core/domain/run-attempt.ts` — additive optional `session_id?: string | null`. Captured
+  from `SessionStarted`, persisted so a restart can *optionally* resume the agent thread.
+- `src/core/domain/retry-entry.ts` — additive optional `session_id?: string | null`, carried onto
+  a (continuation) retry so it survives the orphan→retry reduction across a restart.
+- `src/core/domain/workflow.ts` — `PersistenceConfig` gains `resume_sessions: boolean`
+  (`optionalWith`, **default `false`**). No other config added (non-speculative).
+- `src/core/orchestrator/loop.ts` — three persist chokepoints + one gated restore, all on
+  **existing** sites (no new dispatch path, no fork):
+  - `dispatch` `setRunning`: persists `session_id: rec.sessionId` on the `RunAttempt` (null on a
+    fresh dispatch — reset above; set for a continuation that carries/has a session).
+  - `handleAgentEvent`: folds `session_id: rec.sessionId` into the **existing** `StreamingTurn`
+    `store.update`, so the id becomes durable the moment `SessionStarted` sets `rec.sessionId`.
+  - `scheduleRetry` `setRetry`: persists `session_id: rec.sessionId` on the `RetryEntry`
+    (truthful/additive).
+  - `restoreFromCheckpoint`: reads `config.persistence.resume_sessions` once; **only when enabled**
+    populates `rec.sessionId` from the persisted entry — `ra.session_id` for an orphaned `running`,
+    `entry.session_id` for a pending **continuation** retry (failure retries always reset to null,
+    they re-dispatch fresh). When disabled, `rec.sessionId` stays null → **identical to #41**. The
+    orphan→retry `RetryEntry` carries `session_id` truthfully regardless of the flag; the runtime
+    `rec.sessionId` is the gate that actually drives `--resume`.
+- `test/domain.test.ts` (+3) — `session_id` round-trips through `RunAttempt`/`RetryEntry`
+  (present + null), and both decode when **absent** (pre-#42 checkpoint).
+- `test/restore-reconcile.test.ts` (+3) — `buildDurableDef` gains a `resumeSessions` opt:
+  - OFF (default) + `session_id` on disk → continuation runs FRESH, `resumed:false`, agent invoked
+    WITHOUT resume (regression guard: #41 behavior unchanged by default).
+  - ON + restored `session_id` → continuation dispatched WITH `--resume <session_id>`
+    (`resumed:true`, `runs[0].resumeSessionId === "sess-abc"`).
+  - ON but resume REJECTED (scripted agent `fail` on the resumed turn) → `WorkerFailed` →
+    failure-backoff (10 s) → re-dispatch FRESH (no resume) → `WorkerCompleted`; issue ends in
+    `completed`. Self-healing proven: `runs[0].resumeSessionId === "sess-stale"`,
+    `runs[1].resumeSessionId === null`, never stranded, never crashed.
+
+**How resume threads through:** the runner already supports `resume:{sessionId}`
+(`agent-runner.ts:20`, `copilot-runner.ts:64` → `--resume`). `dispatch` already computed
+`resume = isCont && rec.sessionId !== null ? { sessionId } : null` (#41) — so the **only** new
+behavior is whether `rec.sessionId` is non-null on a restored continuation, which is exactly what
+the flag-gated restore controls. One continuation-dispatch flow; resume is a conditional argument,
+not a second code path.
+
+**Self-healing fallback (no bespoke path):** a continuation dispatched with `--resume` that Copilot
+rejects (stale/expired/unknown session) fails the worker → `handleWorkerDone` Failed branch
+(`WorkerFailed` observed) → `scheduleRetry("failure", …)` → `handleRetryDue` re-dispatches
+`kind:"fresh"`, which resets `rec.sessionId = null` → the next turn runs FRESH against the on-disk
+workspace (the true record of progress). Resume can only help, never strand; the fallback rides the
+already-tested failure-backoff machinery.
+
+**Default-off == #41:** with `resume_sessions:false`, `restoreFromCheckpoint` forces
+`rec.sessionId = null` for every restored issue, so `dispatch`'s `resume` is always null — byte-for-byte
+the #41 continuation path. The only additive persisted bytes are optional `session_id` fields (ignored
+by the defensive `/api/v1/state` client; no `/api/v2`). Verified by re-running the #41 restore scenarios
+(all green) + the explicit OFF regression test.
+
+**Gates:** typecheck 0 · lint 0 · build 0 · **290 tests** (284 baseline + 6 new: 3 domain codec + 3
+restore/resume scenarios), full suite green. Note: `persistence.test.ts`'s `debounce … (TestClock)`
+test is a **pre-existing** #40 load-dependent flake (reproduced on clean `b494e83` before any #42
+change; passes in isolation and on re-run) — untouched by #42 (no change to `durable-store.ts`).

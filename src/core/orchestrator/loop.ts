@@ -263,6 +263,10 @@ export const runOrchestrator = (
                   // registry `turnCount`/`failureAttempts` from these on the next boot.
                   turn: rec.turnCount,
                   failure_attempts: rec.failureAttempts,
+                  // Session id for opt-in resume across restart (#42). Null on a fresh
+                  // dispatch (reset above); set once `SessionStarted` arrives or carried
+                  // in from a restored continuation when resume is enabled.
+                  session_id: rec.sessionId,
                 }),
               ),
               issue.id,
@@ -321,6 +325,10 @@ export const runOrchestrator = (
               // Persist the retry shape (#41) so a restart can re-dispatch the correct
               // path (continuation vs failure) via `handleRetryDue` after re-arming.
               kind,
+              // Carry the agent session id onto the retry (#42) so a restart can optionally
+              // resume the thread when re-dispatching a continuation (gated on restore by
+              // `persistence.resume_sessions`). Truthful/additive; `null` when unknown.
+              session_id: rec.sessionId,
               error,
             }),
           );
@@ -581,7 +589,12 @@ export const runOrchestrator = (
           }
           yield* store.update((s) => {
             const ra = s.running[issueId];
-            return ra === undefined ? s : setRunning(s, { ...ra, status: "StreamingTurn" });
+            // Fold the (now-known) session id into the persisted running attempt (#42) so
+            // an orphaned `running` issue can optionally resume its agent thread on the
+            // next boot. Idempotent: `rec.sessionId` only ever moves null → set per turn.
+            return ra === undefined
+              ? s
+              : setRunning(s, { ...ra, status: "StreamingTurn", session_id: rec.sessionId });
           });
           yield* observer.emit({
             _tag: "AgentEvent",
@@ -772,14 +785,20 @@ export const runOrchestrator = (
           const wallNow = yield* clock.currentTimeMillis;
           const monoNow = yield* clock.monotonicMillis;
           const plan: ReArm[] = [];
+          // Opt-in best-effort session resume (#42). When off (default), restored
+          // continuations run FRESH — the #41 baseline (`rec.sessionId` stays null). When
+          // on, a restored continuation carries its persisted session id so `dispatch`
+          // passes `--resume`; a stale id self-heals via the normal failure path.
+          const resumeEnabled = config.persistence.resume_sessions;
 
           // 1) Orphaned `running` → due-immediately continuation retry. Each persisted
           //    `running` issue has no live worker fiber after a restart, so we reduce it to
           //    the existing retry/reconcile/dispatch machinery: clear it from `running`,
           //    schedule a `kind:"continuation"` retry due now, and let `handleRetryDue`
-          //    re-dispatch it as a continuation against its on-disk workspace. The restored
-          //    continuation runs FRESH (no session resume) — `rec.sessionId` stays null;
-          //    session resume is #42 (workspace-on-disk is the true record of progress).
+          //    re-dispatch it as a continuation against its on-disk workspace. With resume
+          //    enabled (#42) `rec.sessionId` is restored so the continuation resumes the
+          //    agent thread; otherwise it stays null and the turn runs fresh (the
+          //    workspace-on-disk is the true record of progress either way).
           let orphanedRunningConverted = 0;
           for (const [id, ra] of runningEntries) {
             const rec = freshRuntime(restoredIssue(id, ra.issue_identifier));
@@ -790,6 +809,7 @@ export const runOrchestrator = (
             };
             rec.turnCount = ra.turn ?? 0;
             rec.failureAttempts = ra.failure_attempts ?? 0;
+            rec.sessionId = resumeEnabled ? (ra.session_id ?? null) : null;
             rec.lastEventAt = monoNow;
             const attempt = rec.turnCount + 1;
             rec.pendingKind = "continuation";
@@ -804,6 +824,9 @@ export const runOrchestrator = (
                 scheduled_at: new Date(wallNow),
                 delay_ms: 0,
                 kind: "continuation",
+                // Carry the session id truthfully (#42); the runtime `rec.sessionId` above
+                // is what actually gates resume on the immediate re-dispatch.
+                session_id: ra.session_id ?? null,
                 error: null,
               }),
             );
@@ -825,6 +848,9 @@ export const runOrchestrator = (
             rec.pendingKind = kind;
             rec.pendingAttempt = entry.attempt;
             rec.lastEventAt = monoNow;
+            // Resume only applies to continuations (a failure retry re-dispatches fresh).
+            rec.sessionId =
+              resumeEnabled && kind === "continuation" ? (entry.session_id ?? null) : null;
             if (kind === "continuation") {
               rec.turnCount = Math.max(entry.attempt - 1, 0);
             } else {

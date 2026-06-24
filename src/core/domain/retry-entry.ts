@@ -31,6 +31,13 @@ export const RetryEntry = Schema.Struct({
    * absent `kind` defaults to `"failure"`.
    */
   kind: Schema.optional(Schema.Literal("failure", "continuation")),
+  /**
+   * The agent thread/session id carried onto a (continuation) retry (Sprint 4 / #42).
+   * Persisted so a restart can *optionally* resume the agent thread when re-dispatching
+   * the continuation — gated behind `persistence.resume_sessions` (default off).
+   * Optional/additive: absent in pre-#42 checkpoints; `null` when no session is known.
+   */
+  session_id: Schema.optional(Schema.NullOr(Schema.String)),
   error: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "RetryEntry" });
 export type RetryEntry = typeof RetryEntry.Type;
