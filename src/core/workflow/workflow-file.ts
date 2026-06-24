@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { FileSystem } from "@effect/platform";
 import { Context, Effect, Layer, Schema } from "effect";
 import { parseDocument } from "yaml";
@@ -172,6 +173,12 @@ export const WorkflowFileLive = (
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
 
+      // Serialize the read→edit→write→rename cycle. The cockpit runs each PUT on its own
+      // fiber, so two overlapping writes would otherwise interleave (lost update, or an
+      // ENOENT on the second rename). A single-permit lock makes each apply atomic against
+      // every other apply; a unique temp suffix below is belt-and-suspenders against clobber.
+      const writeLock = yield* Effect.makeSemaphore(1);
+
       /** Decode the whole config from a raw front-matter map (defaults; no $VAR resolution). */
       const decodeRaw = (raw: unknown) =>
         Schema.decodeUnknown(ServiceConfig)(raw).pipe(
@@ -204,66 +211,69 @@ export const WorkflowFileLive = (
       const applyPatch = (
         patch: SettingsPatch,
       ): Effect.Effect<SettingsApplied, SettingsRejected | LoadWorkflowError> =>
-        Effect.gen(function* () {
-          const content = yield* fs.readFileString(workflowPath).pipe(
-            Effect.mapError(
-              (e) =>
-                new SettingsRejected({
-                  message: `could not read WORKFLOW.md: ${errorMessage(e)}`,
-                }),
-            ),
-          );
-          const { frontMatter, body, eol } = yield* splitForEdit(content);
+        writeLock.withPermits(1)(
+          Effect.gen(function* () {
+            const content = yield* fs.readFileString(workflowPath).pipe(
+              Effect.mapError(
+                (e) =>
+                  new SettingsRejected({
+                    message: `could not read WORKFLOW.md: ${errorMessage(e)}`,
+                  }),
+              ),
+            );
+            const { frontMatter, body, eol } = yield* splitForEdit(content);
 
-          // Edit the parsed DOCUMENT (not a re-stringified object): untouched nodes — including
-          // `tracker.api_key` and any `$VAR` — keep their exact original representation.
-          const doc = parseDocument(frontMatter);
-          const { sets, deletes } = collectEdits(patch);
-          for (const edit of sets) {
-            doc.setIn([...edit.path], edit.value);
-          }
-          for (const path of deletes) {
-            doc.deleteIn([...path]);
-          }
+            // Edit the parsed DOCUMENT (not a re-stringified object): untouched nodes —
+            // including `tracker.api_key` and any `$VAR` — keep their exact representation.
+            const doc = parseDocument(frontMatter);
+            const { sets, deletes } = collectEdits(patch);
+            for (const edit of sets) {
+              doc.setIn([...edit.path], edit.value);
+            }
+            for (const path of deletes) {
+              doc.deleteIn([...path]);
+            }
 
-          // Validate-then-write: refuse a patch that would yield an unparseable WORKFLOW.md.
-          yield* decodeRaw(doc.toJS() ?? {});
+            // Validate-then-write: refuse a patch that would yield an unparseable WORKFLOW.md.
+            yield* decodeRaw(doc.toJS() ?? {});
 
-          const newFrontMatter = doc
-            .toString()
-            .replace(/\r?\n/g, eol)
-            .replace(new RegExp(`${eol}$`), "");
-          const newContent = `---${eol}${newFrontMatter}${eol}---${eol}${body}`;
+            const newFrontMatter = doc
+              .toString()
+              .replace(/\r?\n/g, eol)
+              .replace(new RegExp(`${eol}$`), "");
+            const newContent = `---${eol}${newFrontMatter}${eol}---${eol}${body}`;
 
-          // Preserve the file's existing permission bits (it may hold a literal credential).
-          const stat = yield* fs.stat(workflowPath).pipe(Effect.option);
-          const mode = stat._tag === "Some" ? stat.value.mode & 0o777 : FILE_MODE;
+            // Preserve the file's existing permission bits (it may hold a literal credential).
+            const stat = yield* fs.stat(workflowPath).pipe(Effect.option);
+            const mode = stat._tag === "Some" ? stat.value.mode & 0o777 : FILE_MODE;
 
-          // Atomic temp + rename (mirrors the Sprint-4 checkpoint discipline).
-          const tmp = `${workflowPath}.orchestra.tmp`;
-          yield* fs.writeFileString(tmp, newContent, { mode }).pipe(
-            Effect.mapError(
-              (e) =>
-                new SettingsRejected({
-                  message: `could not write WORKFLOW.md: ${errorMessage(e)}`,
-                }),
-            ),
-          );
-          yield* fs.rename(tmp, workflowPath).pipe(
-            Effect.mapError(
-              (e) =>
-                new SettingsRejected({
-                  message: `could not commit WORKFLOW.md: ${errorMessage(e)}`,
-                }),
-            ),
-          );
+            // Atomic temp + rename (mirrors the Sprint-4 checkpoint discipline). A unique
+            // suffix means an unexpected overlapping writer can never clobber our temp file.
+            const tmp = `${workflowPath}.${randomBytes(6).toString("hex")}.orchestra.tmp`;
+            yield* fs.writeFileString(tmp, newContent, { mode }).pipe(
+              Effect.mapError(
+                (e) =>
+                  new SettingsRejected({
+                    message: `could not write WORKFLOW.md: ${errorMessage(e)}`,
+                  }),
+              ),
+            );
+            yield* fs.rename(tmp, workflowPath).pipe(
+              Effect.mapError(
+                (e) =>
+                  new SettingsRejected({
+                    message: `could not commit WORKFLOW.md: ${errorMessage(e)}`,
+                  }),
+              ),
+            );
 
-          // Re-load the written file for the fully resolved config the loop hot-applies.
-          const def = yield* loadWorkflow(workflowPath).pipe(
-            Effect.provideService(FileSystem.FileSystem, fs),
-          );
-          return { settings: project(def.config), config: def.config };
-        });
+            // Re-load the written file for the fully resolved config the loop hot-applies.
+            const def = yield* loadWorkflow(workflowPath).pipe(
+              Effect.provideService(FileSystem.FileSystem, fs),
+            );
+            return { settings: project(def.config), config: def.config };
+          }),
+        );
 
       return { read, applyPatch };
     }),

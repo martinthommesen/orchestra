@@ -158,6 +158,40 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
       expect(after).toBe(ORIGINAL); // byte-identical — nothing was written.
     }).pipe(Effect.provide(NodeContext.layer)),
   );
+
+  it.scoped("two overlapping writes both land (no lost update; serialized per writer)", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+      const path = `${dir}/WORKFLOW.md`;
+      yield* fs.writeFileString(path, ORIGINAL);
+
+      // Two concurrent PUTs touch DIFFERENT keys. Unserialized, both read ORIGINAL and the
+      // slower rename clobbers the faster one → a lost update (only one key changes) or an
+      // ENOENT on a shared temp path. The Semaphore(1) + unique temp suffix make each apply
+      // atomic against the other, so the final file reflects BOTH edits.
+      yield* Effect.gen(function* () {
+        const wf = yield* WorkflowFile;
+        yield* Effect.all(
+          [
+            wf.applyPatch({ polling: { interval_ms: 5000 } }),
+            wf.applyPatch({ agent: { max_turns: 7 } }),
+          ],
+          { concurrency: "unbounded" },
+        );
+      }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+      const after = yield* fs.readFileString(path);
+      expect(after).toContain("interval_ms: 5000"); // first writer's edit survived
+      expect(after).toContain("max_turns: 7"); // second writer's edit survived
+      // Untouched secret + body still byte-preserved through both writes.
+      expect(after).toContain(`api_key: $${CRED_ENV_VAR}`);
+      expect(after).toContain(BODY);
+      // No temp file leaked behind a successful rename.
+      const entries = yield* fs.readDirectory(dir);
+      expect(entries.some((e) => e.includes(".orchestra.tmp"))).toBe(false);
+    }).pipe(Effect.provide(NodeContext.layer)),
+  );
 });
 
 const isDispatched =
