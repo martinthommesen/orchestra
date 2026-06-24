@@ -92,6 +92,19 @@ describe("deriveState (§11.3)", () => {
       "Closed",
     );
   });
+  it("maps a closed issue with a lingering active label to terminal (closed precedence, #18)", () => {
+    // A closed issue still carrying an active status label must NOT normalize to active —
+    // `closed` is an explicit terminal signal and takes precedence over the label.
+    expect(
+      deriveState(
+        payload({ state: "closed", state_reason: "completed", labels: ["In Progress"] }),
+        config(),
+      ),
+    ).toBe("Closed");
+  });
+  it("honors a terminal status label to pick which terminal state on a closed issue", () => {
+    expect(deriveState(payload({ state: "closed", labels: ["Done"] }), config())).toBe("Done");
+  });
 });
 
 describe("toIssue", () => {
@@ -135,5 +148,14 @@ describe("toStateRef", () => {
     expect(ref.identifier).toBe("9");
     expect(ref.state).toBe("In Progress");
     expect(ref.labels).toEqual(["in progress", "bug"]);
+  });
+  it("derives a terminal ref for a closed issue even with an active label (#18)", () => {
+    // This is the reconciliation path: a closed issue must refresh to terminal so its
+    // worker is stopped and its workspace cleaned, not kept alive by the active label.
+    const ref = toStateRef(
+      payload({ number: 9, state: "closed", state_reason: "completed", labels: ["In Progress"] }),
+      config(),
+    );
+    expect(ref.state).toBe("Closed");
   });
 });
