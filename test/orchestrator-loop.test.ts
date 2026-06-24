@@ -327,4 +327,157 @@ describe("orchestrator loop (fakes + TestClock)", () => {
       }).pipe(Effect.provide(env));
     }),
   );
+
+  // ── #17 regression (#22 live concurrency invariant) ──────────────────────────────
+  it.scoped(
+    "concurrency cap is held across a retry backoff: a retrying issue reserves its slot (Fixes #17)",
+    () =>
+      Effect.gen(function* () {
+        const i1 = makeIssue({ id: "i1", identifier: "ORC-1", state: "In Progress" });
+        const i2 = makeIssue({ id: "i2", identifier: "ORC-2", state: "In Progress" });
+        const tracker = yield* makeFakeTracker({
+          candidates: [i1, i2],
+          states: [makeStateRef("i1", "In Progress"), makeStateRef("i2", "In Progress")],
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+        const obs = yield* makeRecordingObserver();
+        // i1 fails the first turn (→ failure backoff), then succeeds on the retry.
+        yield* runner.control.pushScript("i1", [
+          Ev.sessionStarted("s1"),
+          { _tag: "fail", error: new TurnFailed({ message: "boom" }) },
+        ]);
+        yield* runner.control.pushScript("i1", [
+          Ev.sessionStarted("s2"),
+          Ev.turnCompleted(),
+          { _tag: "complete" },
+        ]);
+        // i2 would hang forever if it were ever (wrongly) admitted into the cap-1 slot.
+        yield* runner.control.pushScript("i2", [Ev.sessionStarted("s9"), { _tag: "stall" }]);
+
+        const def = buildDef({
+          maxConcurrent: 1,
+          maxTurns: 1,
+          intervalMs: 5_000,
+          stallTimeoutMs: 300_000,
+        });
+        const env = loopLayer(def, {
+          tracker: tracker.layer,
+          runner: runner.layer,
+          workspace: wsm.layer,
+          observer: obs.layer,
+        });
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          const store = yield* OrchestratorStore;
+
+          // tick1 dispatches only i1 (cap = 1); it then fails and schedules a backoff.
+          yield* waitFor(obs.queue, isDispatched("i1", 1));
+          yield* waitFor(obs.queue, (o) => o._tag === "WorkerFailed" && o.issueId === "i1");
+          yield* waitFor(
+            obs.queue,
+            (o) => o._tag === "RetryScheduled" && o.issueId === "i1" && o.kind === "failure",
+          );
+
+          // Mid-backoff i1 holds no worker — but it MUST still reserve its slot.
+          const backoff = yield* store.get;
+          expect(Object.keys(backoff.running)).toEqual([]);
+          expect(backoff.retry_attempts.i1).toBeDefined();
+
+          // A poll tick lands inside the backoff window. Pre-fix this over-admitted i2
+          // into the apparently-free slot (cap=1 → 2 in flight); post-fix the retrying
+          // issue reserves the slot so nothing is dispatched.
+          yield* TestClock.adjust(Duration.millis(5_000));
+          const tick2 = yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+          expect(tick2._tag === "TickEnd" && tick2.dispatched).toEqual([]);
+
+          const afterTick = yield* store.get;
+          expect(Object.keys(afterTick.running).length).toBeLessThanOrEqual(1);
+          expect(afterTick.running.i2).toBeUndefined();
+
+          // Fire the backoff: i1 re-dispatches into its own slot and completes; i2 never runs.
+          yield* TestClock.adjust(Duration.millis(5_000));
+          yield* waitFor(obs.queue, isDispatched("i1"));
+          yield* waitFor(obs.queue, (o) => o._tag === "WorkerCompleted" && o.issueId === "i1");
+
+          const done = yield* store.get;
+          expect(done.completed).toContain("i1");
+          expect(done.running.i2).toBeUndefined();
+          const runs = yield* runner.control.runs;
+          expect(runs.filter((r) => r.issueId === "i2")).toHaveLength(0);
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }),
+  );
+
+  it.scoped(
+    "a retrying issue that goes terminal mid-backoff is reconciled, not re-dispatched (Fixes #17)",
+    () =>
+      Effect.gen(function* () {
+        const i1 = makeIssue({ id: "i1", identifier: "ORC-1", state: "In Progress" });
+        const tracker = yield* makeFakeTracker({
+          candidates: [i1],
+          states: [makeStateRef("i1", "In Progress")],
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+        const obs = yield* makeRecordingObserver();
+        // i1 fails once → schedules a 10s failure backoff. A second run must never happen.
+        yield* runner.control.pushScript("i1", [
+          Ev.sessionStarted("s1"),
+          { _tag: "fail", error: new TurnFailed({ message: "boom" }) },
+        ]);
+
+        const def = buildDef({
+          maxConcurrent: 5,
+          maxTurns: 1,
+          intervalMs: 5_000,
+          stallTimeoutMs: 300_000,
+        });
+        const env = loopLayer(def, {
+          tracker: tracker.layer,
+          runner: runner.layer,
+          workspace: wsm.layer,
+          observer: obs.layer,
+        });
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          const store = yield* OrchestratorStore;
+
+          yield* waitFor(obs.queue, isDispatched("i1"));
+          yield* waitFor(
+            obs.queue,
+            (o) => o._tag === "RetryScheduled" && o.issueId === "i1" && o.kind === "failure",
+          );
+
+          // The issue is closed in the tracker while i1 is mid-backoff.
+          yield* tracker.control.setStateOf("i1", "Done");
+          yield* tracker.control.setCandidates([]);
+
+          // Next poll tick: reconcile now SEES the retrying issue and kills it (cancelling
+          // the pending retry) instead of letting the backoff fire a wasted dispatch.
+          yield* TestClock.adjust(Duration.millis(5_000));
+          const killed = yield* waitFor(
+            obs.queue,
+            (o) => o._tag === "WorkerKilled" && o.issueId === "i1",
+          );
+          expect(killed._tag === "WorkerKilled" && killed.reason).toBe("terminal");
+          yield* waitFor(obs.queue, (o) => o._tag === "WorkspaceCleaned" && o.issueId === "i1");
+
+          const afterKill = yield* store.get;
+          expect(afterKill.completed).toContain("i1");
+          expect(afterKill.retry_attempts.i1).toBeUndefined();
+
+          // Advance well past where the 10s backoff would have fired: still exactly one run.
+          yield* TestClock.adjust(Duration.millis(20_000));
+          const runs = yield* runner.control.runs;
+          expect(runs).toHaveLength(1);
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }),
+  );
 });
