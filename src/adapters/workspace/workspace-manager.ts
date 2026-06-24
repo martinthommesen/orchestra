@@ -1,6 +1,6 @@
 import { Command, CommandExecutor, FileSystem } from "@effect/platform";
 import type { PlatformError } from "@effect/platform/Error";
-import { Duration, Effect, Layer } from "effect";
+import { Duration, Effect, Layer, Stream } from "effect";
 import type { Issue } from "../../core/domain/issue";
 import type { ServiceConfig } from "../../core/domain/workflow";
 import { Workspace } from "../../core/domain/workspace";
@@ -10,6 +10,7 @@ import {
   WorkspaceHookFailed,
   WorkspaceHookTimeout,
 } from "../../core/errors";
+import { truncateOneLine } from "../../core/observability/glyphs";
 import { type HookName, WorkspaceManager } from "../../core/ports/workspace-manager";
 import { computeWorkspacePath } from "../../core/workspace/safety";
 
@@ -32,8 +33,12 @@ import { computeWorkspacePath } from "../../core/workspace/safety";
  * workspace and a `hooks.timeout_ms` deadline (timeout ⇒ {@link WorkspaceHookTimeout},
  * the interrupted process is SIGTERM'd by the Command scope). The child inherits the
  * orchestrator env so hooks see `$GITHUB_TOKEN` etc.; we never echo that env ourselves.
- * `after_create` runs only on first creation (gated by `created_now`) and is fatal for
- * the issue; `before_remove` is best-effort so teardown still removes the directory.
+ * Hook stdout/stderr are **captured and truncated** (never inherited onto the
+ * orchestrator's fds) so a hook can't write unbounded — or secret-bearing — text straight
+ * into the logfmt stream (§9.2/§9.4); the captured output is surfaced as a single bounded,
+ * one-line debug record under our control. `after_create` runs only on first creation
+ * (gated by `created_now`) and is fatal for the issue; `before_remove` is best-effort so
+ * teardown still removes the directory.
  */
 export const makeWorkspaceManager = (
   config: ServiceConfig,
@@ -58,31 +63,57 @@ export const makeWorkspaceManager = (
       script: string,
       cwd: string,
     ): Effect.Effect<void, WorkspaceError> =>
-      Command.make("sh", "-lc", script).pipe(
-        Command.workingDirectory(cwd),
-        Command.stdout("inherit"),
-        Command.stderr("inherit"),
-        Command.exitCode,
-        Effect.provideService(CommandExecutor.CommandExecutor, executor),
-        Effect.mapError(
-          (cause: PlatformError) =>
-            new WorkspaceHookFailed({ hook, message: `hook '${hook}' could not run`, cause }),
-        ),
-        Effect.timeoutFail({
-          duration: Duration.millis(timeoutMs),
-          onTimeout: () => new WorkspaceHookTimeout({ hook, timeout_ms: timeoutMs }),
-        }),
-        Effect.flatMap((code) =>
-          code === 0
-            ? Effect.void
-            : Effect.fail(
-                new WorkspaceHookFailed({
-                  hook,
-                  message: `hook '${hook}' exited with code ${code}`,
-                }),
-              ),
-        ),
-      );
+      Effect.gen(function* () {
+        // Pipe (don't inherit) the child fds so the output is captured, not streamed raw
+        // onto the orchestrator's stdout/stderr (§9.2/§9.4).
+        const command = Command.make("sh", "-lc", script).pipe(
+          Command.workingDirectory(cwd),
+          Command.stdout("pipe"),
+          Command.stderr("pipe"),
+        );
+        const collect = (
+          stream: Stream.Stream<Uint8Array, PlatformError>,
+        ): Effect.Effect<string, PlatformError> =>
+          stream.pipe(Stream.decodeText(), Stream.mkString);
+
+        const { code, output } = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const proc = yield* executor.start(command);
+            // Drain both streams while awaiting exit so a chatty hook can't deadlock on a
+            // full pipe buffer; the scope finalizer SIGTERMs the child on interrupt/timeout.
+            const [out, err, exit] = yield* Effect.all(
+              [collect(proc.stdout), collect(proc.stderr), proc.exitCode],
+              { concurrency: "unbounded" },
+            );
+            return { code: Number(exit), output: `${out}${err}` };
+          }),
+        ).pipe(
+          Effect.mapError(
+            (cause: PlatformError) =>
+              new WorkspaceHookFailed({ hook, message: `hook '${hook}' could not run`, cause }),
+          ),
+          Effect.timeoutFail({
+            duration: Duration.millis(timeoutMs),
+            onTimeout: () => new WorkspaceHookTimeout({ hook, timeout_ms: timeoutMs }),
+          }),
+        );
+
+        // Surface captured output as one bounded, single-line record (truncateOneLine
+        // collapses newlines and caps length, so it can't span lines or dump a secret).
+        const summary = truncateOneLine(output);
+        if (summary.length > 0) {
+          yield* Effect.logDebug(`hook '${hook}' output: ${summary}`).pipe(
+            Effect.annotateLogs({ hook }),
+          );
+        }
+
+        if (code !== 0) {
+          return yield* new WorkspaceHookFailed({
+            hook,
+            message: `hook '${hook}' exited with code ${code}`,
+          });
+        }
+      });
 
     const scriptFor = (hook: HookName): string | undefined => config.hooks[hook];
 
