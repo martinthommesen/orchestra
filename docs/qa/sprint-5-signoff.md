@@ -1,11 +1,22 @@
 # Sprint 5 — Operator Experience QA Sign-off
 
 > QA: Ivy · Date: 2026-06-24 · Branch under test: `feature/sprint-5` (synced with `main`) ·
-> HEAD `a767bb0` (merge of PR #59) · vitest + @effect/vitest + fast-check@4.8.0 + Ink ·
+> Initial pass HEAD `a767bb0` (merge of PR #59) · **Re-verification HEAD `bd557a2`** ·
+> vitest + @effect/vitest + fast-check@4.8.0 + Ink ·
 > Audited against `docs/sprint-5/plan.md`, `docs/sprint-5/done.md`, and `PROJECT_BRIEF.md` §7/§8.
 > Scope: #53 (budget guardrails), #54 (restore visibility), #55 (humanized events), #56 (close-out).
 
-## Verdict: ❌ BLOCK — one narrow, trivially-fixable blocker (#60); all three features otherwise sound
+## FINAL VERDICT: ✅ SHIP (re-verified @ `bd557a2`)
+
+> **Status:** Both blockers resolved and independently re-verified — **#60** (`44c7416`) and **#61**
+> (`bd557a2`). `pnpm test` is now deterministic: **35/35** full-suite runs green (336/336). All four
+> gates 0. See the **[Re-verification (2026-06-24, HEAD `bd557a2`)](#re-verification-2026-06-24-head-bd557a2)**
+> section at the bottom for the evidence. The original **BLOCK** below is preserved verbatim as the
+> audit trail — it was the correct call on `a767bb0`, where the required test gate was a coin-flip.
+
+---
+
+## Original verdict (initial pass @ `a767bb0`): ❌ BLOCK — one narrow, trivially-fixable blocker (#60); all three features otherwise sound
 
 Sprint 5's three features are **functionally correct** and the design invariants hold under audit:
 the budget gate is a pure pre-`planDispatch` read that provably never kills in-flight work, restore
@@ -188,3 +199,82 @@ No source files, git state, or commits were modified by QA beyond this sign-off 
 Fix #60 (one-line own-property guard in `humanize.ts`), confirm `pnpm vitest run` is green on a
 repeat loop (≥8×), and this verdict flips to **✅ SHIP**. Everything else in Sprint 5 is already
 there.
+
+---
+
+## Re-verification (2026-06-24, HEAD `bd557a2`)
+
+> Picking back up after the dev/Producer fixes landed. Two commits since the BLOCK: `44c7416`
+> (#60, my blocker) and `bd557a2` (#61, a second flake the Producer found while verifying my fix).
+> I re-audited both diffs and ran my own determinism loop. **Verdict flips to ✅ SHIP.**
+
+### Fix audit
+
+**#60 — `humanizeAgentEvent` prototype-key defect (`44c7416`) — CORRECT.**
+The lookup is now guarded with `Object.hasOwn(AGENT_EVENT_SUMMARIES, eventTag)`, so only genuinely
+mapped own keys return a summary; every other input — unknown tags *and* `Object.prototype` member
+names — falls through to the unchanged raw-label / generic-blank fallback. The `as AgentEventTag`
+cast is now sound (reached only when the key is provably own). Public signature, summaries, callers,
+and the no-payload-leak property are all unchanged. Direct re-check returns a **string** for every
+input I threw at it:
+
+```
+"toString"    -> string "toString"      "SessionStarted" -> string "started session"
+"valueOf"     -> string "valueOf"       "UnknownTag"     -> string "UnknownTag"
+"__proto__"   -> string "__proto__"     ""               -> string "agent event"
+"constructor" -> string "constructor"   "   "            -> string "agent event"
+```
+
+The property test was strengthened to union the 8 known prototype keys into its input domain
+(`fc.oneof(fc.string(), fc.constantFrom(...PROTOTYPE_KEYS))`) and assert `typeof summary ===
+"string"`, so this regression class now fails **every** run rather than ~1-in-8. The fix does **not**
+weaken what the test proves — it makes the contract real and the test deterministic. Issue **#60
+closed** with this evidence.
+
+**#61 — persistence debounce TestClock flake (`bd557a2`) — CORRECT, test-helper only.**
+This is the residual #40/#43 flake my 8× loop missed (base rate ~2/30). `awaitFileExists` was bounded
+by a fixed 500-`setImmediate` iteration budget which, under parallel-suite IO contention, can spin
+out in a few ms of wall-clock — less than a contended `mkdir→write→rename` — yielding a false
+negative on the debounced flush. The fix rebounds the poll by a **real ~5s wall-clock deadline**
+(`Effect.suspend` capturing `Date.now() + 5_000` per call — and `Date.now()` is *not* patched by
+`TestClock`, only Effect's `Clock` service is) with a real `setTimeout` inter-poll delay
+(`realDelay`, correctly **not** `Effect.sleep`, which would freeze under the installed `TestClock`).
+I confirmed via `git show` that the change is confined to `test/persistence.test.ts` — **production
+`persistence.ts` is untouched**. Coverage is not weakened: a genuine regression (the write never
+happens) still returns `false` and fails the assertion within the deadline instead of hanging. Issue
+**#61 closed** with this evidence.
+
+### Gates (re-run @ `bd557a2`)
+
+| Gate | Result | Evidence |
+|------|--------|----------|
+| `pnpm typecheck` | ✅ PASS | exit **0** |
+| `pnpm lint` | ✅ PASS | "Checked **109 files** … No fixes applied", exit **0** |
+| `pnpm build` | ✅ PASS | "Build success", exit **0** |
+| `pnpm test` | ✅ PASS | **336 passed (336)** — now **deterministic** (see loop) |
+
+### Determinism loop (my own, ≥30× as requested)
+
+`pnpm vitest run` ×**35** from repo root (two chunks of 18 + 17), targeting both flake classes
+(humanize prototype keys ~7/8 base rate; persistence debounce ~2/30 base rate):
+
+```
+runs  1–18 : 18/18 PASS  (336 passed every run)
+runs 19–35 : 17/17 PASS  (336 passed every run)
+==== TOTAL  PASS=35  FAIL=0  of 35 ====
+```
+
+**35/35 green, zero failures.** No counterexamples, no debounce false-negative, no other suite
+flaked. This is consistent with the dev's 12/12 (humanizer) + 30/30 (persistence) and the Producer's
+40/40. The previously coin-flip `pnpm test` gate is now deterministic.
+
+### Re-verification conclusion
+
+Both blockers are genuinely resolved; the fixes are correct, minimal, and do not weaken their tests
+or touch production beyond the one-line `Object.hasOwn` guard (#60, which has no behavioral effect
+for the only real caller — `event._tag` was always a known tag). The remaining Sprint-5 audit from
+the initial pass stands unchanged: all three features are functionally sound, the snapshot stays
+strictly additive, no payload leak, in-flight work is never killed by the budget gate. **Verdict:
+✅ SHIP.** No new bugs found during re-verification. No open QA blockers remain (#60, #61 both
+closed). I did not push or open a PR.
+
