@@ -6,6 +6,7 @@ import { layerWorkspaceManager } from "../adapters/workspace";
 import { ClockLive } from "../core/clock/live";
 import type { ServiceConfig } from "../core/domain/workflow";
 import { ObservabilityLive } from "../core/observability/observer-tee";
+import { RecentCompletionsLive } from "../core/observability/recent-completions";
 import { runSnapshotServer } from "../core/observability/snapshot-server";
 import { runOrchestrator } from "../core/orchestrator/loop";
 import { layerOrchestratorStore } from "../core/orchestrator/state";
@@ -44,8 +45,11 @@ export const appLayer = (config: ServiceConfig) =>
     layerCopilotRunner(config),
     layerWorkspaceManager(config),
     ClockLive,
-    // Tee observer: structured logs (as before) + recent-events ring for the dashboard.
+    // Tee observer + recent-events ring + live-activity map (one shared instance each,
+    // read by the snapshot server). #36/#37.
     ObservabilityLive,
+    // Rich completion history (loop-fed; read by the snapshot server). #37.
+    RecentCompletionsLive,
   );
 
 /** logfmt logger → stable `key=value` lines per PROJECT_BRIEF §13.1. */

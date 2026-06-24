@@ -2,6 +2,7 @@ import { it } from "@effect/vitest";
 import { Effect, Logger, TestClock } from "effect";
 import * as fc from "fast-check";
 import { describe, expect } from "vitest";
+import { LiveActivity } from "../src/core/observability/live-activity";
 import { ObservabilityLive } from "../src/core/observability/observer-tee";
 import {
   EVENT_MESSAGE_MAX,
@@ -171,6 +172,11 @@ describe("observerTee", () => {
         expect(list.map((e) => e.kind)).toEqual(["dispatched", "failed"]);
         expect(list.map((e) => e.seq)).toEqual([1, 2]);
         expect(list[1]?.level).toBe("warn");
+
+        // The AgentEvent is teed into LiveActivity instead of the feed (#37).
+        const activity = yield* LiveActivity;
+        const map = yield* activity.snapshot;
+        expect(map.get("42")?.event_tag).toBe("AgentMessage");
       }).pipe(
         Effect.provide(ObservabilityLive),
         Effect.provide(Logger.replace(Logger.defaultLogger, capturing)),

@@ -4,6 +4,7 @@ import { type Issue, type IssueStateRef, normalizeState } from "../domain/issue"
 import { RunAttempt } from "../domain/run-attempt";
 import type { WorkflowDefinition } from "../domain/workflow";
 import type { Workspace } from "../domain/workspace";
+import { RecentCompletions } from "../observability/recent-completions";
 import type { AgentRunParams } from "../ports/agent-runner";
 import { AgentRunner } from "../ports/agent-runner";
 import { Clock } from "../ports/clock";
@@ -108,7 +109,8 @@ export type OrchestratorDeps =
   | AgentRunner
   | WorkspaceManager
   | Clock
-  | Observer;
+  | Observer
+  | RecentCompletions;
 
 /**
  * Build and run the orchestrator loop for a loaded workflow. The returned effect never
@@ -126,6 +128,7 @@ export const runOrchestrator = (
       const wsm = yield* WorkspaceManager;
       const clock = yield* Clock;
       const observer = yield* Observer;
+      const completions = yield* RecentCompletions;
 
       const config = def.config;
       const template = def.prompt_template;
@@ -294,6 +297,10 @@ export const runOrchestrator = (
               ? CONTINUATION_DELAY_MS
               : failureBackoffMs(attempt, config.agent.max_retry_backoff_ms);
           const mono = yield* clock.monotonicMillis;
+          // Capture wall-clock at schedule time (#37) so observers can show an honest
+          // wall-clock due time (scheduled_at + delay_ms); the monotonic due_at_ms is
+          // never turned into a countdown.
+          const wall = yield* clock.currentTimeMillis;
           rec.pendingKind = kind;
           rec.pendingAttempt = attempt;
 
@@ -303,6 +310,8 @@ export const runOrchestrator = (
               identifier: rec.issue.identifier,
               attempt,
               due_at_ms: mono + delay,
+              scheduled_at: new Date(wall),
+              delay_ms: delay,
               error,
             }),
           );
@@ -408,6 +417,11 @@ export const runOrchestrator = (
                 yield* Fiber.interrupt(timer);
               }
               yield* store.update((s) => markCompleted(s, action.issueId));
+              yield* completions.record({
+                issue_id: action.issueId,
+                identifier: rec.issue.identifier,
+                outcome: "killed",
+              });
               yield* observer.emit({
                 _tag: "WorkerKilled",
                 issueId: action.issueId,
@@ -585,6 +599,11 @@ export const runOrchestrator = (
               yield* scheduleRetry(rec, "continuation", rec.turnCount + 1, null);
             } else {
               yield* store.update((s) => markCompleted(s, issueId));
+              yield* completions.record({
+                issue_id: issueId,
+                identifier: rec.issue.identifier,
+                outcome: "completed",
+              });
               registry.delete(issueId);
               yield* observer.emit({
                 _tag: "WorkerCompleted",
