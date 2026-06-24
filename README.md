@@ -21,7 +21,9 @@ config and protocol boundaries.
 > sessions, tracker reconciliation, exponential-backoff retries, and structured
 > observability — all on Effect, proven end-to-end against fakes under `TestClock`.
 > A standalone live **dashboard** (Sprint 2) renders the daemon's snapshot in your
-> terminal.
+> terminal. The daemon is **durable** (Sprint 4): it checkpoints state and survives a
+> restart, restoring bookkeeping and safely re-deriving in-flight work (see
+> [Durability](#durability)).
 
 ## Quickstart
 
@@ -79,6 +81,46 @@ overlap (the next request is scheduled only after the previous resolves), and a
 failed poll keeps the last good snapshot on screen while the header flips to
 `stale` — the view never blanks on a transient blip. Press `q` or Ctrl-C to quit;
 the in-flight fetch is aborted and timers are cleared on exit.
+
+## Durability
+
+Orchestra survives a daemon restart. State is checkpointed to a single JSON file at
+`<workspace.root>/.orchestra/state.json` by a scoped, **debounced** writer (default 500 ms,
+coalescing bursts into one write) using an **atomic** temp-file + `rename`, plus a
+**guaranteed final flush** on shutdown. The payload is **versioned** (`Schema.parseJson`,
+ISO `Date`s, forward-only migration).
+
+On restart the checkpoint is restored and reconciled:
+
+- **Bookkeeping survives intact** — completed history, token/runtime totals, and rate limits.
+- **In-flight work is safely re-derived.** Each orphaned `running` issue (a worker that died
+  with the process) becomes a **due-immediately continuation retry**, so it rides the existing
+  retry → reconcile → dispatch path — no bespoke resumption code. Tracker reconciliation gates
+  it first: an issue that finished or vanished while the daemon was down is killed, never
+  re-dispatched (exactly-once is structural, not best-effort).
+- **Retries re-arm from wall-clock** (`scheduled_at + delay_ms`), never the monotonic
+  `due_at_ms` whose origin dies with the process — so a backoff timer fires at the right real
+  time across the downtime.
+- **Corruption or a missing file → a clean start, never a crash.** A bad checkpoint is renamed
+  aside (`state.json.corrupt-<ts>`) for diagnosis and the daemon boots fresh.
+- The observability rings are **not** persisted (post-restart history is cosmetic; the
+  authoritative counts/totals *are* restored). On boot the daemon emits one synthetic
+  *restored after restart* event so the gap in the feed is honest.
+
+Agent **session resume** across a restart is **opt-in** (`persistence.resume_sessions`, default
+**off**): the workspace on disk is the true record of progress, so a restored continuation runs
+fresh by default. When enabled it dispatches the continuation with the persisted `session_id`
+via `--resume`, and is **self-healing** — a stale/expired session falls back to a fresh turn, so
+it can only help, never strand.
+
+The optional `persistence` block in `WORKFLOW.md` (all-defaults, so an unchanged config still
+decodes):
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `dir` | `<workspace.root>/.orchestra` | State directory (relative paths resolve against the workspace root) |
+| `debounce_ms` | `500` | Write-coalescing window in milliseconds |
+| `resume_sessions` | `false` | Opt-in best-effort agent session resume on restart |
 
 ## Configuration
 

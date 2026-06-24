@@ -9,7 +9,7 @@ Design of record: `docs/sprint-3/durability-spike.md`.
 | 40 | Persistence layer (versioned, atomic, debounced) | ✅ done |
 | 41 | Restore + reconcile on boot + retry re-arm | ✅ done |
 | 42 | Session continuity (persist session_id / resume) | ✅ done |
-| 43 | Tests + docs + handoff | pending |
+| 43 | Tests + docs + handoff | ✅ done |
 
 ## Carry-over context
 - Rolled from Sprint 3 at the #39 gate (Producer + user decision): Phase A (Observability v2)
@@ -207,3 +207,53 @@ by the defensive `/api/v1/state` client; no `/api/v2`). Verified by re-running t
 restore/resume scenarios), full suite green. Note: `persistence.test.ts`'s `debounce … (TestClock)`
 test is a **pre-existing** #40 load-dependent flake (reproduced on clean `b494e83` before any #42
 change; passes in isolation and on re-run) — untouched by #42 (no change to `durable-store.ts`).
+
+### #43 — Tests + docs + handoff (done)
+**A) Flaky test stabilized (the #40 debounce/final-flush `TestClock` flake, pre-existing on
+clean `b494e83`).** Two distinct real races, both fixed **deterministically** in
+`test/persistence.test.ts` — **test-only seam, no production-code change**:
+1. **Sleep-registration race** — the test advanced the virtual clock before the forked
+   debounced writer had parked in `Effect.sleep(debounce_ms)`, so its deadline was computed
+   from an already-advanced clock and the window-crossing `adjust` never reached it. Fixed with
+   `awaitWriterParked` (blocks on `TestClock.sleeps()` until the writer's sleep is registered;
+   `yieldNow` between polls hands the scheduler to the writer).
+2. **Real-FS settle race (dominant)** — after the window fires, the multi-step atomic write
+   (`mkdir → writeFile → rename`) runs on the real event loop; two fixed `setImmediate` settles
+   are not a reliable barrier under load, so `fs.exists` could observe the file before `rename`
+   landed. Fixed with `awaitFileExists` (bounded real-FS poll — returns `false` on a genuine
+   regression rather than hanging).
+Assertions unchanged in strength (parked → 499 ms no file → +1 ms write lands). Verified with a
+**20× full-suite parallel-load loop: 20/20 green**.
+
+**B) Coverage audited + filled (no duplication).** The restore/reconcile/resume scenarios
+(#41/#42) and leaf-schema codec tests were already complete. Added only the genuine gaps:
+- Enriched `sampleState` with the #41/#42 additive continuity fields (`turn`,
+  `failure_attempts`, `session_id`, `kind`) so the codec fixed-point **and** the real
+  `save → load` round-trip now prove those survive `encode → write → read → decode` end-to-end.
+- A **debounce-coalescing** test: N mutations in one window → exactly one scheduled flush
+  (`TestClock.sleeps()` length 1) with the latest state, no trailing window.
+
+**C) Docs/close-out.** `README.md` Durability section + `persistence` config-block table (and a
+NOTE-block mention); `docs/sprint-4/done.md` (handoff: shipped #40–#43, design decisions, the
+boot-ordering exactly-once invariant, gates, follow-ups); this progress record; `PROJECT_BRIEF.md`
+§7 (Sprint 4 row) + §8 (Current State rewritten — durable orchestrator shipped, "no durability"
+note removed, test count updated).
+
+**Gates:** typecheck 0 · lint 0 (101 files) · build 0 · **291 tests** (290 baseline + 1 new
+coalescing test), deterministically green (20/20 loop).
+
+## Sprint close
+
+Final board — **all four issues done**:
+
+| # | Task | Status |
+|---|------|--------|
+| 40 | Persistence layer (versioned, atomic, debounced) | ✅ done |
+| 41 | Restore + reconcile on boot + retry re-arm | ✅ done |
+| 42 | Session continuity (persist session_id / resume) | ✅ done |
+| 43 | Tests + docs + handoff | ✅ done |
+
+Durable orchestrator shipped: versioned atomic debounced checkpoint, restore + orphan→continuation
+reconcile + wall-clock retry re-arm, opt-in self-healing session resume; corrupt/missing → clean
+start; snapshot stayed strictly additive. Gates green, 291 tests, flake eliminated. Handoff in
+`docs/sprint-4/done.md`. Ready for the Producer's sprint-close PR (do **not** self-merge).
