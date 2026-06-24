@@ -186,6 +186,12 @@ export const toEventDraft = (obs: Observation): EventDraft | null => {
             message: `retry-now ${obs.issueId}`,
           }
         : null;
+    case "ConfigReloaded":
+      return {
+        level: "info",
+        kind: "config_reloaded",
+        message: `settings reloaded (interval ${obs.pollIntervalMs}ms, max ${obs.maxConcurrent} agents)`,
+      };
   }
 };
 

@@ -11,6 +11,7 @@ import type { RecentEvents } from "../observability/recent-events";
 import type { RestoreStatus } from "../observability/restore-status";
 import type { CommandBus } from "../orchestrator/command";
 import type { OrchestratorStore } from "../orchestrator/state";
+import { WorkflowFileLive } from "../workflow/workflow-file";
 import { CockpitAuthLive } from "./auth";
 import { cockpitApiLive } from "./handlers";
 import { makeStaticHandler } from "./static";
@@ -35,6 +36,8 @@ const defaultStaticDir = (): string => fileURLToPath(new URL("../cockpit", impor
 export interface RunCockpitOptions {
   readonly port: number;
   readonly budgetConfig: BudgetConfig;
+  /** Path to the live `WORKFLOW.md` — the settings read/persist target (#66, DD-4). */
+  readonly workflowPath: string;
   /** Override the static asset root (tests point this at a temp dir; default `dist/cockpit/`). */
   readonly staticDir?: string;
   /** Override the env used to resolve the token (tests inject a fixed token). */
@@ -76,6 +79,7 @@ export const runCockpit = (
 
     const serveLayer = HttpApiBuilder.serve(withStatic).pipe(
       Layer.provide(cockpitApiLive(budgetConfig)),
+      Layer.provide(WorkflowFileLive(options.workflowPath)),
       Layer.provide(CockpitAuthLive),
       Layer.provide(cockpitTokenLayer(resolved.token)),
       Layer.provide(NodeFileSystem.layer),

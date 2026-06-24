@@ -1,0 +1,243 @@
+import { FileSystem } from "@effect/platform";
+import { NodeContext } from "@effect/platform-node";
+import { it } from "@effect/vitest";
+import { Duration, Effect, Fiber, TestClock } from "effect";
+import { describe, expect } from "vitest";
+import { CommandBus } from "../src/core/orchestrator/command";
+import { runOrchestrator } from "../src/core/orchestrator/loop";
+import type { Observation } from "../src/core/orchestrator/observer";
+import { OrchestratorStore } from "../src/core/orchestrator/state";
+import { WorkflowFile, WorkflowFileLive } from "../src/core/workflow/workflow-file";
+import * as Ev from "./fakes/events";
+import { makeFakeAgentRunner } from "./fakes/fake-agent-runner";
+import { makeFakeTracker } from "./fakes/fake-tracker";
+import { makeFakeWorkspaceManager } from "./fakes/fake-workspace-manager";
+import { buildDef, loopLayer, makeIssue, makeStateRef, TEST_ROOT, waitFor } from "./fakes/harness";
+import { makeRecordingObserver } from "./fakes/recording-observer";
+
+/**
+ * Sprint 6 / #66 — settings read/persist + hot-reload (DD-4). Two halves:
+ *
+ *   1. {@link WorkflowFile} edits a whitelisted subset of the RAW front matter, atomically,
+ *      while `tracker.api_key` (a `$VAR`) and the Liquid body pass through byte-for-byte —
+ *      and an invalid patch is rejected before any write lands (the secret-safety headline);
+ *   2. a `ReloadConfig` command hot-applies the new knobs on the NEXT tick through the real
+ *      {@link runOrchestrator} fiber, without disturbing in-flight work (mirrors the budget
+ *      gate).
+ */
+
+// The fixture uses a `$VAR` whose name carries no secret-keyword, so the raw file is a clean
+// fixture (the resolved value lives only in env / the in-memory config, never on the wire).
+const CRED_ENV_VAR = "ORCHESTRA_FIXTURE_CRED";
+const CRED_VALUE = "resolved-by-the-env-not-the-wire";
+
+const BODY = [
+  "Resolve issue {{ issue.identifier }}.",
+  "",
+  "{% if issue.body %}{{ issue.body }}{% endif %}",
+  "",
+  "Keep going until done.",
+].join("\n");
+
+const ORIGINAL = [
+  "---",
+  "tracker:",
+  "  kind: github",
+  "  repo: acme/widgets",
+  `  api_key: $${CRED_ENV_VAR}`,
+  "polling:",
+  "  interval_ms: 30000",
+  "agent:",
+  "  max_concurrent_agents: 4",
+  "  max_turns: 20",
+  "budget:",
+  "  max_total_tokens: 100000",
+  "---",
+  BODY,
+  "",
+].join("\n");
+
+describe("WorkflowFile settings persist (#66, DD-4)", () => {
+  it.scoped(
+    "headline: api_key ($VAR) + Liquid body are byte-identical across a write; knobs change",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+        const path = `${dir}/WORKFLOW.md`;
+        yield* fs.writeFileString(path, ORIGINAL);
+        // The $VAR resolves from env (in-memory only) — never read by the editor/write path.
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            process.env[CRED_ENV_VAR] = CRED_VALUE;
+          }),
+          () =>
+            Effect.sync(() => {
+              delete process.env[CRED_ENV_VAR];
+            }),
+        );
+
+        const applied = yield* Effect.gen(function* () {
+          const wf = yield* WorkflowFile;
+          return yield* wf.applyPatch({
+            polling: { interval_ms: 5000 },
+            agent: { max_turns: 7 },
+            budget: { max_total_tokens: null }, // clear the ceiling
+          });
+        }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+        const after = yield* fs.readFileString(path);
+
+        // Secret safety + body preservation: the untouched $VAR and the Liquid body survive.
+        expect(after).toContain(`api_key: $${CRED_ENV_VAR}`);
+        expect(after).toContain(BODY);
+        // Whitelisted knobs changed; the cleared ceiling is gone from the front matter.
+        expect(after).toContain("interval_ms: 5000");
+        expect(after).toContain("max_turns: 7");
+        expect(after).not.toContain("max_total_tokens");
+
+        // The editable view returned to the wire carries NO secret (no `tracker` at all).
+        expect(applied.settings).toEqual({
+          polling: { interval_ms: 5000 },
+          agent: {
+            max_concurrent_agents: 4,
+            max_concurrent_agents_by_state: {},
+            max_turns: 7,
+            max_retry_backoff_ms: 300_000,
+          },
+          budget: { max_total_tokens: null },
+        });
+        // The in-process config (for ReloadConfig) DID resolve the secret — proving the
+        // secret stays in memory and is never what we serialize to disk or the wire.
+        expect(applied.config.tracker.api_key).toBe(CRED_VALUE);
+      }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped("read returns the whitelisted subset (raw values, no secrets)", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+      const path = `${dir}/WORKFLOW.md`;
+      yield* fs.writeFileString(path, ORIGINAL);
+
+      const settings = yield* Effect.gen(function* () {
+        const wf = yield* WorkflowFile;
+        return yield* wf.read;
+      }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+      expect(settings.polling.interval_ms).toBe(30000);
+      expect(settings.agent.max_concurrent_agents).toBe(4);
+      expect(settings.budget.max_total_tokens).toBe(100000);
+      // No secret-bearing keys are present on the editable projection.
+      expect(Object.keys(settings)).toEqual(["polling", "agent", "budget"]);
+    }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped("an invalid patch (negative concurrency) is rejected before the write lands", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+      const path = `${dir}/WORKFLOW.md`;
+      yield* fs.writeFileString(path, ORIGINAL);
+
+      // The patch schema is the boundary: a non-positive value never decodes, so applyPatch
+      // is never reached and the file is left exactly as it was.
+      const result = yield* Effect.gen(function* () {
+        const wf = yield* WorkflowFile;
+        // biome-ignore lint/suspicious/noExplicitAny: deliberately bypass the type to feed a bad value.
+        return yield* wf.applyPatch({ agent: { max_concurrent_agents: -1 } } as any).pipe(
+          Effect.match({
+            onFailure: () => "rejected" as const,
+            onSuccess: () => "wrote" as const,
+          }),
+        );
+      }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+      expect(result).toBe("rejected");
+      const after = yield* fs.readFileString(path);
+      expect(after).toBe(ORIGINAL); // byte-identical — nothing was written.
+    }).pipe(Effect.provide(NodeContext.layer)),
+  );
+});
+
+const isDispatched =
+  (issueId: string) =>
+  (o: Observation): boolean =>
+    o._tag === "Dispatched" && o.issueId === issueId;
+
+describe("settings hot-reload via ReloadConfig (#66, DD-4)", () => {
+  it.scoped("new knobs apply on the next tick without disturbing in-flight work", () =>
+    Effect.gen(function* () {
+      const i1 = makeIssue({ id: "i1", identifier: "ORC-1", state: "In Progress" });
+      const i2 = makeIssue({ id: "i2", identifier: "ORC-2", state: "In Progress" });
+      const tracker = yield* makeFakeTracker({
+        candidates: [i1, i2],
+        states: [makeStateRef("i1", "In Progress"), makeStateRef("i2", "In Progress")],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+      const obs = yield* makeRecordingObserver();
+      // i1 stays in-flight for a long time; i2 completes quickly once it is allowed to run.
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s1"),
+        { _tag: "delay", ms: 600_000 },
+        { _tag: "complete" },
+      ]);
+      yield* runner.control.pushScript("i2", [Ev.sessionStarted("s2"), { _tag: "complete" }]);
+
+      // Start capped at ONE agent → i2 is withheld by the concurrency gate while i1 runs.
+      const def = buildDef({
+        maxConcurrent: 1,
+        maxTurns: 1,
+        intervalMs: 10_000,
+        stallTimeoutMs: 3_600_000,
+      });
+      // The reloaded config raises the cap to two and shortens the poll interval.
+      const reloaded = buildDef({
+        maxConcurrent: 2,
+        maxTurns: 1,
+        intervalMs: 4_000,
+        stallTimeoutMs: 3_600_000,
+      });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obs.layer,
+      });
+
+      yield* Effect.gen(function* () {
+        const bus = yield* CommandBus;
+        const store = yield* OrchestratorStore;
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+
+        // i1 dispatches; i2 is withheld (cap = 1).
+        yield* waitFor(obs.queue, isDispatched("i1"));
+        yield* TestClock.adjust(Duration.millis(10_000));
+        yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+        expect((yield* store.get).running.i2).toBeUndefined();
+
+        // Operator raises the cap via settings hot-reload — the owner fiber acks `Reloaded`.
+        const ack = yield* bus.send({ _tag: "ReloadConfig", config: reloaded.config });
+        expect(ack).toEqual({ _tag: "Reloaded" });
+        yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "ConfigReloaded" && o.maxConcurrent === 2 && o.pollIntervalMs === 4000,
+        );
+
+        // The state-seeded knobs were patched in place.
+        const afterReload = yield* store.get;
+        expect(afterReload.max_concurrent_agents).toBe(2);
+        expect(afterReload.poll_interval_ms).toBe(4000);
+
+        // Next tick: i2 now dispatches under the new cap; i1 keeps running, untouched.
+        yield* TestClock.adjust(Duration.millis(10_000));
+        yield* waitFor(obs.queue, isDispatched("i2"));
+        const overState = yield* store.get;
+        expect(overState.running.i1).toBeDefined(); // in-flight worker never disturbed.
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
+  );
+});

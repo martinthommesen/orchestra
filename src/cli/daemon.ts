@@ -91,7 +91,9 @@ export const runDaemon = (argv: ReadonlyArray<string>): void => {
     const run = Effect.scoped(
       Effect.gen(function* () {
         if (port !== null) {
-          yield* Effect.forkScoped(runCockpit({ port, budgetConfig: def.config.budget }));
+          yield* Effect.forkScoped(
+            runCockpit({ port, budgetConfig: def.config.budget, workflowPath }),
+          );
         }
         yield* runOrchestrator(def);
       }),

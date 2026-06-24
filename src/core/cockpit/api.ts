@@ -6,6 +6,7 @@ import {
   HttpApiMiddleware,
 } from "@effect/platform";
 import { Schema } from "effect";
+import { EditableSettings, SettingsPatch } from "../workflow/workflow-file";
 
 /**
  * Sprint 6 / #65 — the **one** typed cockpit API (DD-1). The hand-rolled snapshot router is
@@ -48,11 +49,18 @@ export class CockpitAuth extends HttpApiMiddleware.Tag<CockpitAuth>()("orchestra
 }) {}
 
 /** Read group — token-free loopback reads. */
-export class ReadGroup extends HttpApiGroup.make("read").add(
-  // Byte-compatible snapshot: the handler returns a raw HttpServerResponse, so `Unknown`
-  // here just declares a 200 body without re-encoding the projection through a schema.
-  HttpApiEndpoint.get("state", "/api/v1/state").addSuccess(Schema.Unknown),
-) {}
+export class ReadGroup extends HttpApiGroup.make("read")
+  .add(
+    // Byte-compatible snapshot: the handler returns a raw HttpServerResponse, so `Unknown`
+    // here just declares a 200 body without re-encoding the projection through a schema.
+    HttpApiEndpoint.get("state", "/api/v1/state").addSuccess(Schema.Unknown),
+  )
+  .add(
+    // The whitelisted editable subset (raw values, no secrets) — token-free read (DD-4).
+    HttpApiEndpoint.get("settings", "/api/v1/settings")
+      .addSuccess(EditableSettings)
+      .addError(HttpApiError.InternalServerError),
+  ) {}
 
 /** Control group — every endpoint requires the bearer token + loopback Origin (DD-5). */
 export class ControlGroup extends HttpApiGroup.make("control")
@@ -76,6 +84,15 @@ export class ControlGroup extends HttpApiGroup.make("control")
     HttpApiEndpoint.post("cancel", "/api/v1/issues/:id/cancel")
       .setPath(IssueIdParam)
       .addSuccess(AckWire)
+      .addError(HttpApiError.ServiceUnavailable),
+  )
+  .add(
+    // Validate a typed patch → atomic write → ReloadConfig (DD-4). An invalid patch fails
+    // payload decoding (400) before the write; a write/merge failure → BadRequest.
+    HttpApiEndpoint.put("settings", "/api/v1/settings")
+      .setPayload(SettingsPatch)
+      .addSuccess(EditableSettings)
+      .addError(HttpApiError.BadRequest)
       .addError(HttpApiError.ServiceUnavailable),
   )
   .middleware(CockpitAuth) {}

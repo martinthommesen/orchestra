@@ -19,7 +19,7 @@ import { Schema } from "effect";
  * lenient per §5.5); they surface later as the relevant tagged errors.
  */
 
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+export const PositiveInt = Schema.Int.pipe(Schema.positive());
 
 /** `tracker` block (SPEC §5.3.1), GitHub-flavored. */
 export const TrackerConfig = Schema.Struct({

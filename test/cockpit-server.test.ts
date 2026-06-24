@@ -82,6 +82,7 @@ const bootCockpit = (port: number) =>
     runCockpit({
       port,
       budgetConfig: BudgetConfig.make({}),
+      workflowPath: `${ABSENT_STATIC_DIR}/WORKFLOW.md`,
       env: FIXTURE_ENV,
       staticDir: ABSENT_STATIC_DIR,
     }),

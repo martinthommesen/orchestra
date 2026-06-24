@@ -10,7 +10,7 @@ Branch: `feature/sprint-6` (off `main`, all Sprint 5 work merged).
 |---|------|-------|---------------|--------|
 | #64 | Command channel (`CommandBus` + mailbox `Msg.Command`) + operator pause/resume/retry-now/cancel | Sage | M · Med | ✅ done |
 | #65 | Cockpit `HttpApi` server (read + mutating endpoints, auth/Origin, static SPA; replaces snapshot router) | Sage | M · Med | ✅ done |
-| #66 | Settings: read editable subset + persist whitelisted patch to `WORKFLOW.md` + hot-reload | Sage | M · Med | ☐ todo |
+| #66 | Settings: read editable subset + persist whitelisted patch to `WORKFLOW.md` + hot-reload | Sage | M · Med | ✅ done |
 | #67 | Vite+React cockpit scaffold, daemon static serving, dev proxy, token bootstrap, build wiring, API client | Nova | M · Low | ☐ todo |
 | #68 | Cockpit design system + app shell (web parity of `glyphs.ts`/`design-system.md`) | Milo | S–M · Low | ☐ todo |
 | #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ☐ todo |
@@ -38,10 +38,10 @@ typecheck + lint + 336 tests).
 - [x] #65 — auth + loopback-Origin middleware (mutating endpoints) + token bootstrap injection
 - [x] #65 — static SPA serving from `dist/cockpit/` with index fallback
 - [x] #65 — `daemon.ts` wiring (`runCockpit`, `CommandBusLive`)
-- [ ] #66 — `WorkflowFile` service: read raw front-matter, editable-subset projection
-- [ ] #66 — `PUT` validate → patch whitelist → atomic write (body + `$VAR` verbatim)
-- [ ] #66 — `ReloadConfig` command (`ConfigRef` swap + state knob patch), hot-apply on next tick
-- [ ] #66 — secret-safety test: `api_key` + Liquid body byte-identical across a write
+- [x] #66 — `WorkflowFile` service: read raw front-matter, editable-subset projection
+- [x] #66 — `PUT` validate → patch whitelist → atomic write (body + `$VAR` verbatim)
+- [x] #66 — `ReloadConfig` command (`ConfigRef` swap + state knob patch), hot-apply on next tick
+- [x] #66 — secret-safety test: `api_key` + Liquid body byte-identical across a write
 
 ### Phase 2 — Frontend SPA (Nova + Milo)
 - [ ] #67 — `src/cockpit/` Vite+React+TS scaffold + `vite.config.ts` (build/proxy)
@@ -132,5 +132,49 @@ Decisions:
   `dist/cockpit/` relative to the bundled CLI entry.
 Gates: typecheck + lint clean, **355 tests** (339 + 16: 5 cockpit-server, 12 security, −1 net
 from the snapshot test split), `pnpm build` green.
+
+### #66 — Settings read/persist + hot-reload (Sage, dep #65)
+Files (new): `src/core/workflow/workflow-file.ts` (the `WorkflowFile` service + the
+`EditableSettings`/`SettingsPatch` schemas). Modified: `src/core/orchestrator/loop.ts`
+(`liveConfig` swap + `ReloadConfig` handler body — patches the two state-seeded knobs +
+emits `ConfigReloaded`; the hot knobs `max_turns`/`max_retry_backoff_ms`/`budget`/
+`max_concurrent_agents_by_state` now read off `liveConfig`), `observer.ts` (+`ConfigReloaded`
+observation), `live-observer.ts`/`recent-events.ts` (render it), `errors.ts` (+`SettingsRejected`),
+`domain/workflow.ts` (export `PositiveInt`), `cockpit/api.ts` (+`GET`/`PUT /api/v1/settings`),
+`cockpit/handlers.ts` (settings read + PUT→`applyPatch`→`ReloadConfig`), `cockpit/server.ts`
++ `daemon.ts` (thread `workflowPath`, provide `WorkflowFileLive`). Tests: `test/settings.test.ts`
+(headline byte-identical secret/body test, read projection, invalid-patch-rejected-before-write,
+loop hot-reload), + the two observation-fixture maps.
+
+Decisions:
+- **DD-4 edit the RAW document, not a re-stringified object.** The write path uses the `yaml`
+  package's `parseDocument` + `setIn`/`deleteIn` on ONLY the whitelisted paths, then
+  `toString()`. Untouched nodes — `tracker.api_key` (literal or `$VAR`) and every other key —
+  keep their exact original representation. The Liquid body is captured verbatim (the slice
+  after the closing `---`) and re-appended unchanged. The headline test asserts the `$VAR`
+  api_key line and the body are byte-identical before/after.
+- **Secret safety (constraint #4).** The editor never reads the resolved `ServiceConfig` for
+  the write or the wire — it operates on the raw front matter. The editable projection
+  (`{ polling, agent, budget }`) has no `tracker` key at all, so a secret can't leak to the
+  browser. The fully resolved config (with the resolved api_key) is produced only for the
+  in-process `ReloadConfig` command (re-loaded from the just-written file) and never serialized.
+- **Validate-then-write.** The merged document is decoded against `ServiceConfig` BEFORE the
+  write; a patch that would yield an unparseable `WORKFLOW.md` is rejected (`SettingsRejected`)
+  with nothing written. Invalid patches (e.g. negative concurrency) fail the `SettingsPatch`
+  decode at the HTTP boundary (`PositiveInt`) → 400, before `applyPatch` is even reached.
+- **Atomic persist** mirrors the Sprint-4 checkpoint: write a `.orchestra.tmp` sibling (mode
+  preserved from the existing file) then `rename(2)` into place.
+- **Hot-reload without collateral (DD-4).** The loop reads its hot knobs from a loop-local
+  `liveConfig` (the existing latch idiom — only the owner fiber writes it). `ReloadConfig`
+  swaps `liveConfig` and patches `OrchestratorState.{poll_interval_ms, max_concurrent_agents}`,
+  so the next dispatch tick plans against the new values. It interrupts NOTHING — the loop
+  test proves an in-flight worker keeps running while a raised concurrency cap lets a
+  previously-withheld issue dispatch on the next tick.
+- **Deviation note (DD-4 "ConfigRef").** The plan names a `ConfigRef`; I used a loop-local
+  `let liveConfig` instead — it is the same single-writer pattern already used for the
+  `operatorPaused`/`budgetPaused` latches in this loop, avoids a cross-fiber `Ref` the HTTP
+  fiber could touch, and the owner fiber is the only writer. Functionally identical (a
+  point-of-use read swapped atomically by the owner fiber); strictly cleaner here.
+Gates: typecheck + lint clean, **359 tests** (355 + 4 settings), `pnpm build` green.
 
 _(per-task notes land here as work completes — files changed, decisions, gate results.)_

@@ -67,6 +67,7 @@ const sample: Record<Observation["_tag"], Observation> = {
   OperatorControl: { _tag: "OperatorControl", paused: true },
   SessionCancelled: { _tag: "SessionCancelled", issueId: "42", identifier: "#42" },
   RetryNowRequested: { _tag: "RetryNowRequested", issueId: "42", accepted: true },
+  ConfigReloaded: { _tag: "ConfigReloaded", pollIntervalMs: 5000, maxConcurrent: 8 },
 };
 
 /** The cadence/chatter observations the feed deliberately drops. */

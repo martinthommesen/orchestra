@@ -10,6 +10,7 @@ import { toSnapshot } from "../observability/snapshot";
 import { evaluateBudget } from "../orchestrator/budget";
 import { type Command, CommandBus, type CommandResult } from "../orchestrator/command";
 import { OrchestratorStore } from "../orchestrator/state";
+import { WorkflowFile } from "../workflow/workflow-file";
 import { type AckWire, CockpitApi, type CockpitAuth, type ControlStateWire } from "./api";
 
 /**
@@ -41,32 +42,42 @@ const toAckWire = (result: CommandResult): AckWire =>
  */
 export const readGroupLive = (budgetConfig: BudgetConfig) =>
   HttpApiBuilder.group(CockpitApi, "read", (handlers) =>
-    handlers.handle("state", () =>
-      Effect.gen(function* () {
-        const store = yield* OrchestratorStore;
-        const events = yield* RecentEvents;
-        const completions = yield* RecentCompletions;
-        const activity = yield* LiveActivity;
-        const restoreStatus = yield* RestoreStatus;
-        const controlStatus = yield* ControlStatus;
-        const state = yield* store.get;
-        const recentEvents = yield* events.list;
-        const recentCompleted = yield* completions.list;
-        const activityMap = yield* activity.snapshot;
-        const restore = yield* restoreStatus.get;
-        const operatorPaused = yield* controlStatus.get;
-        return yield* HttpServerResponse.json(
-          toSnapshot(state, {
-            recentEvents,
-            recentCompleted,
-            activity: activityMap,
-            budget: evaluateBudget(budgetConfig, state.agent_totals),
-            operatorPaused,
-            ...(restore === null ? {} : { restore }),
-          }),
-        ).pipe(Effect.orDie);
-      }),
-    ),
+    handlers
+      .handle("state", () =>
+        Effect.gen(function* () {
+          const store = yield* OrchestratorStore;
+          const events = yield* RecentEvents;
+          const completions = yield* RecentCompletions;
+          const activity = yield* LiveActivity;
+          const restoreStatus = yield* RestoreStatus;
+          const controlStatus = yield* ControlStatus;
+          const state = yield* store.get;
+          const recentEvents = yield* events.list;
+          const recentCompleted = yield* completions.list;
+          const activityMap = yield* activity.snapshot;
+          const restore = yield* restoreStatus.get;
+          const operatorPaused = yield* controlStatus.get;
+          return yield* HttpServerResponse.json(
+            toSnapshot(state, {
+              recentEvents,
+              recentCompleted,
+              activity: activityMap,
+              budget: evaluateBudget(budgetConfig, state.agent_totals),
+              operatorPaused,
+              ...(restore === null ? {} : { restore }),
+            }),
+          ).pipe(Effect.orDie);
+        }),
+      )
+      .handle("settings", () =>
+        // The whitelisted editable subset (DD-4) — raw values, secrets excluded by construction.
+        Effect.gen(function* () {
+          const workflowFile = yield* WorkflowFile;
+          return yield* workflowFile.read.pipe(
+            Effect.catchAll(() => new HttpApiError.InternalServerError()),
+          );
+        }),
+      ),
   );
 
 /** Run one command through the bus, answering 503 if the owner fiber does not ack in time. */
@@ -93,6 +104,18 @@ export const controlGroupLive = HttpApiBuilder.group(CockpitApi, "control", (han
     )
     .handle("cancel", ({ path }) =>
       sendCommand({ _tag: "CancelSession", issueId: path.id }).pipe(Effect.map(toAckWire)),
+    )
+    .handle("settings", ({ payload }) =>
+      // Validate + atomically persist the patch (DD-4), then hot-reload via the CommandBus.
+      // Persist/validation failures map to 400; a wedged owner fiber yields 503.
+      Effect.gen(function* () {
+        const workflowFile = yield* WorkflowFile;
+        const applied = yield* workflowFile
+          .applyPatch(payload)
+          .pipe(Effect.catchAll(() => new HttpApiError.BadRequest()));
+        yield* sendCommand({ _tag: "ReloadConfig", config: applied.config });
+        return applied.settings;
+      }),
     ),
 );
 
@@ -110,6 +133,7 @@ export const cockpitApiLive = (
   | ControlStatus
   | CommandBus
   | CockpitAuth
+  | WorkflowFile
 > =>
   HttpApiBuilder.api(CockpitApi).pipe(
     Layer.provide(readGroupLive(budgetConfig)),

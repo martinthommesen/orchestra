@@ -152,6 +152,12 @@ export const runOrchestrator = (
       const commandBus = yield* CommandBus;
 
       const config = def.config;
+      // Hot-reloadable knobs (Sprint 6 / #66, DD-4) are read off `liveConfig`, which a
+      // `ReloadConfig` command swaps wholesale from a re-parsed WORKFLOW.md. Only whitelisted
+      // keys can change (the cockpit edits nothing else), so the non-whitelisted fields are
+      // identical across the swap; reads happen at point-of-use each tick, so the new values
+      // apply on the NEXT tick/completion/backoff without disturbing any in-flight work.
+      let liveConfig = config;
       const template = def.prompt_template;
       const activeStates = new Set(config.tracker.active_states.map(normalizeState));
       const terminalStates = new Set(config.tracker.terminal_states.map(normalizeState));
@@ -345,7 +351,7 @@ export const runOrchestrator = (
           const delay =
             kind === "continuation"
               ? CONTINUATION_DELAY_MS
-              : failureBackoffMs(attempt, config.agent.max_retry_backoff_ms);
+              : failureBackoffMs(attempt, liveConfig.agent.max_retry_backoff_ms);
           const mono = yield* clock.monotonicMillis;
           // Capture wall-clock at schedule time (#37) so observers can show an honest
           // wall-clock due time (scheduled_at + delay_ms); the monotonic due_at_ms is
@@ -596,7 +602,7 @@ export const runOrchestrator = (
         // touches neither the concurrency math nor the retry/reconcile paths. The
         // BudgetExceeded observation is emitted once per transition (latched on
         // `budgetPaused`), never every tick.
-        const budget: BudgetStatus = evaluateBudget(config.budget, state.agent_totals);
+        const budget: BudgetStatus = evaluateBudget(liveConfig.budget, state.agent_totals);
         if (budget.paused !== budgetPaused) {
           budgetPaused = budget.paused;
           yield* observer.emit({
@@ -616,7 +622,7 @@ export const runOrchestrator = (
         const sorted = selectCandidates(candidatesResult.right, selCtx);
         const conCtx = concurrencyContext({
           globalLimit: state.max_concurrent_agents,
-          perStateLimits: config.agent.max_concurrent_agents_by_state,
+          perStateLimits: liveConfig.agent.max_concurrent_agents_by_state,
           runningTotal: runningTotal(),
           runningByState: runningByState(),
         });
@@ -677,7 +683,7 @@ export const runOrchestrator = (
           rec.workerFiber = null;
           if (outcome._tag === "Completed") {
             rec.turnCount += 1;
-            if (rec.turnCount < config.agent.max_turns) {
+            if (rec.turnCount < liveConfig.agent.max_turns) {
               yield* scheduleRetry(rec, "continuation", rec.turnCount + 1, null);
             } else {
               yield* store.update((s) => markCompleted(s, issueId));
@@ -818,8 +824,22 @@ export const runOrchestrator = (
               break;
             }
             case "ReloadConfig": {
-              // Wired in #66 (settings hot-reload). Acknowledged here so the union stays
-              // exhaustive; the no-op is harmless until #66 patches the live config.
+              // Sprint 6 / #66 (DD-4): settings hot-reload. The WorkflowFile already
+              // validated + atomically wrote the patched WORKFLOW.md; here the owner fiber
+              // (the only writer) swaps the live config and patches the two state-seeded
+              // knobs so the next dispatch tick plans against the new values. NOTHING in
+              // flight is touched — only future-tick decisions change.
+              liveConfig = command.config;
+              yield* store.update((s) => ({
+                ...s,
+                poll_interval_ms: liveConfig.polling.interval_ms,
+                max_concurrent_agents: liveConfig.agent.max_concurrent_agents,
+              }));
+              yield* observer.emit({
+                _tag: "ConfigReloaded",
+                pollIntervalMs: liveConfig.polling.interval_ms,
+                maxConcurrent: liveConfig.agent.max_concurrent_agents,
+              });
               yield* Deferred.succeed(reply, { _tag: "Reloaded" });
               break;
             }

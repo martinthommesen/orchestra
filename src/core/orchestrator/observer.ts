@@ -118,6 +118,17 @@ export type Observation =
       readonly _tag: "RetryNowRequested";
       readonly issueId: string;
       readonly accepted: boolean;
+    }
+  | {
+      /**
+       * Settings hot-reload applied (Sprint 6 / #66, DD-4). Emitted after an operator `PUT
+       * /api/v1/settings` atomically rewrote the whitelisted front-matter and the owner
+       * fiber swapped its live config. The new orchestration knobs apply on the next tick;
+       * no in-flight worker, retry, or reconciliation is disturbed.
+       */
+      readonly _tag: "ConfigReloaded";
+      readonly pollIntervalMs: number;
+      readonly maxConcurrent: number;
     };
 
 export class Observer extends Context.Tag("orchestra/Observer")<

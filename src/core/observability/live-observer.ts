@@ -220,6 +220,15 @@ export const formatObservation = (obs: Observation): LogLine => {
           accepted: String(obs.accepted),
         }),
       };
+    case "ConfigReloaded":
+      return {
+        level: "info",
+        message: `${glyph("done")} settings reloaded (interval ${obs.pollIntervalMs}ms, max ${obs.maxConcurrent})`,
+        annotations: ev("config_reloaded", {
+          poll_interval_ms: String(obs.pollIntervalMs),
+          max_concurrent_agents: String(obs.maxConcurrent),
+        }),
+      };
   }
 };
 
