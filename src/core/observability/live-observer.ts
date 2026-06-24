@@ -45,6 +45,18 @@ export const formatObservation = (obs: Observation): LogLine => {
         message: `startup cleanup removed ${obs.removed.length} workspace(s)`,
         annotations: ev("startup_cleanup", { removed: obs.removed.join(",") }),
       };
+    case "RestoredAfterRestart":
+      return {
+        level: "info",
+        message:
+          `restored after restart: ${obs.orphanedRunningConverted} running, ` +
+          `${obs.reArmedRetries} retrying, ${obs.restoredCompleted} completed`,
+        annotations: ev("restored", {
+          orphaned_running_converted: String(obs.orphanedRunningConverted),
+          rearmed_retries: String(obs.reArmedRetries),
+          restored_completed: String(obs.restoredCompleted),
+        }),
+      };
     case "TickStart":
       return { level: "info", message: "tick start", annotations: ev("tick_start") };
     case "TickEnd":

@@ -158,7 +158,7 @@ describe("persistence — service load/save (real filesystem)", () => {
 });
 
 describe("persistence — durable store decorator", () => {
-  it.scoped("seeds BOOKKEEPING ONLY; scheduling slice starts empty (#40/#41 boundary)", () =>
+  it.scoped("seeds the FULL state — scheduling slice included (#41 restore)", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-persist-" });
@@ -176,10 +176,14 @@ describe("persistence — durable store decorator", () => {
       expect(seeded.agent_rate_limits).toEqual({
         primary: { remaining: 7, reset_at: "2026-01-01T00:00:00.000Z" },
       });
-      // Scheduling slice deliberately empty until #41 reconciles/re-arms:
-      expect(seeded.running).toEqual({});
-      expect(seeded.retry_attempts).toEqual({});
-      expect(seeded.claimed).toEqual([]);
+      // #41: the scheduling slice is restored too (the loop's startup rebuilds the registry,
+      // converts orphans, and re-arms timers — see test/restore-reconcile.test.ts).
+      expect(seeded.running.i1?.issue_identifier).toBe("ORC-1");
+      expect(seeded.retry_attempts.i2?.identifier).toBe("ORC-2");
+      expect(seeded.claimed).toEqual(["i1", "i2"]);
+      // Reloadable knobs always come from the live config, never the checkpoint.
+      expect(seeded.poll_interval_ms).toBe(config.polling.interval_ms);
+      expect(seeded.max_concurrent_agents).toBe(config.agent.max_concurrent_agents);
     }).pipe(Effect.provide(platform)),
   );
 

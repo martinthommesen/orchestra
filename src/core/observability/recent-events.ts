@@ -66,6 +66,14 @@ export const toEventDraft = (obs: Observation): EventDraft | null => {
       return null;
     case "Started":
       return { level: "info", kind: "started", message: "orchestrator started" };
+    case "RestoredAfterRestart":
+      return {
+        level: "info",
+        kind: "restored",
+        message:
+          `restored after restart: ${obs.orphanedRunningConverted} running, ` +
+          `${obs.reArmedRetries} retrying, ${obs.restoredCompleted} completed`,
+      };
     case "StartupCleanup":
       return {
         level: "info",

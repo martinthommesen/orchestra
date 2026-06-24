@@ -23,6 +23,12 @@ import { Observer } from "../src/core/orchestrator/observer";
 
 const sample: Record<Observation["_tag"], Observation> = {
   Started: { _tag: "Started", pollIntervalMs: 1000, maxConcurrent: 3 },
+  RestoredAfterRestart: {
+    _tag: "RestoredAfterRestart",
+    orphanedRunningConverted: 1,
+    reArmedRetries: 2,
+    restoredCompleted: 3,
+  },
   StartupCleanup: { _tag: "StartupCleanup", removed: ["a", "b"] },
   TickStart: { _tag: "TickStart" },
   TickEnd: { _tag: "TickEnd", dispatched: ["i1"], dispatchSkipped: false },
@@ -98,6 +104,15 @@ describe("toEventDraft", () => {
       expect(dispatched?.identifier).toBe("#42");
       expect(toEventDraft(sample.WorkerFailed)?.level).toBe("warn");
       expect(toEventDraft(sample.TrackerError)?.level).toBe("warn");
+    }),
+  );
+
+  it.effect("restored-after-restart becomes one info 'restored' draft with the counts (#41)", () =>
+    Effect.sync(() => {
+      const draft = toEventDraft(sample.RestoredAfterRestart);
+      expect(draft?.kind).toBe("restored");
+      expect(draft?.level).toBe("info");
+      expect(draft?.message).toBe("restored after restart: 1 running, 2 retrying, 3 completed");
     }),
   );
 

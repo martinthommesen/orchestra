@@ -8,7 +8,7 @@ import { toPersisted } from "./persisted-state";
 import { layerPersistence, Persistence } from "./persistence";
 
 /**
- * Sprint 4 / #40 — the transparent durable {@link OrchestratorStore} decorator
+ * Sprint 4 / #40+#41 — the transparent durable {@link OrchestratorStore} decorator
  * (durability spike §2.4, §2.7).
  *
  * It is a **drop-in replacement** for `layerOrchestratorStore` in the daemon's
@@ -17,40 +17,37 @@ import { layerPersistence, Persistence } from "./persistence";
  * (with a guaranteed final flush). `get`/`update`/`modify` semantics are byte-identical, so
  * `loop.ts` and `snapshot-server.ts` need no edits.
  *
- * ## Seed boundary — #40 restores BOOKKEEPING ONLY (the deliberate #40/#41 line)
+ * ## Full state restore (#41)
  * The checkpoint persists the *whole* state (the writer saves `store.get`, scheduling state
- * included), but on restore #40 seeds only the **safe bookkeeping**: `completed`,
- * `agent_totals`, `agent_rate_limits`, and the config-derived knobs. The **scheduling**
- * slice — `running`, `claimed`, `retry_attempts` — is intentionally reset to empty, because
- * restoring it live requires the registry rebuild + wall-clock retry re-arm +
- * orphan→continuation reconcile that is #41. Seeding it without #41 would either strand
- * issues (a `running` entry with no worker fiber is never reconciled to progress; a
- * `retry_attempts` entry with no re-armed timer never fires — both stay `claimed` forever)
- * or risk the per-tick reconcile mishandling orphaned `running` entries. Resetting that
- * slice reproduces today's safe behavior (next tick re-selects active issues fresh) with
- * zero new double-dispatch risk, while bookkeeping/totals survive the restart immediately.
- * #41 replaces {@link seedState} with a full restore + reconcile.
+ * included). On restore #41 seeds the **complete** {@link OrchestratorState} — bookkeeping
+ * (`completed`, `agent_totals`, `agent_rate_limits`) **and** the scheduling slice
+ * (`running`, `claimed`, `retry_attempts`). The poll/concurrency knobs are taken from the
+ * **live config** (they are reloadable: a checkpoint's values may be stale relative to the
+ * current `WORKFLOW.md`), everything else from the checkpoint.
+ *
+ * Seeding the scheduling slice is only safe because `runOrchestrator`'s startup
+ * (the restore + reconcile + wall-clock retry re-arm in `loop.ts`) rebuilds the in-memory
+ * registry, converts each orphaned `running` issue into a due-immediately continuation
+ * retry, and re-arms every pending retry from its wall-clock due time — all **before** the
+ * first tick dispatches. Without that, a `running` entry with no worker fiber would never
+ * progress and a `retry_attempts` entry with no re-armed timer would never fire. The two
+ * halves (this seed + the loop's reconcile) are a single restore flow.
  */
 export const seedState = (
   loaded: Option.Option<PersistedState>,
   config: ServiceConfig,
-): OrchestratorState => {
-  const base = initialState(config);
-  return Option.match(loaded, {
-    onNone: () => base,
+): OrchestratorState =>
+  Option.match(loaded, {
+    onNone: () => initialState(config),
     onSome: (p) =>
       OrchestratorState.make({
-        ...base,
-        // SAFE bookkeeping (gates nothing in dispatch) — restored as-is.
-        completed: p.state.completed,
-        agent_totals: p.state.agent_totals,
-        agent_rate_limits: p.state.agent_rate_limits,
-        // SCHEDULING slice (running / claimed / retry_attempts) stays empty until #41
-        // can rebuild the registry, re-arm retries from wall-clock, and convert orphans.
-        // TODO(#41): seed running/claimed/retry_attempts from p.state and reconcile+re-arm.
+        ...p.state,
+        // Reloadable knobs always come from the live config, never the (possibly stale)
+        // checkpoint — matching `initialState`'s config-sourced semantics.
+        poll_interval_ms: config.polling.interval_ms,
+        max_concurrent_agents: config.agent.max_concurrent_agents,
       }),
   });
-};
 
 /**
  * Build a durable {@link OrchestratorStore}: load → seed → wrap mutators → fork writer.
