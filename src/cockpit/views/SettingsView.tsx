@@ -1,0 +1,244 @@
+import { useEffect, useState } from "react";
+import { ApiError } from "../api/client";
+import { COCKPIT_POLL_MS, client } from "../api/instance";
+import { ConnectionBanner } from "../components/ConnectionBanner";
+import { Panel } from "../components/Panel";
+import {
+  type FieldId,
+  type SettingsFormModel,
+  toFormModel,
+  validateSettings,
+} from "../model/settings";
+import { usePolling } from "../usePolling";
+
+/**
+ * Sprint 6 / #71 — the Settings view + global Pause/Resume toggle.
+ *
+ * The form is built from `GET /api/v1/settings` (the whitelisted subset — never any secret/
+ * `tracker` key), validated client-side against the same schema (`validateSettings`, pure), and
+ * saved via `PUT /api/v1/settings`. The Pause/Resume toggle reflects the live
+ * `control.dispatch_paused`/`paused_by` from the polled snapshot and calls the control endpoints.
+ */
+
+type SaveState =
+  | { phase: "idle" }
+  | { phase: "saving" }
+  | { phase: "saved" }
+  | { phase: "error"; message: string };
+
+const messageOf = (err: unknown): string =>
+  err instanceof ApiError || err instanceof Error ? err.message : String(err);
+
+export const SettingsView = () => {
+  const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
+  const control = poll.data?.control ?? null;
+
+  const [form, setForm] = useState<SettingsFormModel | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [save, setSave] = useState<SaveState>({ phase: "idle" });
+  const [pauseBusy, setPauseBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    client
+      .getSettings()
+      .then((s) => {
+        if (alive) setForm(toFormModel(s));
+      })
+      .catch((err) => {
+        if (alive) setLoadError(messageOf(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const validation = form === null ? null : validateSettings(form);
+
+  const onSave = async () => {
+    if (form === null || validation === null || !validation.ok || validation.patch === undefined) {
+      return;
+    }
+    setSave({ phase: "saving" });
+    try {
+      const updated = await client.putSettings(validation.patch);
+      setForm(toFormModel(updated));
+      setSave({ phase: "saved" });
+    } catch (err) {
+      setSave({ phase: "error", message: messageOf(err) });
+    }
+  };
+
+  const togglePause = async () => {
+    const paused = control?.dispatch_paused ?? false;
+    setPauseBusy(true);
+    try {
+      await (paused ? client.resume() : client.pause());
+    } finally {
+      setPauseBusy(false);
+    }
+  };
+
+  const patch = (next: Partial<SettingsFormModel>) =>
+    setForm((f) => (f === null ? f : { ...f, ...next }));
+
+  return (
+    <>
+      <ConnectionBanner connection={poll.connection} error={poll.error} updatedLabel={null} />
+
+      <Panel title="Dispatch control">
+        <div className="pause-toggle">
+          <div>
+            <strong>
+              {control?.dispatch_paused
+                ? `Dispatch is paused${control.paused_by ? ` (by ${control.paused_by})` : ""}`
+                : "Dispatch is running"}
+            </strong>
+            <p className="muted">
+              Pausing withholds <em>new</em> sessions only — in-flight work keeps running.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn"
+            disabled={pauseBusy}
+            onClick={togglePause}
+            aria-pressed={control?.dispatch_paused ?? false}
+          >
+            {pauseBusy ? "…" : control?.dispatch_paused ? "Resume dispatch" : "Pause dispatch"}
+          </button>
+        </div>
+      </Panel>
+
+      <Panel
+        title="Settings"
+        actions={
+          <button
+            type="button"
+            className="btn"
+            disabled={form === null || save.phase === "saving" || validation?.ok === false}
+            onClick={onSave}
+          >
+            {save.phase === "saving" ? "Saving…" : "Save"}
+          </button>
+        }
+      >
+        {loadError !== null ? (
+          <p className="card__error" role="alert">
+            Failed to load settings: {loadError}
+          </p>
+        ) : form === null || validation === null ? (
+          <p className="view-placeholder">Loading settings…</p>
+        ) : (
+          <form
+            className="settings-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void onSave();
+            }}
+          >
+            <NumberField
+              id="intervalMs"
+              label="Poll interval (ms)"
+              value={form.intervalMs}
+              error={validation.errors.intervalMs}
+              onChange={(v) => patch({ intervalMs: v })}
+            />
+            <NumberField
+              id="maxConcurrentAgents"
+              label="Max concurrent agents"
+              value={form.maxConcurrentAgents}
+              error={validation.errors.maxConcurrentAgents}
+              onChange={(v) => patch({ maxConcurrentAgents: v })}
+            />
+            <NumberField
+              id="maxTurns"
+              label="Max turns"
+              value={form.maxTurns}
+              error={validation.errors.maxTurns}
+              onChange={(v) => patch({ maxTurns: v })}
+            />
+            <NumberField
+              id="maxRetryBackoffMs"
+              label="Max retry backoff (ms)"
+              value={form.maxRetryBackoffMs}
+              error={validation.errors.maxRetryBackoffMs}
+              onChange={(v) => patch({ maxRetryBackoffMs: v })}
+            />
+            <NumberField
+              id="maxTotalTokens"
+              label="Max total tokens (blank = no ceiling)"
+              value={form.maxTotalTokens}
+              error={validation.errors.maxTotalTokens}
+              onChange={(v) => patch({ maxTotalTokens: v })}
+              allowEmpty
+            />
+
+            {form.byState.length > 0 ? (
+              <fieldset className="settings-fieldset">
+                <legend>Per-state concurrency</legend>
+                {form.byState.map((row) => (
+                  <NumberField
+                    key={row.state}
+                    id={`byState:${row.state}` as FieldId}
+                    label={row.state}
+                    value={row.value}
+                    error={validation.errors[`byState:${row.state}`]}
+                    onChange={(v) =>
+                      patch({
+                        byState: form.byState.map((r) =>
+                          r.state === row.state ? { ...r, value: v } : r,
+                        ),
+                      })
+                    }
+                  />
+                ))}
+              </fieldset>
+            ) : null}
+
+            {save.phase === "saved" ? <p className="settings-ok">Settings saved.</p> : null}
+            {save.phase === "error" ? (
+              <p className="card__error" role="alert">
+                Save failed: {save.message}
+              </p>
+            ) : null}
+          </form>
+        )}
+      </Panel>
+    </>
+  );
+};
+
+const NumberField = ({
+  id,
+  label,
+  value,
+  error,
+  onChange,
+  allowEmpty,
+}: {
+  id: FieldId;
+  label: string;
+  value: string;
+  error: string | undefined;
+  onChange: (value: string) => void;
+  allowEmpty?: boolean;
+}) => (
+  <div className="field">
+    <label htmlFor={id}>{label}</label>
+    <input
+      id={id}
+      type="number"
+      inputMode="numeric"
+      min={allowEmpty ? undefined : 1}
+      value={value}
+      aria-invalid={error !== undefined}
+      onChange={(e) => onChange(e.target.value)}
+    />
+    {error !== undefined ? (
+      <span className="field__error" role="alert">
+        {error}
+      </span>
+    ) : null}
+  </div>
+);

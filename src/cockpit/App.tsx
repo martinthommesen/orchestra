@@ -1,25 +1,16 @@
 import { AppShell } from "./components/AppShell";
-import { Panel } from "./components/Panel";
 import type { Route } from "./router";
-import { ROUTE_LABELS } from "./router";
 import { useRoute } from "./useRoute";
 import { EventsView } from "./views/EventsView";
 import { FleetView } from "./views/FleetView";
 import { KanbanView } from "./views/KanbanView";
+import { SettingsView } from "./views/SettingsView";
 
 /**
  * Sprint 6 — the cockpit app root. Owns route state (via `useRoute`) and renders the persistent
- * app shell around the active view. Fleet (#69, default), Events (#69) and Kanban (#70) are live;
- * Settings (#71) is a placeholder until its issue lands.
+ * app shell around the active view. All four views are live: Fleet (#69, default), Events (#69),
+ * Kanban (#70) and Settings (#71).
  */
-
-const Placeholder = ({ route }: { route: Route }) => (
-  <Panel title={ROUTE_LABELS[route]}>
-    <p className="view-placeholder">
-      The {ROUTE_LABELS[route]} view lands in a later Phase-2 issue.
-    </p>
-  </Panel>
-);
 
 const viewFor = (route: Route) => {
   switch (route) {
@@ -29,8 +20,8 @@ const viewFor = (route: Route) => {
       return <EventsView />;
     case "kanban":
       return <KanbanView />;
-    default:
-      return <Placeholder route={route} />;
+    case "settings":
+      return <SettingsView />;
   }
 };
 

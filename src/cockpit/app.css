@@ -431,3 +431,74 @@
   font-size: var(--fs-xs);
   padding: var(--sp-1) var(--sp-2);
 }
+
+/* ─── Settings + pause/resume (#71) ──────────────────────────────────────────── */
+
+.pause-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.pause-toggle p {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: 480px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.field label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.field input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-mono);
+}
+
+.field input[aria-invalid="true"] {
+  border-color: var(--status-danger);
+}
+
+.field__error {
+  color: var(--status-danger);
+  font-size: var(--fs-xs);
+}
+
+.settings-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.settings-fieldset legend {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  padding: 0 var(--sp-2);
+}
+
+.settings-ok {
+  color: var(--status-success);
+  font-size: var(--fs-sm);
+  margin: 0;
+}

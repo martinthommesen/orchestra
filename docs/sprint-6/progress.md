@@ -15,7 +15,7 @@ Branch: `feature/sprint-6` (off `main`, all Sprint 5 work merged).
 | #68 | Cockpit design system + app shell (web parity of `glyphs.ts`/`design-system.md`) | Milo | S–M · Low | ✅ done |
 | #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ✅ done |
 | #70 | Kanban board view with actionable cards (Cancel / Retry-now) | Nova | M · Med | ✅ done |
-| #71 | Settings view + global pause/resume control | Nova (art: Milo) | M · Med | ☐ todo |
+| #71 | Settings view + global pause/resume control | Nova (art: Milo) | M · Med | ✅ done |
 | #72 | Remove Ink dashboard + deps; tests + docs + handoff close-out | Nova (docs: Remy) | M · Low | ☐ todo |
 
 Dependencies: `#64 → #65 → #66` · `#65 → #67 → #68 → {#69, #70, #71}` · `#64 → #70` ·
@@ -51,7 +51,7 @@ typecheck + lint + 336 tests).
 - [x] #69 — Fleet/Session overview view (non-overlapping poll, last-good-on-error)
 - [x] #69 — Events feed view (newest-first, filterable)
 - [x] #70 — Kanban columns (pure derivation) + Cancel/Retry-now buttons
-- [ ] #71 — Settings form (whitelist, client validation, no secrets) + Pause/Resume toggle
+- [x] #71 — Settings form (whitelist, client validation, no secrets) + Pause/Resume toggle
 
 ### Phase 3 — Close-out
 - [ ] #72 — delete `src/cli/dashboard/` + `dashboard.tsx` + `dashboard` subcommand
@@ -294,3 +294,26 @@ Decisions:
 Gates: typecheck (both configs) + lint clean, **410 tests** (+7 kanban), `pnpm build` emits the
 SPA. (Note: the control-banner's left-accent border was removed per the design hook — the
 "side-tab accent" AI tell — in favor of a uniform border.)
+### #71 — Settings view + global pause/resume (Nova, art Milo, dep #66)
+Files (new): `src/cockpit/model/settings.ts`, `src/cockpit/views/SettingsView.tsx`,
+`test/cockpit-settings.test.ts`. Modified: `src/cockpit/App.tsx` (route Settings → view; the last
+placeholder is gone — all four views are live), `src/cockpit/app.css`.
+
+Decisions:
+- **Client-side validation mirrors the daemon whitelist schema, purely.** `validateSettings`
+  enforces the same rules as `workflow-file.ts` (every numeric knob a `PositiveInt` — integer > 0;
+  `budget.max_total_tokens` blank → null clears the ceiling) and only builds the
+  `SettingsPatchWire` when the whole form is valid. `toFormModel`/`validateSettings` are pure and
+  unit-tested; the React form is a thin controlled-input layer. Per the confirmed answer, a failed
+  PUT just surfaces the daemon's typed 400 message — no richer error envelope.
+- **Secret-safe by construction.** The form is built ONLY from `EditableSettingsWire` (the
+  whitelisted subset — no `tracker`/secret) and emits ONLY a `SettingsPatchWire` over the same
+  whitelist. Tests assert neither the form model nor the built patch ever contains a
+  `tracker`/`api_key`/`secret` key; the patch's top-level keys are exactly `agent|budget|polling`.
+  (The only `tracker` substring in the built bundle is React DOM's internal `_valueTracker`.)
+- **Prominent Pause/Resume toggle on the control endpoints.** Reflects the live
+  `control.dispatch_paused`/`paused_by` from the polled snapshot and calls
+  `POST /control/pause|resume`; the next poll shows the truth. Copy states plainly that pausing
+  withholds *new* sessions only — in-flight work keeps running.
+Gates: typecheck (both configs) + lint clean, **423 tests** (+13 settings), `pnpm build` emits the
+SPA (`dist/cockpit/index.html` + assets).
