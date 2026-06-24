@@ -79,6 +79,19 @@ export interface SnapshotCounts {
   readonly claimed: number;
 }
 
+/**
+ * Budget guardrail status (#53). Present ONLY when the daemon has a ceiling configured —
+ * absent on older daemons and when no budget is set, so the dashboard simply omits the
+ * panel. `remaining_tokens` is `max(limit - spent, 0)`; `paused` reflects whether NEW
+ * dispatch is currently withheld.
+ */
+export interface SnapshotBudget {
+  readonly limit_tokens: number;
+  readonly spent_tokens: number;
+  readonly remaining_tokens: number;
+  readonly paused: boolean;
+}
+
 /** The parsed, view-ready snapshot. */
 export interface Snapshot {
   readonly poll_interval_ms: number;
@@ -95,6 +108,8 @@ export interface Snapshot {
   readonly totals: SnapshotTotals;
   /** Vendor passthrough — rendered defensively; never assume a schema. */
   readonly rate_limits: unknown;
+  /** Budget guardrail status (#53); absent on older daemons / when no ceiling is set. */
+  readonly budget?: SnapshotBudget;
 }
 
 /** The injectable fetcher signature (real impl + test fakes share this type). */
@@ -318,9 +333,28 @@ const parseTotals = (raw: unknown): SnapshotTotals => {
   };
 };
 
+/** Parse the additive budget block (#53). Absent → undefined (older daemon / no ceiling). */
+const parseBudget = (raw: unknown): SnapshotBudget | undefined => {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  const obj = asRecord(raw, "budget");
+  const paused = obj.paused;
+  if (typeof paused !== "boolean") {
+    throw new SnapshotParseError(`expected boolean at "budget.paused"`);
+  }
+  return {
+    limit_tokens: reqInt(obj, "limit_tokens"),
+    spent_tokens: reqInt(obj, "spent_tokens"),
+    remaining_tokens: reqInt(obj, "remaining_tokens"),
+    paused,
+  };
+};
+
 /** Validate an unknown JSON body into a typed {@link Snapshot} (throws on mismatch). */
 export const parseSnapshot = (raw: unknown): Snapshot => {
   const obj = asRecord(raw, "<root>");
+  const budget = parseBudget(obj.budget);
   return {
     poll_interval_ms: reqInt(obj, "poll_interval_ms"),
     max_concurrent_agents: reqInt(obj, "max_concurrent_agents"),
@@ -333,6 +367,8 @@ export const parseSnapshot = (raw: unknown): Snapshot => {
     totals: parseTotals(obj.totals),
     // Keep rate_limits opaque: null when absent, otherwise the raw vendor value.
     rate_limits: obj.rate_limits ?? null,
+    // Additive: only attach the budget block when the daemon sent one (#53).
+    ...(budget === undefined ? {} : { budget }),
   };
 };
 

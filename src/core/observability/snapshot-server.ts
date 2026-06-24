@@ -3,6 +3,8 @@ import { HttpRouter, HttpServer, HttpServerResponse } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, type Scope } from "effect";
 import type { OrchestratorState } from "../domain/orchestrator-state";
+import type { BudgetConfig } from "../domain/workflow";
+import { type BudgetStatus, evaluateBudget } from "../orchestrator/budget";
 import { OrchestratorStore } from "../orchestrator/state";
 import { type ActivityEntry, LiveActivity } from "./live-activity";
 import { type RecentCompletion, RecentCompletions } from "./recent-completions";
@@ -29,7 +31,24 @@ export interface SnapshotExtras {
   readonly recentEvents?: ReadonlyArray<EventEnvelope>;
   readonly recentCompleted?: ReadonlyArray<RecentCompletion>;
   readonly activity?: ReadonlyMap<string, ActivityEntry>;
+  /**
+   * Budget guardrail status (#53). Strictly additive: the projected `budget` block is
+   * emitted ONLY when a ceiling is configured (`configured: true`), so an unconfigured
+   * daemon — and every older dashboard — sees no `budget` field at all.
+   */
+  readonly budget?: BudgetStatus;
 }
+
+/** Project the budget status onto the additive wire block, or null to omit it. */
+const budgetProjection = (budget: BudgetStatus | undefined) =>
+  budget?.configured
+    ? {
+        limit_tokens: budget.limitTokens,
+        spent_tokens: budget.spentTokens,
+        remaining_tokens: budget.remainingTokens,
+        paused: budget.paused,
+      }
+    : null;
 
 /** JSON-friendly projection of the authoritative state (Dates → ISO via JSON). */
 export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => {
@@ -39,6 +58,7 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
     return act === undefined ? ra : { ...ra, last_activity: act };
   });
   const retrying = Object.values(s.retry_attempts);
+  const budget = budgetProjection(extra.budget);
   return {
     poll_interval_ms: s.poll_interval_ms,
     max_concurrent_agents: s.max_concurrent_agents,
@@ -59,41 +79,56 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
     recent_events: extra.recentEvents ?? [],
     totals: s.agent_totals,
     rate_limits: s.agent_rate_limits,
+    // Budget guardrail status (#53), additive — only present when a ceiling is configured.
+    ...(budget === null ? {} : { budget }),
   };
 };
 
-const router = HttpRouter.empty.pipe(
-  HttpRouter.get(
-    "/api/v1/state",
-    Effect.gen(function* () {
-      const store = yield* OrchestratorStore;
-      const events = yield* RecentEvents;
-      const completions = yield* RecentCompletions;
-      const activity = yield* LiveActivity;
-      const state = yield* store.get;
-      const recentEvents = yield* events.list;
-      const recentCompleted = yield* completions.list;
-      const activityMap = yield* activity.snapshot;
-      return yield* HttpServerResponse.json(
-        toSnapshot(state, { recentEvents, recentCompleted, activity: activityMap }),
-      ).pipe(Effect.orDie);
-    }),
-  ),
-);
+/**
+ * Build the snapshot router. The `budget` config (#53) is closed over so the read handler
+ * can project a display-only budget status from the live totals without ever mutating
+ * state. Budget evaluation is pure (`evaluateBudget`); the gate that actually withholds
+ * dispatch lives in the loop, not here.
+ */
+const makeRouter = (budgetConfig: BudgetConfig) =>
+  HttpRouter.empty.pipe(
+    HttpRouter.get(
+      "/api/v1/state",
+      Effect.gen(function* () {
+        const store = yield* OrchestratorStore;
+        const events = yield* RecentEvents;
+        const completions = yield* RecentCompletions;
+        const activity = yield* LiveActivity;
+        const state = yield* store.get;
+        const recentEvents = yield* events.list;
+        const recentCompleted = yield* completions.list;
+        const activityMap = yield* activity.snapshot;
+        return yield* HttpServerResponse.json(
+          toSnapshot(state, {
+            recentEvents,
+            recentCompleted,
+            activity: activityMap,
+            budget: evaluateBudget(budgetConfig, state.agent_totals),
+          }),
+        ).pipe(Effect.orDie);
+      }),
+    ),
+  );
 
 /**
  * Run the snapshot server on `127.0.0.1:<port>` until interrupted. Fork this into the
  * orchestrator scope alongside the loop; reads the authoritative store plus the
- * observability rings from context.
+ * observability rings from context. `budgetConfig` (#53) drives the additive budget block.
  */
 export const runSnapshotServer = (
   port: number,
+  budgetConfig: BudgetConfig,
 ): Effect.Effect<
   void,
   never,
   Scope.Scope | OrchestratorStore | RecentEvents | RecentCompletions | LiveActivity
 > =>
-  HttpServer.serveEffect(router).pipe(
+  HttpServer.serveEffect(makeRouter(budgetConfig)).pipe(
     // `serveEffect` installs the server and returns; the listener lives for as long as
     // the provided layer's scope stays open, so we idle (`Effect.never`) to keep it bound
     // for the lifetime of the orchestrator (interrupting the fiber tears it down cleanly).

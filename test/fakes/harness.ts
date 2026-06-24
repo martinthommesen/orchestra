@@ -32,6 +32,8 @@ export interface DefOptions {
   readonly stallTimeoutMs?: number;
   readonly root?: string;
   readonly template?: string;
+  /** #53 budget guardrail: token ceiling. Omit → no budget block (guard inert). */
+  readonly budgetMaxTotalTokens?: number;
 }
 
 /** Build a complete {@link WorkflowDefinition} from a few knobs (defaults fill the rest). */
@@ -54,6 +56,9 @@ export const buildDef = (opts: DefOptions = {}): WorkflowDefinition => {
     },
     copilot: { stall_timeout_ms: opts.stallTimeoutMs ?? 300_000 },
     workspace: { root: opts.root ?? TEST_ROOT },
+    ...(opts.budgetMaxTotalTokens === undefined
+      ? {}
+      : { budget: { max_total_tokens: opts.budgetMaxTotalTokens } }),
   });
   return { config, prompt_template: opts.template ?? "Work on {{ issue.identifier }}." };
 };

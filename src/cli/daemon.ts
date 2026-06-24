@@ -82,7 +82,7 @@ export const runDaemon = (argv: ReadonlyArray<string>): void => {
     const run = Effect.scoped(
       Effect.gen(function* () {
         if (port !== null) {
-          yield* Effect.forkScoped(runSnapshotServer(port));
+          yield* Effect.forkScoped(runSnapshotServer(port, def.config.budget));
         }
         yield* runOrchestrator(def);
       }),

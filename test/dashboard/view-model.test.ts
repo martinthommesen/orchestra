@@ -445,3 +445,39 @@ describe("relative-time column width contract (#45)", () => {
     expect(EVENTS_RELATIVE_TIME_COLUMN_WIDTH).toBe(RELATIVE_LABEL_MAX_WIDTH + 1);
   });
 });
+
+describe("toViewModel — budget panel (#53)", () => {
+  it("absent budget block → no panel", () => {
+    const vm = toViewModel(makeSnapshot(), NOW, opts());
+    expect(vm.budget).toBeNull();
+  });
+
+  it("active budget → running glyph, 'active', summary with remaining", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        budget: { limit_tokens: 1000, spent_tokens: 250, remaining_tokens: 750, paused: false },
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.budget?.paused).toBe(false);
+    expect(vm.budget?.stateLabel).toBe("active");
+    expect(vm.budget?.glyph).toBe(statusStyle("running").glyph);
+    expect(vm.budget?.summary).toBe("250 / 1000 tokens · 750 left");
+  });
+
+  it("paused budget → blocked glyph, warn tone, 'paused'", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        budget: { limit_tokens: 1000, spent_tokens: 1200, remaining_tokens: 0, paused: true },
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.budget?.paused).toBe(true);
+    expect(vm.budget?.stateLabel).toBe("paused");
+    expect(vm.budget?.glyph).toBe(statusStyle("blocked").glyph);
+    expect(vm.budget?.color).toBe("warn");
+    expect(vm.budget?.summary).toBe("1200 / 1000 tokens · 0 left");
+  });
+});

@@ -75,7 +75,20 @@ export type Observation =
     }
   | { readonly _tag: "RetryFired"; readonly issueId: string; readonly identifier: string }
   | { readonly _tag: "PreflightFailed"; readonly reason: string }
-  | { readonly _tag: "TrackerError"; readonly op: string; readonly message: string };
+  | { readonly _tag: "TrackerError"; readonly op: string; readonly message: string }
+  | {
+      /**
+       * Budget guardrail transition (Sprint 5 / #53). Emitted **once per transition**
+       * (entering paused, then resuming) — never every tick — when cumulative spend
+       * crosses the configured token ceiling. `paused: true` = NEW dispatch is now
+       * withheld; `paused: false` = the ceiling was cleared/raised and dispatch resumes.
+       * In-flight workers, retries, and reconciliation are unaffected either way.
+       */
+      readonly _tag: "BudgetExceeded";
+      readonly paused: boolean;
+      readonly limitTokens: number;
+      readonly spentTokens: number;
+    };
 
 export class Observer extends Context.Tag("orchestra/Observer")<
   Observer,

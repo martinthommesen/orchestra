@@ -166,6 +166,26 @@ export const formatObservation = (obs: Observation): LogLine => {
         message: `tracker error (${obs.op}): ${truncate(obs.message)}`,
         annotations: ev("tracker_error", { op: obs.op, message: truncate(obs.message) }),
       };
+    case "BudgetExceeded":
+      return obs.paused
+        ? {
+            level: "warn",
+            message: `${glyph("blocked")} budget reached: dispatch paused (${obs.spentTokens}/${obs.limitTokens} tokens)`,
+            annotations: ev("budget_paused", {
+              paused: "true",
+              spent_tokens: String(obs.spentTokens),
+              limit_tokens: String(obs.limitTokens),
+            }),
+          }
+        : {
+            level: "info",
+            message: `budget cleared: dispatch resumed (${obs.spentTokens}/${obs.limitTokens} tokens)`,
+            annotations: ev("budget_resumed", {
+              paused: "false",
+              spent_tokens: String(obs.spentTokens),
+              limit_tokens: String(obs.limitTokens),
+            }),
+          };
   }
 };
 

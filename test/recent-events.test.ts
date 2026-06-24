@@ -63,6 +63,7 @@ const sample: Record<Observation["_tag"], Observation> = {
   RetryFired: { _tag: "RetryFired", issueId: "42", identifier: "#42" },
   PreflightFailed: { _tag: "PreflightFailed", reason: "missing token" },
   TrackerError: { _tag: "TrackerError", op: "fetchCandidates", message: "429" },
+  BudgetExceeded: { _tag: "BudgetExceeded", paused: true, limitTokens: 1000, spentTokens: 1200 },
 };
 
 /** The cadence/chatter observations the feed deliberately drops. */
