@@ -7,12 +7,23 @@ Branch: `feature/sprint-3` (from `main` @ 5f31f76). Identity: martin-lammetun.th
 |---|-------|------|--------|
 | 36 | A | RecentEvents ring-buffer service + tee Observer | ✅ done (2274da4) |
 | 37 | A | Snapshot enrichment (additive fields) | ✅ done |
-| 38 | A | Dashboard event-log + activity + rich completed | ✅ done |
-| 39 | B | **BLOCKING** durability design spike | pending |
-| 40 | B | Persistence layer (versioned, atomic, debounced) | pending |
-| 41 | B | Restore + reconcile on boot + retry re-arm | pending |
-| 42 | B | Session continuity (persist session_id / resume) | pending |
-| 43 | C | Tests + docs + handoff | pending |
+| 38 | A | Dashboard event-log + activity + rich completed | ✅ done (+ #45 QA fix) |
+| 39 | B | **BLOCKING** durability design spike | ✅ done |
+| 40 | B | Persistence layer (versioned, atomic, debounced) | ⏭ rolled to Sprint 4 |
+| 41 | B | Restore + reconcile on boot + retry re-arm | ⏭ rolled to Sprint 4 |
+| 42 | B | Session continuity (persist session_id / resume) | ⏭ rolled to Sprint 4 |
+| 43 | C | Tests + docs + handoff | ⏭ rolled to Sprint 4 |
+
+## Sprint close
+- **Decision at the #39 gate (Producer + user):** ship **Phase A (Observability v2) + the
+  #39 spike** as Sprint 3; **roll the Phase B durability build (#40–#43) to Sprint 4** —
+  ~5–7 days of high-risk core surgery (centre of gravity: #41 orphan reconcile) that must
+  not be rushed at sprint-end. See `docs/sprint-4/plan.md`.
+- **Phase A merged to `main`** via PR #44 (CI green on Node 22+24 + CodeQL + Socket).
+- **QA sign-off (Ivy):** SHIP-WITH-FOLLOW-UPS, no blockers (`docs/qa/sprint-3-signoff.md`);
+  filed **#45** (minor EVENTS column wrap) → **fixed before close** (`eff891a`).
+- **Closed:** #36, #37, #38, #39, #45. **Final gates:** typecheck/lint/build 0 · **266 tests**.
+- Handoff: `docs/sprint-3/done.md`.
 
 ## Sequencing
 - Phase A (#36→#37→#38) runs first — additive, low risk.
@@ -109,3 +120,52 @@ Branch: `feature/sprint-3` (from `main` @ 5f31f76). Identity: martin-lammetun.th
 - **Decision:** rich completed panel titled `RECENTLY FINISHED` to stay visually distinct
   from the authoritative IDs-only `COMPLETED (n)` summary, which is unchanged.
 - Gates: typecheck/lint/build 0; tests **263 (+17)**. Full suite green.
+- **Follow-up #45 (QA layout fix, done):** EVENTS relative-time column rendered in a fixed
+  `<Box width={9}>`, but `formatRelative` emits up to `"59m 59s ago"` / `"99h 59m ago"` (11
+  chars), so events ≥60s old wrapped `ago` onto a second line. Root-caused two things: the
+  worst-case label is 11, *and* `formatDuration`'s hour tier was unbounded (`"1000h 00m"` …)
+  so the column contract was a fiction. Fix: clamped `formatDuration` to a `99h 59m 59s`
+  ceiling (bounds every width-constrained label, incl. running `elapsed`), and replaced the
+  magic `9` with an exported `EVENTS_RELATIVE_TIME_COLUMN_WIDTH = RELATIVE_LABEL_MAX_WIDTH(11)
+  + 1` = 12 (matches QA's Expected block exactly; 1-char gutter, never wraps). Layout-only,
+  additive, honours `--ascii`/`NO_COLOR`. Tests +3 (formatDuration clamp ceiling; view-model
+  width-invariant sweep across all tiers; render no-wrap regression) → **266**.
+
+### #39 — durability design spike (done) — DESIGN ONLY, no src/test touched
+- Deliverable: `docs/sprint-3/durability-spike.md` (current-state analysis w/ file:line cites,
+ proposed design for #40–#42, per-issue risk/effort sizing). No `src/**` or `test/**` changed.
+- **Key decisions:**
+ - **Observability rings → OUT.** `RecentEvents`(200)/`RecentCompletions`(50)/`LiveActivity`(256)
+   are NOT persisted (boundary integrity per constraint #2; `LiveActivity` mutates on every
+   `AgentEvent` so it would thrash the debounced writer; post-restart history is cosmetic since
+   the authoritative `completed`/counts ARE restored). On boot they start empty; emit one
+   synthetic `RecentEvents` "restored after restart" entry so the gap is honest.
+ - **Persist = core `OrchestratorState` + minimal continuity** (`session_id`, `turn`,
+   `failure_attempts`, retry `kind`) promoted **additively** onto `RunAttempt`/`RetryEntry`
+   (Option A) so the store stays the single source of truth and persistence is a transparent
+   `update`/`modify` decorator — keeps loop surgery minimal and the snapshot contract additive
+   (no `/api/v2`).
+ - **Versioned `Schema.parseJson(PersistedStateV1)`** (version+saved_at+state); `Schema.encode`
+   for ISO Date round-trip; forward-only `migrateVNtoVN+1`; corruption/decode-fail → rename to
+   `state.json.corrupt-<ts>` + clean start (`initialState`), **never crash** (constraint #5).
+ - **Write strategy:** atomic temp+rename (same-dir → same-fs), single scoped debounced writer
+   fiber (default 500ms) signalled from the store mutator chokepoint, **guaranteed final flush**
+   via scope finalizer. File at `<workspace.root>/.orchestra/state.json`; optional
+   `persistence:{dir?,debounce_ms?}` config.
+ - **Orphaned-running reconcile policy (headline):** re-dispatch as a **continuation**, reusing
+   the persisted **workspace-on-disk** (the true record of progress) — mechanically reduced to
+   "convert orphan `running` → a **due-immediately continuation retry**", so it rides the
+   already-tested retry-rearm + reconcile + continuation-dispatch machinery (reconcile gates
+   terminal/vanished → no double-dispatch). Session **resume is optional/self-healing**, default
+   OFF (fresh), behind `persistence.resume_sessions`.
+ - **Retry re-arm = WALL-CLOCK only:** `fireInstant = scheduled_at + delay_ms`,
+   `remaining = fireInstant - now`; ≤0 fire now, else `sleep(remaining)`. **Never** the
+   monotonic `due_at_ms` (origin resets per process). The recurring trap, made central.
+- **Sizing:** #40 M/Low–Med · **#41 H/High (the risky core surgery — orphan reconcile + re-arm +
+ boot-ordering idempotency)** · #42 S–M/Med (Low if resume default-off; runner already supports
+ `resume`) · #43 M/Low. Total ~5–7d.
+- **Recommendation:** **roll Phase-B build (#40–#42) to Sprint 4**; close Sprint 3 as Phase A +
+ this spike. If durability is wanted this sprint, the safe slice = **#40 + minimal restore**
+ (bookkeeping + wall-clock retry re-arm) with orphans handled by **release-and-requeue** (today's
+ behavior, zero new risk), deferring orphan→continuation resume (#41) + session resume (#42).
+ **Phase-B in/out is a Producer + user call at this gate — STOP.**

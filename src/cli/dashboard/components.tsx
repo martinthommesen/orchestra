@@ -10,6 +10,7 @@ import type {
   StatusBadgeVM,
   TotalsVM,
 } from "./view-model";
+import { EVENTS_RELATIVE_TIME_COLUMN_WIDTH } from "./view-model";
 
 /**
  * Presentational Ink components for the dashboard (#32). They are deliberately dumb:
@@ -166,7 +167,7 @@ function EventRow({ row, ascii, color }: { readonly row: EventRowVM } & Themed) 
           {ascii ? row.ascii : row.glyph}
         </Tinted>
       </Box>
-      <Box width={9}>
+      <Box width={EVENTS_RELATIVE_TIME_COLUMN_WIDTH}>
         <Dim color={color}>{row.relativeLabel}</Dim>
       </Box>
       <Box flexGrow={1}>

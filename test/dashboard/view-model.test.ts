@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  EVENTS_RELATIVE_TIME_COLUMN_WIDTH,
   formatDuration,
   RECENT_COMPLETED,
+  RELATIVE_LABEL_MAX_WIDTH,
   toViewModel,
   type ViewModelOptions,
 } from "../../src/cli/dashboard/view-model";
@@ -396,5 +398,50 @@ describe("formatDuration", () => {
     expect(formatDuration(3_600_000 + 3 * 60_000 + 9_000)).toBe("1h 03m");
     expect(formatDuration(-5)).toBe("0s");
     expect(formatDuration(Number.NaN)).toBe("0s");
+  });
+
+  it("clamps the hour tier to a bounded ceiling so no column can overflow (#45)", () => {
+    // The hour tier is otherwise unbounded ("1000h 00m" …). Anything past the ceiling
+    // saturates to "99h 59m" — 7 chars — instead of widening without limit.
+    expect(formatDuration((99 * 3600 + 59 * 60 + 59) * 1_000)).toBe("99h 59m");
+    expect(formatDuration(1_000 * 3_600 * 1_000)).toBe("99h 59m");
+    expect(formatDuration(Number.POSITIVE_INFINITY)).toBe("0s");
+  });
+});
+
+describe("relative-time column width contract (#45)", () => {
+  // The EVENTS box is a fixed Ink width; a label one char wider wraps "ago" onto its own
+  // line. Sweep every tier (incl. the clamped worst case) and a NOW that yields "Xm YYs".
+  it("never emits a relative label wider than the column, across the full range", () => {
+    const ages = [
+      3_000, // "3s ago"
+      45_000, // "45s ago"
+      64_000, // "1m 04s ago"
+      (59 * 60 + 59) * 1_000, // "59m 59s ago" — 11, the bounded worst case
+      (99 * 3600 + 59 * 60 + 59) * 1_000, // "99h 59m ago" — 11, clamp ceiling
+      1_000 * 3_600 * 1_000, // absurd: still clamped, still fits
+    ];
+    let widest = 0;
+    for (const ageMs of ages) {
+      const emittedAt = new Date(NOW - ageMs).toISOString();
+      const vm = toViewModel(
+        makeSnapshot({ recent_events: [makeEvent({ emitted_at: emittedAt })] }),
+        NOW,
+        opts(),
+      );
+      const label = vm.events[0]?.relativeLabel ?? "";
+      expect(label.length).toBeLessThan(EVENTS_RELATIVE_TIME_COLUMN_WIDTH);
+      widest = Math.max(widest, label.length);
+    }
+    // The unparseable sentinel must also fit.
+    const sentinel = toViewModel(
+      makeSnapshot({ recent_events: [makeEvent({ emitted_at: "not-a-date" })] }),
+      NOW,
+      opts(),
+    ).events[0]?.relativeLabel;
+    expect(sentinel).toBe("—");
+    // The declared max is real (a true worst case exists) and the gutter is exactly 1.
+    expect(widest).toBe(RELATIVE_LABEL_MAX_WIDTH);
+    expect(EVENTS_RELATIVE_TIME_COLUMN_WIDTH).toBe(RELATIVE_LABEL_MAX_WIDTH + 1);
   });
 });
