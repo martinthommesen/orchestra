@@ -7,12 +7,23 @@ Branch: `feature/sprint-3` (from `main` @ 5f31f76). Identity: martin-lammetun.th
 |---|-------|------|--------|
 | 36 | A | RecentEvents ring-buffer service + tee Observer | ✅ done (2274da4) |
 | 37 | A | Snapshot enrichment (additive fields) | ✅ done |
-| 38 | A | Dashboard event-log + activity + rich completed | ✅ done |
+| 38 | A | Dashboard event-log + activity + rich completed | ✅ done (+ #45 QA fix) |
 | 39 | B | **BLOCKING** durability design spike | ✅ done |
-| 40 | B | Persistence layer (versioned, atomic, debounced) | pending |
-| 41 | B | Restore + reconcile on boot + retry re-arm | pending |
-| 42 | B | Session continuity (persist session_id / resume) | pending |
-| 43 | C | Tests + docs + handoff | pending |
+| 40 | B | Persistence layer (versioned, atomic, debounced) | ⏭ rolled to Sprint 4 |
+| 41 | B | Restore + reconcile on boot + retry re-arm | ⏭ rolled to Sprint 4 |
+| 42 | B | Session continuity (persist session_id / resume) | ⏭ rolled to Sprint 4 |
+| 43 | C | Tests + docs + handoff | ⏭ rolled to Sprint 4 |
+
+## Sprint close
+- **Decision at the #39 gate (Producer + user):** ship **Phase A (Observability v2) + the
+  #39 spike** as Sprint 3; **roll the Phase B durability build (#40–#43) to Sprint 4** —
+  ~5–7 days of high-risk core surgery (centre of gravity: #41 orphan reconcile) that must
+  not be rushed at sprint-end. See `docs/sprint-4/plan.md`.
+- **Phase A merged to `main`** via PR #44 (CI green on Node 22+24 + CodeQL + Socket).
+- **QA sign-off (Ivy):** SHIP-WITH-FOLLOW-UPS, no blockers (`docs/qa/sprint-3-signoff.md`);
+  filed **#45** (minor EVENTS column wrap) → **fixed before close** (`eff891a`).
+- **Closed:** #36, #37, #38, #39, #45. **Final gates:** typecheck/lint/build 0 · **266 tests**.
+- Handoff: `docs/sprint-3/done.md`.
 
 ## Sequencing
 - Phase A (#36→#37→#38) runs first — additive, low risk.

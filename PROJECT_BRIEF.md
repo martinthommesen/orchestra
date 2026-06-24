@@ -144,10 +144,11 @@ necessarily `Done`.
 | 0 | Architecture & Foundations | ✅ Done | pnpm monorepo scaffold, Effect setup, domain `Schema` types, ports, WORKFLOW.md loader, tagged errors, CI, **Copilot integration spike** |
 | 1 | Core Orchestrator Loop | ✅ Done | Poll/dispatch/concurrency/retry/reconcile state machine, GitHub Issues adapter, Copilot subprocess runner, workspace manager, fakes + property/e2e tests, observability (logs + `--port` snapshot). Hardened in a post-merge QA pass (`fix/sprint-1-qa`, issues #17–#22). |
 | 2 | Live Ink Dashboard | ✅ Done | Standalone `orchestra dashboard` (Ink/React 19) polling the loopback snapshot API: thin CLI dispatcher, defensive snapshot client + non-overlapping poller, pure view-model + honest Ink rendering (reuses the glyph design system), `connecting/live/stale` resilience, `--ascii`/`NO_COLOR`. Apache-2.0 license added. Core orchestrator untouched. |
+| 3 | Observability v2 + Durability Spike | ✅ Done | Strictly-additive snapshot enrichment + new dashboard panels: live **event feed**, per-session **activity**, rich **completed/retry** (`recent_events`, `recent_completed`, `running[].last_activity`, retry wall-clock `scheduled_at`+`delay_ms`). New `RecentEvents`/`LiveActivity`/`RecentCompletions` services via a tee observer; exactly two sanctioned `loop.ts` edits. Plus the **#39 durability design spike** (`docs/sprint-3/durability-spike.md`). **Phase B durability build (#40–#43) rolled to Sprint 4** at the #39 gate. QA: SHIP-WITH-FOLLOW-UPS (#45 fixed). |
 
 ## 8. Current State (rewrite every sprint)
 
-**What works (Sprint 2 complete — live dashboard on top of the Sprint 1 loop):**
+**What works (Sprint 3 complete — Observability v2 on the Sprint 1 loop + Sprint 2 dashboard):**
 - Everything from Sprint 0 (monorepo, Effect, strict `tsconfig` + **Biome**, domain `Schema`,
   ports, tagged errors, WORKFLOW.md loader, glyph design system, CI on Node 22+24).
 - **Single state-owning orchestrator fiber** (`src/core/orchestrator/`): startup terminal
@@ -182,35 +183,51 @@ necessarily `Done`.
   `GET /api/v1/state` via an injectable `fetchSnapshot` (`AbortSignal.timeout`); polls never
   overlap, a failed poll keeps the last good snapshot and flips `live → stale` (never blanks),
   and `connecting` holds until the first success. A pure `toViewModel` then Ink `<Box>`
-  components render honestly — running with client-calculated elapsed/status/workspace/attempt,
-  retrying with **no countdown** (`due_at_ms` is monotonic), completed as recent **IDs only**,
-  totals, and **defensive** rate-limits. Reuses the `glyphs.ts` design system; honors `--ascii`,
-  `NO_COLOR`, and non-TTY. `q`/Ctrl-C unmount Ink, abort the in-flight fetch, and clear timers.
+  components render honestly — running with client-calculated elapsed/status/workspace/attempt
+  **plus a last-activity line** (`↳ <event_tag> · <rel> ago`, omitted when absent), retrying with
+  **no countdown** but an honest wall-clock `due HH:MM:SSZ` derived from `scheduled_at`+`delay_ms`
+  (the monotonic `due_at_ms` never surfaces), a live **EVENTS** feed (newest-first, glyph+colour
+  by level/kind), a rich **RECENTLY FINISHED** list (identifier + relative finished-at + outcome)
+  distinct from the authoritative IDs-only **COMPLETED (n)**, totals, and **defensive** rate-limits.
+  Every new panel is additive — absent fields → panel omitted, so an older daemon renders exactly
+  like Sprint 2. Reuses the `glyphs.ts` design system; honors `--ascii`, `NO_COLOR`, and non-TTY.
+  `q`/Ctrl-C unmount Ink, abort the in-flight fetch, and clear timers.
   No Effect runtime is bridged into Ink; the orchestrator core is untouched.
 - **Observability** (`src/core/observability/`): one structured logfmt line per event with
-  `issue_id`/`issue_identifier`/`session_id` context + status glyphs; optional loopback-only
-  `GET /api/v1/state` JSON snapshot (running/retrying/completed/totals/rate_limits) behind
-  `--port`.
+  `issue_id`/`issue_identifier`/`session_id` context + status glyphs. **Observability v2** adds a
+  bounded **`RecentEvents`** ring (cap 200, display-safe, monotonic `seq`), **`LiveActivity`**
+  (per-issue last agent activity, cap 256), and **`RecentCompletions`** (rich finished ring, cap
+  50) — all fed by a **tee observer** that preserves the logfmt output byte-for-byte AND appends
+  to the rings (high-volume `AgentEvent` + loop-cadence ticks are dropped from the feed). The
+  loopback-only `GET /api/v1/state` snapshot (behind `--port`) is **strictly additive**: existing
+  fields byte-compatible (`completed` IDs-only, monotonic `due_at_ms` unchanged) plus
+  `recent_events`, `recent_completed`, `running[].last_activity`, and retry `scheduled_at`+`delay_ms`.
 - **License:** Apache-2.0 (`LICENSE` + `NOTICE`; `package.json` `"license": "Apache-2.0"`).
-- **Tests:** **224 passing** across 20 files (vitest + @effect/vitest + fast-check + Ink) — pure
+- **Tests:** **266 passing** across 23 files (vitest + @effect/vitest + fast-check + Ink) — pure
   unit + property (no-double-dispatch, concurrency caps incl. retry-backoff, backoff
   monotonic/capped), full-loop fake scenarios under `TestClock`, adapter integration tests,
-  a combined fake e2e, plus the dashboard view-model/poller (fake-timer)/light-render suites.
-  `pnpm typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green; a live PTY
-  smoke confirms the dashboard renders, polls without overlap, goes stale-with-data on
+  a combined fake e2e, the `RecentEvents` ring + snapshot-enrichment suites, plus the dashboard
+  view-model/poller (fake-timer)/render suites (incl. backward-safety + relative-time width
+  invariants). `pnpm typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green;
+  a live PTY smoke confirms the dashboard renders, polls without overlap, goes stale-with-data on
   disconnect, and exits cleanly.
 
-**What doesn't work yet (Sprint 3+):**
+**What doesn't work yet (Sprint 4+):**
+- **No durability yet** — a daemon restart loses in-flight running/retry state and session
+  continuity. The full design is done (`docs/sprint-3/durability-spike.md`); the build (#40–#43)
+  is **Sprint 4** (versioned atomic persistence, restore + reconcile + wall-clock retry re-arm,
+  orphan→continuation resume, optional session resume).
 - No live PR creation / branch push flow, no GitHub status write-back beyond reading issues.
 - WORKFLOW.md hot-reload (watcher) still deferred.
-- Snapshot API + dashboard are read-only; no control plane, auth, metrics export, or event
-  history/feed (the dashboard renders operational *state*, not a log stream).
+- Snapshot API + dashboard are read-only; no control plane, auth, or metrics export. The event
+  feed is a **bounded recent ring**, not a long-term forensic timeline / raw-stdout log tail.
 - Not yet exercised against a real GitHub repo + live Copilot in CI (adapters are unit-tested;
   the loop is proven against fakes). Manual real-repo validation is the operator's step.
 
 **What's next:**
-- Producer to open the PR for `feature/sprint-2`, verify CI green on Node 22+24, and merge.
-- Plan Sprint 3 on these foundations (real-repo hardening, PR/branch flow, richer observability).
+- Open `feature/sprint-4` off `main` and build durability per `docs/sprint-4/plan.md` and the
+  #39 spike: **#40 persistence → #41 restore+reconcile+re-arm (the risky one) → #42 session
+  continuity → #43 tests+docs**. Keep the snapshot contract additive and core-loop edits minimal.
 
 ## 9. Security Rules
 
