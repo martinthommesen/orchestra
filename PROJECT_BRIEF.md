@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — Orchestra
 
-> Last updated: 2026-06-23 | Sprint 0 complete | Status: Foundations ready for Sprint 1
+> Last updated: 2026-06-24 | Sprint 4 complete | Status: Durable orchestrator shipped
 >
 > **This file is the single source of truth across all team chats.** Each chat is a
 > fresh context — this file and `docs/sprint-N/progress.md` are the only things that
@@ -145,10 +145,11 @@ necessarily `Done`.
 | 1 | Core Orchestrator Loop | ✅ Done | Poll/dispatch/concurrency/retry/reconcile state machine, GitHub Issues adapter, Copilot subprocess runner, workspace manager, fakes + property/e2e tests, observability (logs + `--port` snapshot). Hardened in a post-merge QA pass (`fix/sprint-1-qa`, issues #17–#22). |
 | 2 | Live Ink Dashboard | ✅ Done | Standalone `orchestra dashboard` (Ink/React 19) polling the loopback snapshot API: thin CLI dispatcher, defensive snapshot client + non-overlapping poller, pure view-model + honest Ink rendering (reuses the glyph design system), `connecting/live/stale` resilience, `--ascii`/`NO_COLOR`. Apache-2.0 license added. Core orchestrator untouched. |
 | 3 | Observability v2 + Durability Spike | ✅ Done | Strictly-additive snapshot enrichment + new dashboard panels: live **event feed**, per-session **activity**, rich **completed/retry** (`recent_events`, `recent_completed`, `running[].last_activity`, retry wall-clock `scheduled_at`+`delay_ms`). New `RecentEvents`/`LiveActivity`/`RecentCompletions` services via a tee observer; exactly two sanctioned `loop.ts` edits. Plus the **#39 durability design spike** (`docs/sprint-3/durability-spike.md`). **Phase B durability build (#40–#43) rolled to Sprint 4** at the #39 gate. QA: SHIP-WITH-FOLLOW-UPS (#45 fixed). |
+| 4 | Durable Orchestrator | ✅ Done | The daemon survives a restart. Versioned (`Schema.parseJson`) **atomic** temp+rename checkpoint at `<workspace.root>/.orchestra/state.json`, written by a scoped **debounced** writer (default 500 ms, coalesced) with a **guaranteed final flush**; corrupt/missing → rename-aside + clean start, never crashes (#40). On boot: restore bookkeeping intact, **orphaned `running` → due-immediately continuation retry** (rides existing reconcile/dispatch, exactly-once is structural), **wall-clock retry re-arm** (`scheduled_at + delay_ms`, never monotonic `due_at_ms`), one synthetic `RestoredAfterRestart` (#41). Additive `RunAttempt.{turn,failure_attempts,session_id}` + `RetryEntry.{kind,session_id}`; **opt-in self-healing session resume** (`persistence.resume_sessions`, default off) (#42). Snapshot stayed **strictly additive** (no `/api/v2`); core-loop edits minimal. #43 stabilized the pre-existing #40 debounce `TestClock` flake (deterministic, 20/20 loop), filled audited coverage gaps, and shipped the docs/handoff. |
 
 ## 8. Current State (rewrite every sprint)
 
-**What works (Sprint 3 complete — Observability v2 on the Sprint 1 loop + Sprint 2 dashboard):**
+**What works (Sprint 4 complete — durable orchestrator on the Sprint 1 loop + Sprint 2 dashboard + Sprint 3 observability v2):**
 - Everything from Sprint 0 (monorepo, Effect, strict `tsconfig` + **Biome**, domain `Schema`,
   ports, tagged errors, WORKFLOW.md loader, glyph design system, CI on Node 22+24).
 - **Single state-owning orchestrator fiber** (`src/core/orchestrator/`): startup terminal
@@ -202,21 +203,44 @@ necessarily `Done`.
   loopback-only `GET /api/v1/state` snapshot (behind `--port`) is **strictly additive**: existing
   fields byte-compatible (`completed` IDs-only, monotonic `due_at_ms` unchanged) plus
   `recent_events`, `recent_completed`, `running[].last_activity`, and retry `scheduled_at`+`delay_ms`.
+- **Durability** (`src/core/persistence/`, Sprint 4): the daemon **survives a restart**. State is
+  checkpointed to `<workspace.root>/.orchestra/state.json` by a scoped **debounced** writer
+  (default 500 ms, bursts coalesced via a `Queue.sliding(1)` dirty signal) using an **atomic**
+  temp-file + `rename`, with a **guaranteed final flush** on shutdown; the payload is **versioned**
+  (`Schema.parseJson`, ISO `Date`s, forward-only `migrateToCurrent` seam). A transparent
+  `layerDurableOrchestratorStore` is a drop-in for `layerOrchestratorStore`, so `loop.ts`/
+  `snapshot-server.ts` are unedited. On boot the loop restores the full state then reconciles:
+  bookkeeping (completed/totals/rate-limits) survives intact; each **orphaned `running` issue
+  becomes a due-immediately continuation retry** that rides the existing retry → reconcile →
+  dispatch path (tracker reconcile gates terminal/vanished first — exactly-once is **structural**,
+  not best-effort); **retries re-arm from wall-clock** (`scheduled_at + delay_ms`, never the
+  monotonic `due_at_ms`); a **corrupt or missing** file → rename-aside (`state.json.corrupt-<ts>`)
+  + clean start, **never a crash**. Observability rings are not persisted — they boot empty and
+  emit one synthetic `RestoredAfterRestart` so the feed gap is honest. Agent **session resume** is
+  **opt-in** (`persistence.resume_sessions`, default off) and **self-healing** — a stale session
+  falls back to a fresh turn against the on-disk workspace (the true record of progress). All
+  persisted continuity fields (`RunAttempt.{turn,failure_attempts,session_id}`,
+  `RetryEntry.{kind,session_id}`) are optional/additive; `/api/v1/state` stayed strictly additive.
 - **License:** Apache-2.0 (`LICENSE` + `NOTICE`; `package.json` `"license": "Apache-2.0"`).
-- **Tests:** **266 passing** across 23 files (vitest + @effect/vitest + fast-check + Ink) — pure
+- **Tests:** **291 passing** across 25 files (vitest + @effect/vitest + fast-check + Ink) — pure
   unit + property (no-double-dispatch, concurrency caps incl. retry-backoff, backoff
   monotonic/capped), full-loop fake scenarios under `TestClock`, adapter integration tests,
-  a combined fake e2e, the `RecentEvents` ring + snapshot-enrichment suites, plus the dashboard
+  a combined fake e2e, the `RecentEvents` ring + snapshot-enrichment suites, the dashboard
   view-model/poller (fake-timer)/render suites (incl. backward-safety + relative-time width
-  invariants). `pnpm typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green;
-  a live PTY smoke confirms the dashboard renders, polls without overlap, goes stale-with-data on
-  disconnect, and exits cleanly.
+  invariants), **plus the durability suites** — persisted-state codec fixed-point + additive-field
+  survival, atomic save/load + corruption rename-aside, debounce gating/coalescing/final-flush
+  under `TestClock` (deterministic — the pre-existing #40 flake was fixed in #43, verified 20/20 in
+  a parallel-load loop), and the restore/reconcile/re-arm + opt-in-resume scenarios. `pnpm
+  typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green; a live PTY smoke
+  confirms the dashboard renders, polls without overlap, goes stale-with-data on disconnect, and
+  exits cleanly.
 
-**What doesn't work yet (Sprint 4+):**
-- **No durability yet** — a daemon restart loses in-flight running/retry state and session
-  continuity. The full design is done (`docs/sprint-3/durability-spike.md`); the build (#40–#43)
-  is **Sprint 4** (versioned atomic persistence, restore + reconcile + wall-clock retry re-arm,
-  orphan→continuation resume, optional session resume).
+**What doesn't work yet (Sprint 5+):**
+- **Session resume is unproven against a live Copilot.** `persistence.resume_sessions` is
+  default-off and self-healing by design; enabling it for real workloads needs an integration
+  validation that Copilot honors `--resume` across daemon downtime (today only the fake-agent
+  self-heal path is tested). The checkpoint is not surfaced in the dashboard/snapshot, and schema
+  migration is V1-only (the `migrateToCurrent` seam awaits its first real bump).
 - No live PR creation / branch push flow, no GitHub status write-back beyond reading issues.
 - WORKFLOW.md hot-reload (watcher) still deferred.
 - Snapshot API + dashboard are read-only; no control plane, auth, or metrics export. The event
@@ -225,9 +249,9 @@ necessarily `Done`.
   the loop is proven against fakes). Manual real-repo validation is the operator's step.
 
 **What's next:**
-- Open `feature/sprint-4` off `main` and build durability per `docs/sprint-4/plan.md` and the
-  #39 spike: **#40 persistence → #41 restore+reconcile+re-arm (the risky one) → #42 session
-  continuity → #43 tests+docs**. Keep the snapshot contract additive and core-loop edits minimal.
+- Sprint 5 scope is the Producer's call. Candidates from the durability follow-ups
+  (`docs/sprint-4/done.md`): a live-Copilot resume validation, surfacing checkpoint/restore state
+  in the dashboard, and the control-plane / PR write-back flow.
 
 ## 9. Security Rules
 

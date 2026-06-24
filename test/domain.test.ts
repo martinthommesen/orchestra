@@ -1,6 +1,13 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { AgentEvent, Issue, normalizeLabel, ServiceConfig } from "../src/core/domain";
+import {
+  AgentEvent,
+  Issue,
+  normalizeLabel,
+  RetryEntry,
+  RunAttempt,
+  ServiceConfig,
+} from "../src/core/domain";
 
 describe("Issue schema", () => {
   it("decodes a wire issue and normalizes labels to lowercase", () => {
@@ -117,5 +124,60 @@ describe("AgentEvent union (SPEC §10.4)", () => {
         timestamp: "2024-05-06T07:08:09.000Z",
       }),
     ).toThrow();
+  });
+});
+
+describe("session_id continuity field (#42 — additive, opt-in resume)", () => {
+  it("RunAttempt round-trips an optional session_id (present and null)", () => {
+    const base = {
+      issue_id: "i1",
+      issue_identifier: "ORC-1",
+      attempt: 2,
+      workspace_path: "/ws/ORC-1",
+      started_at: "2026-06-24T10:00:00.000Z",
+      status: "StreamingTurn" as const,
+    };
+    const withId = Schema.decodeUnknownSync(RunAttempt)({ ...base, session_id: "sess-abc" });
+    expect(withId.session_id).toBe("sess-abc");
+    expect(Schema.encodeSync(RunAttempt)(withId).session_id).toBe("sess-abc");
+
+    const withNull = Schema.decodeUnknownSync(RunAttempt)({ ...base, session_id: null });
+    expect(withNull.session_id).toBeNull();
+  });
+
+  it("RunAttempt decodes a pre-#42 checkpoint with session_id ABSENT", () => {
+    const decoded = Schema.decodeUnknownSync(RunAttempt)({
+      issue_id: "i1",
+      issue_identifier: "ORC-1",
+      attempt: null,
+      workspace_path: "/ws/ORC-1",
+      started_at: "2026-06-24T10:00:00.000Z",
+      status: "PreparingWorkspace",
+    });
+    expect(decoded.session_id).toBeUndefined();
+  });
+
+  it("RetryEntry round-trips an optional session_id on a continuation retry", () => {
+    const decoded = Schema.decodeUnknownSync(RetryEntry)({
+      issue_id: "i1",
+      identifier: "ORC-1",
+      attempt: 2,
+      due_at_ms: 123,
+      kind: "continuation",
+      session_id: "sess-xyz",
+      error: null,
+    });
+    expect(decoded.session_id).toBe("sess-xyz");
+    expect(Schema.encodeSync(RetryEntry)(decoded).session_id).toBe("sess-xyz");
+
+    // Pre-#42 entry: session_id absent → undefined, still decodes.
+    const legacy = Schema.decodeUnknownSync(RetryEntry)({
+      issue_id: "i1",
+      identifier: "ORC-1",
+      attempt: 1,
+      due_at_ms: 1,
+      error: "boom",
+    });
+    expect(legacy.session_id).toBeUndefined();
   });
 });

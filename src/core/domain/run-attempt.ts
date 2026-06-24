@@ -42,5 +42,14 @@ export const RunAttempt = Schema.Struct({
    * preserves exponential-backoff accounting across the resumed attempt. Optional/additive.
    */
   failure_attempts: Schema.optional(Schema.Int),
+  /**
+   * The agent thread/session id for this attempt (Sprint 4 / #42). Captured from the
+   * `SessionStarted` event and persisted so a restart can *optionally* resume the agent
+   * thread instead of starting fresh — gated behind `persistence.resume_sessions`
+   * (default off). Optional/additive: absent in pre-#42 checkpoints; `null` until the
+   * session id is known. The workspace on disk remains the true record of progress, so
+   * resume is best-effort and self-healing (a stale id falls back to a fresh turn).
+   */
+  session_id: Schema.optional(Schema.NullOr(Schema.String)),
 }).annotations({ identifier: "RunAttempt" });
 export type RunAttempt = typeof RunAttempt.Type;

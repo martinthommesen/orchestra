@@ -6,6 +6,7 @@ import { describe, expect } from "vitest";
 import { ClockLive } from "../src/core/clock/live";
 import type { OrchestratorState } from "../src/core/domain/orchestrator-state";
 import { ServiceConfig, type WorkflowDefinition } from "../src/core/domain/workflow";
+import { TurnFailed } from "../src/core/errors";
 import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";
@@ -51,6 +52,7 @@ interface DefOpts {
   readonly terminalStates?: ReadonlyArray<string>;
   readonly maxConcurrent?: number;
   readonly maxTurns?: number;
+  readonly resumeSessions?: boolean;
 }
 
 const buildDurableDef = (dir: string, opts: DefOpts = {}): WorkflowDefinition => {
@@ -72,7 +74,7 @@ const buildDurableDef = (dir: string, opts: DefOpts = {}): WorkflowDefinition =>
     },
     copilot: { stall_timeout_ms: 300_000 },
     workspace: { root: dir },
-    persistence: { dir },
+    persistence: { dir, resume_sessions: opts.resumeSessions ?? false },
   });
   return { config, prompt_template: "Work on {{ issue.identifier }}." };
 };
@@ -567,6 +569,231 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         // The corrupt file was renamed aside, not left in place to re-poison a later boot.
         const entries = yield* fs.readDirectory(dir);
         expect(entries.some((e) => e.startsWith("state.json.corrupt-"))).toBe(true);
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }).pipe(Effect.provide(NodeContext.layer)),
+  );
+});
+
+/**
+ * Sprint 4 / #42 — opt-in, self-healing agent session resume on restart
+ * (durability spike §2.4 / §2.6). Extends the #41 restore path: the persisted `session_id`
+ * is restored into the runtime registry ONLY when `persistence.resume_sessions` is enabled,
+ * and threaded into the continuation dispatch's `resume`. The workspace-on-disk remains the
+ * true record of progress, so resume is best-effort: a rejected/stale session id rides the
+ * normal failure-backoff path back to a FRESH continuation — it can only help, never strand.
+ */
+describe("opt-in session resume on continuation (#42)", () => {
+  it.scoped(
+    "resume_sessions OFF (default) → restored continuation runs FRESH, session_id ignored",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-resume-" });
+        // Default off (resumeSessions omitted) — must be byte-identical to #41 behavior.
+        const def = buildDurableDef(dir, { maxTurns: 2 });
+
+        // Checkpoint carries a known session id, but resume is OFF → it must be ignored.
+        const seeded = setRunning(initialState(def.config), {
+          issue_id: "i1",
+          issue_identifier: "ORC-1",
+          attempt: 1,
+          workspace_path: `${dir}/ORC-1`,
+          started_at: new Date(0),
+          status: "StreamingTurn",
+          turn: 1,
+          failure_attempts: 0,
+          session_id: "sess-abc",
+        });
+        yield* seedCheckpoint(def.config, seeded);
+
+        const tracker = yield* makeFakeTracker({
+          candidates: [],
+          states: [makeStateRef("i1", "In Progress")],
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(dir);
+        const obs = yield* makeRecordingObserver();
+        yield* runner.control.pushScript("i1", [{ _tag: "complete" }]);
+
+        const env = Layer.mergeAll(
+          tracker.layer,
+          runner.layer,
+          wsm.layer,
+          obs.layer,
+          ClockLive,
+          layerDurableOrchestratorStore(def.config),
+          RecentCompletionsLive,
+        );
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          yield* waitFor(obs.queue, (o) => o._tag === "RestoredAfterRestart");
+          yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+
+          yield* TestClock.adjust(Duration.millis(1));
+          const dispatched = yield* waitFor(obs.queue, isDispatched("i1"));
+          if (dispatched._tag === "Dispatched") {
+            expect(dispatched.turn).toBe(2);
+            // The hallmark of #41 default behavior: NOT resumed.
+            expect(dispatched.resumed).toBe(false);
+          }
+          yield* waitFor(obs.queue, (o) => o._tag === "WorkerCompleted" && o.issueId === "i1");
+
+          const runs = yield* runner.control.runs;
+          const i1Runs = runs.filter((r) => r.issueId === "i1");
+          expect(i1Runs).toHaveLength(1);
+          // session_id present on disk but NOT used → fresh continuation.
+          expect(i1Runs[0]?.resumeSessionId).toBeNull();
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped(
+    "resume_sessions ON + restored session_id → continuation dispatched WITH --resume",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-resume-" });
+        const def = buildDurableDef(dir, { maxTurns: 2, resumeSessions: true });
+
+        const seeded = setRunning(initialState(def.config), {
+          issue_id: "i1",
+          issue_identifier: "ORC-1",
+          attempt: 1,
+          workspace_path: `${dir}/ORC-1`,
+          started_at: new Date(0),
+          status: "StreamingTurn",
+          turn: 1,
+          failure_attempts: 0,
+          session_id: "sess-abc",
+        });
+        yield* seedCheckpoint(def.config, seeded);
+
+        const tracker = yield* makeFakeTracker({
+          candidates: [],
+          states: [makeStateRef("i1", "In Progress")],
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(dir);
+        const obs = yield* makeRecordingObserver();
+        yield* runner.control.pushScript("i1", [{ _tag: "complete" }]);
+
+        const env = Layer.mergeAll(
+          tracker.layer,
+          runner.layer,
+          wsm.layer,
+          obs.layer,
+          ClockLive,
+          layerDurableOrchestratorStore(def.config),
+          RecentCompletionsLive,
+        );
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          yield* waitFor(obs.queue, (o) => o._tag === "RestoredAfterRestart");
+          yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+
+          yield* TestClock.adjust(Duration.millis(1));
+          const dispatched = yield* waitFor(obs.queue, isDispatched("i1"));
+          if (dispatched._tag === "Dispatched") {
+            expect(dispatched.turn).toBe(2);
+            // Resume threaded through: the continuation resumes the prior session.
+            expect(dispatched.resumed).toBe(true);
+          }
+          yield* waitFor(obs.queue, (o) => o._tag === "WorkerCompleted" && o.issueId === "i1");
+
+          const runs = yield* runner.control.runs;
+          const i1Runs = runs.filter((r) => r.issueId === "i1");
+          expect(i1Runs).toHaveLength(1);
+          // The agent was invoked WITH --resume <session_id>.
+          expect(i1Runs[0]?.resumeSessionId).toBe("sess-abc");
+          expect(i1Runs[0]?.attempt).toBe(2);
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped("resume_sessions ON but resume REJECTED → self-heals to a FRESH continuation", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-resume-" });
+      // maxTurns 1 + orphan turn 0: the fresh fallback turn completes the issue in one run.
+      const def = buildDurableDef(dir, { maxTurns: 1, resumeSessions: true });
+
+      const seeded = setRunning(initialState(def.config), {
+        issue_id: "i1",
+        issue_identifier: "ORC-1",
+        attempt: 1,
+        workspace_path: `${dir}/ORC-1`,
+        started_at: new Date(0),
+        status: "StreamingTurn",
+        turn: 0,
+        failure_attempts: 0,
+        session_id: "sess-stale",
+      });
+      yield* seedCheckpoint(def.config, seeded);
+
+      const tracker = yield* makeFakeTracker({
+        candidates: [],
+        states: [makeStateRef("i1", "In Progress")],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(dir);
+      const obs = yield* makeRecordingObserver();
+      // 1st run = the resumed turn: agent rejects the stale session → fails.
+      // 2nd run = the self-healed fresh continuation: completes.
+      yield* runner.control.pushScript("i1", [
+        { _tag: "fail", error: new TurnFailed({ message: "resume rejected: unknown session" }) },
+      ]);
+      yield* runner.control.pushScript("i1", [{ _tag: "complete" }]);
+
+      const env = Layer.mergeAll(
+        tracker.layer,
+        runner.layer,
+        wsm.layer,
+        obs.layer,
+        ClockLive,
+        layerDurableOrchestratorStore(def.config),
+        RecentCompletionsLive,
+      );
+
+      yield* Effect.gen(function* () {
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+        yield* waitFor(obs.queue, (o) => o._tag === "RestoredAfterRestart");
+        yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+
+        // Fire the due-now continuation → dispatched WITH resume → fails.
+        yield* TestClock.adjust(Duration.millis(1));
+        const resumed = yield* waitFor(obs.queue, isDispatched("i1"));
+        if (resumed._tag === "Dispatched") {
+          expect(resumed.resumed).toBe(true);
+        }
+        yield* waitFor(obs.queue, (o) => o._tag === "WorkerFailed" && o.issueId === "i1");
+
+        // Self-healing: the failure schedules a fresh failure-backoff retry (10s). Firing it
+        // re-dispatches a FRESH turn (no resume) against the on-disk workspace → progresses.
+        yield* TestClock.adjust(Duration.millis(10_000));
+        const fresh = yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "Dispatched" && o.issueId === "i1" && o.resumed === false,
+        );
+        expect(fresh._tag).toBe("Dispatched");
+        yield* waitFor(obs.queue, (o) => o._tag === "WorkerCompleted" && o.issueId === "i1");
+
+        const runs = yield* runner.control.runs;
+        const i1Runs = runs.filter((r) => r.issueId === "i1");
+        expect(i1Runs).toHaveLength(2);
+        expect(i1Runs[0]?.resumeSessionId).toBe("sess-stale"); // resumed turn (rejected)
+        expect(i1Runs[1]?.resumeSessionId).toBeNull(); // fresh fallback turn
+        // The issue still progressed to completion — never stranded, never crashed.
+        const store = yield* OrchestratorStore;
+        const state = yield* store.get;
+        expect(state.completed).toContain("i1");
+
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));
     }).pipe(Effect.provide(NodeContext.layer)),

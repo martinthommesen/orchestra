@@ -118,6 +118,16 @@ export const PersistenceConfig = Schema.Struct({
   dir: Schema.optional(Schema.String),
   /** Debounce window (ms) coalescing bursts of mutations into one atomic write. */
   debounce_ms: Schema.optionalWith(PositiveInt, { default: () => 500 }),
+  /**
+   * Opt-in best-effort agent session resume on restart (Sprint 4 / #42). When `true`, a
+   * restored continuation carries its persisted `session_id` and is dispatched with
+   * `--resume`; when `false` (default) the restored continuation runs fresh — exactly the
+   * #41 baseline. Resume is self-healing: a stale/expired session id fails the turn and
+   * falls back to a fresh continuation against the on-disk workspace (the true record of
+   * progress), so it can only help, never strand. Default **off** because Copilot owns the
+   * session lifecycle and cross-restart liveness is not guaranteed.
+   */
+  resume_sessions: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations({ identifier: "PersistenceConfig" });
 export type PersistenceConfig = typeof PersistenceConfig.Type;
 
