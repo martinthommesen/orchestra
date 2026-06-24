@@ -11,11 +11,6 @@ sprint plan (or a GitHub Issue) when ready.
   optional JSON API. A richer web UI is post-v1.
 - **SSH / remote workers.** Symphony's `make e2e` exercises SSH workers. Orchestra
   v1 runs workers locally only.
-- **Durable orchestrator state.** Spec is intentionally in-memory; a persistent
-  store (resume retry timers across restart) is a future option.
-- **`max_concurrent_agents_by_state`.** Per-state concurrency limits — nice-to-have
-  after global concurrency lands.
-- **Humanized agent-event summaries.** Observability sugar, post-v1.
 
 ## Open questions
 
@@ -23,6 +18,13 @@ sprint plan (or a GitHub Issue) when ready.
 
 ## Resolved
 
+- **Durable orchestrator state → shipped (Sprint 4, #40–#43).** Versioned atomic
+  debounced checkpoint, boot restore + orphan→continuation reconcile, wall-clock
+  retry re-arm, opt-in session resume. (`docs/sprint-3/durability-spike.md` design;
+  `docs/sprint-4/done.md` handoff.)
+- **`max_concurrent_agents_by_state` → shipped (Sprint 1).** Per-state concurrency
+  limits enforced in the dispatch planner (`config.agent.max_concurrent_agents_by_state`).
+- **Humanized agent-event summaries → promoted to Sprint 5 (#55).**
 - **License → Apache-2.0** (Sprint 2). Matches Symphony's license; `LICENSE` +
   `NOTICE` added at the repo root, `package.json` set to `Apache-2.0`. Orchestra
   ships no Symphony source — the SPEC is a behavioral reference only.
@@ -33,4 +35,5 @@ sprint plan (or a GitHub Issue) when ready.
 
 - Multi-agent "fleet" view: visualize all running Copilot sessions live in a TUI.
 - Auto-generated walkthrough videos as proof-of-work (Symphony demo parity).
-- Cost guardrails: pause dispatch when token spend crosses a budget.
+- ~~Cost guardrails: pause dispatch when token spend crosses a budget.~~ → **promoted
+  to Sprint 5 (#53).**
