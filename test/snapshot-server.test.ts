@@ -4,6 +4,7 @@ import { it } from "@effect/vitest";
 import { Effect, Layer, Schedule } from "effect";
 import { describe, expect } from "vitest";
 import { RunAttempt } from "../src/core/domain/run-attempt";
+import { BudgetConfig } from "../src/core/domain/workflow";
 import { LiveActivityLive } from "../src/core/observability/live-activity";
 import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
 import { RecentEventsLive } from "../src/core/observability/recent-events";
@@ -84,7 +85,7 @@ describe("runSnapshotServer", () => {
       const store = yield* makeOrchestratorStore(seededState());
 
       yield* Effect.forkScoped(
-        runSnapshotServer(port).pipe(
+        runSnapshotServer(port, BudgetConfig.make({})).pipe(
           Effect.provideService(OrchestratorStore, store),
           Effect.provide(ObservabilityRings),
         ),

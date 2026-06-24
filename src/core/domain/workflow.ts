@@ -132,6 +132,23 @@ export const PersistenceConfig = Schema.Struct({
 export type PersistenceConfig = typeof PersistenceConfig.Type;
 
 /**
+ * `budget` block (Sprint 5 / #53) — an optional spend guardrail. Additive and
+ * all-defaults so an unchanged `WORKFLOW.md` still decodes; an empty block configures
+ * **no** ceiling and the dispatch guard stays inert (identical to pre-#53 behavior).
+ *
+ * `max_total_tokens` is the (only) ceiling: once cumulative `agent_totals.total_tokens`
+ * reaches it, the orchestrator **pauses NEW dispatch** — in-flight workers, retries, and
+ * reconciliation are never affected (Sprint 5 constraint #2). The cap is intentionally a
+ * single, concrete token ceiling; a derived USD ceiling is deliberately deferred rather
+ * than shipped as a half-wired knob (clean-code mandate: minimal-but-complete).
+ */
+export const BudgetConfig = Schema.Struct({
+  /** Token ceiling. Absent → unlimited (guard inert). Pause NEW dispatch once spend ≥ this. */
+  max_total_tokens: Schema.optional(PositiveInt),
+}).annotations({ identifier: "BudgetConfig" });
+export type BudgetConfig = typeof BudgetConfig.Type;
+
+/**
  * The fully-typed, defaulted service configuration (SPEC §4.1.3). Each block is
  * optional at the top level and falls back to its own all-defaults form, so a
  * `WORKFLOW.md` with no front matter still decodes to a complete config.
@@ -157,6 +174,9 @@ export const ServiceConfig = Schema.Struct({
   }),
   persistence: Schema.optionalWith(PersistenceConfig, {
     default: () => PersistenceConfig.make({}),
+  }),
+  budget: Schema.optionalWith(BudgetConfig, {
+    default: () => BudgetConfig.make({}),
   }),
 }).annotations({ identifier: "ServiceConfig" });
 export type ServiceConfig = typeof ServiceConfig.Type;

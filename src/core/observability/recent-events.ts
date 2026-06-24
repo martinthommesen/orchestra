@@ -147,6 +147,22 @@ export const toEventDraft = (obs: Observation): EventDraft | null => {
         kind: "tracker_error",
         message: `tracker error (${obs.op}): ${obs.message}`,
       };
+    case "BudgetExceeded":
+      return obs.paused
+        ? {
+            level: "warn",
+            kind: "budget_paused",
+            message:
+              `budget reached: new dispatch paused ` +
+              `(${obs.spentTokens}/${obs.limitTokens} tokens)`,
+          }
+        : {
+            level: "info",
+            kind: "budget_resumed",
+            message:
+              `budget cleared: new dispatch resumed ` +
+              `(${obs.spentTokens}/${obs.limitTokens} tokens)`,
+          };
   }
 };
 

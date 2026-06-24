@@ -14,6 +14,7 @@ import { WorkspaceManager } from "../ports/workspace-manager";
 import { renderPrompt } from "../workflow/render";
 import { computeWorkspacePath, sanitizeWorkspaceKey } from "../workspace/safety";
 import { CONTINUATION_DELAY_MS, failureBackoffMs } from "./backoff";
+import { type BudgetStatus, evaluateBudget } from "./budget";
 import { concurrencyContext, planDispatch } from "./concurrency";
 import type { Msg, WorkerOutcome } from "./messages";
 import { Observer, type RetryKind } from "./observer";
@@ -138,6 +139,12 @@ export const runOrchestrator = (
 
       const mailbox = yield* Queue.unbounded<Msg>();
       const registry = new Map<string, IssueRuntime>();
+
+      // Budget guardrail (#53) — runtime-only latch tracking whether the dispatch gate
+      // is currently paused, so the BudgetExceeded observation fires ONCE per transition
+      // (entering paused / resuming) rather than every tick. It is pure display/transition
+      // bookkeeping and never gates worker, retry, or reconcile paths.
+      let budgetPaused = false;
 
       const freshRuntime = (issue: Issue): IssueRuntime => ({
         issue,
@@ -547,6 +554,26 @@ export const runOrchestrator = (
         }
 
         const state = yield* store.get;
+
+        // ── Budget guardrail (#53): a PURE, additive pre-planDispatch gate ──
+        // Compute current spend vs. the configured ceiling. When spend ≥ ceiling we plan
+        // ZERO new dispatches this tick — and ONLY that. Reconciliation already ran above,
+        // retries fire on their own timers via the separate `handleRetryDue` path, and
+        // in-flight worker fibers keep streaming and reconcile exactly as today. The guard
+        // touches neither the concurrency math nor the retry/reconcile paths. The
+        // BudgetExceeded observation is emitted once per transition (latched on
+        // `budgetPaused`), never every tick.
+        const budget: BudgetStatus = evaluateBudget(config.budget, state.agent_totals);
+        if (budget.paused !== budgetPaused) {
+          budgetPaused = budget.paused;
+          yield* observer.emit({
+            _tag: "BudgetExceeded",
+            paused: budget.paused,
+            limitTokens: budget.limitTokens ?? 0,
+            spentTokens: budget.spentTokens,
+          });
+        }
+
         const selCtx = selectionContext({
           activeStates: config.tracker.active_states,
           terminalStates: config.tracker.terminal_states,
@@ -560,14 +587,14 @@ export const runOrchestrator = (
           runningTotal: runningTotal(),
           runningByState: runningByState(),
         });
-        const toDispatch = planDispatch(sorted, conCtx);
+        const toDispatch = budget.paused ? [] : planDispatch(sorted, conCtx);
         for (const issue of toDispatch) {
           yield* dispatch(issue, { kind: "fresh", attempt: null });
         }
         yield* observer.emit({
           _tag: "TickEnd",
           dispatched: toDispatch.map((i) => i.id),
-          dispatchSkipped: false,
+          dispatchSkipped: budget.paused,
         });
       });
 

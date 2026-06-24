@@ -96,6 +96,37 @@ describe("parseSnapshot", () => {
     expect(() => parseSnapshot(wire({ completed: ["ok", 7] }))).toThrow(SnapshotParseError);
     expect(() => parseSnapshot(wire({ totals: { input_tokens: 1 } }))).toThrow(SnapshotParseError);
   });
+
+  it("treats an absent budget block as undefined (older daemon / no ceiling)", () => {
+    expect(parseSnapshot(wire()).budget).toBeUndefined();
+  });
+
+  it("parses the additive budget block when present (#53)", () => {
+    const snap = parseSnapshot(
+      wire({
+        budget: { limit_tokens: 1000, spent_tokens: 1200, remaining_tokens: 0, paused: true },
+      }),
+    );
+    expect(snap.budget).toEqual({
+      limit_tokens: 1000,
+      spent_tokens: 1200,
+      remaining_tokens: 0,
+      paused: true,
+    });
+  });
+
+  it("rejects a malformed budget block", () => {
+    expect(() => parseSnapshot(wire({ budget: { limit_tokens: 1000 } }))).toThrow(
+      SnapshotParseError,
+    );
+    expect(() =>
+      parseSnapshot(
+        wire({
+          budget: { limit_tokens: 1000, spent_tokens: 1, remaining_tokens: 1, paused: "yes" },
+        }),
+      ),
+    ).toThrow(SnapshotParseError);
+  });
 });
 
 describe("makeFetchSnapshot", () => {

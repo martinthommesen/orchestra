@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import type { ColorToken } from "../../core/observability/glyphs";
 import type {
+  BudgetVM,
   CompletedRowVM,
   DashboardViewModel,
   EventRowVM,
@@ -229,6 +230,17 @@ function Totals({ totals }: { readonly totals: TotalsVM }) {
   );
 }
 
+function Budget({ budget, ascii, color }: { readonly budget: BudgetVM } & Themed) {
+  return (
+    <Box marginLeft={2}>
+      <Tinted tone={budget.color} color={color}>
+        {ascii ? budget.ascii : budget.glyph} {budget.stateLabel}
+      </Tinted>
+      <Dim color={color}> · {budget.summary}</Dim>
+    </Box>
+  );
+}
+
 /** The whole dashboard, rendered from a fully-computed view model. */
 export function DashboardView({ vm, ascii, color }: { readonly vm: DashboardViewModel } & Themed) {
   return (
@@ -287,6 +299,12 @@ export function DashboardView({ vm, ascii, color }: { readonly vm: DashboardView
           <Totals totals={vm.totals} />
         )}
       </Section>
+
+      {vm.budget !== null ? (
+        <Section title="BUDGET" color={color}>
+          <Budget budget={vm.budget} ascii={ascii} color={color} />
+        </Section>
+      ) : null}
 
       <Section title="RATE LIMITS" color={color}>
         <Box marginLeft={2}>

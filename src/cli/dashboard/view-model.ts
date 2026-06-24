@@ -6,7 +6,12 @@ import {
   truncateOneLine,
 } from "../../core/observability/glyphs";
 import type { ConnectionState } from "./poller";
-import type { Snapshot, SnapshotActivity, SnapshotRetrying } from "./snapshot-client";
+import type {
+  Snapshot,
+  SnapshotActivity,
+  SnapshotBudget,
+  SnapshotRetrying,
+} from "./snapshot-client";
 
 /**
  * Pure presentation logic for the dashboard (#32). `toViewModel` turns a (possibly
@@ -116,6 +121,22 @@ export interface TotalsVM {
   readonly runtimeLabel: string;
 }
 
+/**
+ * Budget guardrail panel (#53). `null` when the daemon sends no budget block (older
+ * daemon or no ceiling configured) — the panel is then omitted entirely. The glyph/color
+ * reuse the `glyphs.ts` design system: paused → `⏸ blocked` (warn), active → `▶`/info.
+ */
+export interface BudgetVM {
+  readonly glyph: string;
+  readonly ascii: string;
+  readonly color: ColorToken;
+  /** "paused" / "active". */
+  readonly stateLabel: string;
+  /** "1200 / 1000 tokens · 0 left" — already display-ready. */
+  readonly summary: string;
+  readonly paused: boolean;
+}
+
 export interface RateLimitsVM {
   readonly available: boolean;
   readonly summary: string;
@@ -132,6 +153,8 @@ export interface DashboardViewModel {
   readonly events: ReadonlyArray<EventRowVM>;
   readonly totals: TotalsVM | null;
   readonly rateLimits: RateLimitsVM;
+  /** Budget guardrail panel (#53); null when the daemon sends no budget block. */
+  readonly budget: BudgetVM | null;
 }
 
 export interface ViewModelOptions {
@@ -309,6 +332,23 @@ const outcomeColor = (outcome: string): ColorToken => {
 
 const attemptLabel = (attempt: number | null): string => (attempt === null ? "—" : `#${attempt}`);
 
+/**
+ * Build the budget panel VM from the additive wire block (#53). Reuses the `glyphs.ts`
+ * status design system: paused → `⏸ blocked` (warn tone); active → `▶ running` (info).
+ * `null` in is mapped by the caller (absent block → no panel).
+ */
+const toBudgetVM = (b: SnapshotBudget): BudgetVM => {
+  const style = statusStyle(b.paused ? "blocked" : "running");
+  return {
+    glyph: style.glyph,
+    ascii: style.ascii,
+    color: b.paused ? "warn" : style.color,
+    stateLabel: b.paused ? "paused" : "active",
+    summary: `${b.spent_tokens} / ${b.limit_tokens} tokens · ${b.remaining_tokens} left`,
+    paused: b.paused,
+  };
+};
+
 const connectionStyle = (
   connection: ConnectionState,
 ): { readonly label: string; readonly color: ColorToken } => {
@@ -415,6 +455,7 @@ export const toViewModel = (
       events: [],
       totals: null,
       rateLimits: summarizeRateLimits(null),
+      budget: null,
     };
   }
 
@@ -456,5 +497,6 @@ export const toViewModel = (
       runtimeLabel: formatDuration(snapshot.totals.runtime_seconds * 1000),
     },
     rateLimits: summarizeRateLimits(snapshot.rate_limits),
+    budget: snapshot.budget === undefined ? null : toBudgetVM(snapshot.budget),
   };
 };
