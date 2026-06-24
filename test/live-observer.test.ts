@@ -15,6 +15,12 @@ import { Observer } from "../src/core/orchestrator/observer";
 
 const sample: Record<Observation["_tag"], Observation> = {
   Started: { _tag: "Started", pollIntervalMs: 1000, maxConcurrent: 3 },
+  RestoredAfterRestart: {
+    _tag: "RestoredAfterRestart",
+    orphanedRunningConverted: 1,
+    reArmedRetries: 2,
+    restoredCompleted: 3,
+  },
   StartupCleanup: { _tag: "StartupCleanup", removed: ["a", "b"] },
   TickStart: { _tag: "TickStart" },
   TickEnd: { _tag: "TickEnd", dispatched: ["i1"], dispatchSkipped: false },

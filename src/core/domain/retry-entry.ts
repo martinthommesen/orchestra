@@ -23,6 +23,14 @@ export const RetryEntry = Schema.Struct({
   scheduled_at: Schema.optional(Schema.Date),
   /** Backoff delay (ms) applied at schedule time (Sprint 3 / #37). Optional, additive. */
   delay_ms: Schema.optional(Schema.Int),
+  /**
+   * Whether this retry re-dispatches as a fixed continuation turn or an
+   * exponential-backoff failure retry (Sprint 4 / #41). Persisted so a restart can
+   * reconstruct the registry's `pendingKind` and re-dispatch the correct shape
+   * (`handleRetryDue`). Optional/additive — absent in pre-#41 checkpoints; on restore an
+   * absent `kind` defaults to `"failure"`.
+   */
+  kind: Schema.optional(Schema.Literal("failure", "continuation")),
   error: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "RetryEntry" });
 export type RetryEntry = typeof RetryEntry.Type;

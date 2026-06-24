@@ -1,6 +1,7 @@
 import { Cause, Duration, Effect, Either, Fiber, Queue, type Scope, Stream } from "effect";
 import type { AgentEvent, Usage } from "../domain/agent-event";
-import { type Issue, type IssueStateRef, normalizeState } from "../domain/issue";
+import { Issue, type IssueStateRef, normalizeState } from "../domain/issue";
+import type { RetryEntry } from "../domain/retry-entry";
 import { RunAttempt } from "../domain/run-attempt";
 import type { WorkflowDefinition } from "../domain/workflow";
 import type { Workspace } from "../domain/workspace";
@@ -11,7 +12,7 @@ import { Clock } from "../ports/clock";
 import { IssueTracker } from "../ports/issue-tracker";
 import { WorkspaceManager } from "../ports/workspace-manager";
 import { renderPrompt } from "../workflow/render";
-import { computeWorkspacePath } from "../workspace/safety";
+import { computeWorkspacePath, sanitizeWorkspaceKey } from "../workspace/safety";
 import { CONTINUATION_DELAY_MS, failureBackoffMs } from "./backoff";
 import { concurrencyContext, planDispatch } from "./concurrency";
 import type { Msg, WorkerOutcome } from "./messages";
@@ -257,6 +258,11 @@ export const runOrchestrator = (
                   workspace_path: ws.path,
                   started_at: new Date(wall),
                   status: "PreparingWorkspace",
+                  // Continuity persisted for restart resume (#41): clean turns done so far
+                  // and failure-backoff count. An orphaned `running` issue rebuilds its
+                  // registry `turnCount`/`failureAttempts` from these on the next boot.
+                  turn: rec.turnCount,
+                  failure_attempts: rec.failureAttempts,
                 }),
               ),
               issue.id,
@@ -312,6 +318,9 @@ export const runOrchestrator = (
               due_at_ms: mono + delay,
               scheduled_at: new Date(wall),
               delay_ms: delay,
+              // Persist the retry shape (#41) so a restart can re-dispatch the correct
+              // path (continuation vs failure) via `handleRetryDue` after re-arming.
+              kind,
               error,
             }),
           );
@@ -679,14 +688,182 @@ export const runOrchestrator = (
         yield* observer.emit({ _tag: "StartupCleanup", removed: removed.right });
       });
 
+      // ───────────────────────────── Restore + reconcile (#41) ─────────────────────────────
+
+      /**
+       * Build a minimal {@link Issue} for a restored issue. The checkpoint persists only
+       * id/identifier per attempt (not the full tracker issue), which is all the
+       * continuation/reconcile paths need: workspace key + guidance use `identifier`, and
+       * the first tick's reconcile refreshes the real tracker state. `state` is seeded to
+       * the first configured active state so per-state concurrency accounting treats the
+       * restored issue as active until reconcile corrects it.
+       */
+      const restoredActiveState = config.tracker.active_states[0] ?? "";
+      const restoredIssue = (id: string, identifier: string): Issue =>
+        Issue.make({
+          id,
+          identifier,
+          title: identifier,
+          description: null,
+          priority: null,
+          state: restoredActiveState,
+          branch_name: null,
+          url: null,
+          labels: [],
+          blocked_by: [],
+          created_at: null,
+          updated_at: null,
+        });
+
+      /** A restored re-arm: which registry record fires, and after how many wall-clock ms. */
+      interface ReArm {
+        readonly rec: IssueRuntime;
+        readonly delayMs: number;
+      }
+
+      /**
+       * Fork a restored retry's timer with its residual wall-clock delay and record it as
+       * `rec.timerFiber` so the issue occupies a concurrency slot. Forked AFTER the first
+       * `Tick` is enqueued (see boot sequence) so the FIFO mailbox guarantees the tick's
+       * reconcile runs before any `RetryDue` — a restored issue that went terminal/vanished
+       * while the daemon was down is killed by reconcile, never re-dispatched.
+       */
+      const armRestoredRetry = (arm: ReArm): Effect.Effect<void, never, Scope.Scope> =>
+        Effect.gen(function* () {
+          const issueId = arm.rec.issue.id;
+          const timer = yield* Effect.forkScoped(
+            Effect.sleep(Duration.millis(arm.delayMs)).pipe(
+              Effect.zipRight(Queue.offer(mailbox, { _tag: "RetryDue", issueId })),
+              Effect.asVoid,
+            ),
+          );
+          arm.rec.timerFiber = timer;
+        });
+
+      /** Residual wall-clock ms until a restored retry is due (NEVER the monotonic `due_at_ms`). */
+      const remainingWallMs = (entry: RetryEntry, wallNow: number): number => {
+        // `scheduled_at + delay_ms` is the absolute wall-clock fire instant captured at
+        // schedule time (#37) — the only restart-safe countdown. The persisted `due_at_ms`
+        // is monotonic, relative to the dead process's clock origin, and is never read here.
+        if (entry.scheduled_at === undefined || entry.delay_ms === undefined) {
+          return 0; // pre-#37 file (durability never writes one) → due immediately, defensive.
+        }
+        const fireInstant = entry.scheduled_at.getTime() + entry.delay_ms;
+        return Math.max(fireInstant - wallNow, 0);
+      };
+
+      /**
+       * Rebuild the runtime registry from the restored checkpoint, convert orphaned
+       * `running` issues into due-immediately continuation retries, and compute the
+       * wall-clock re-arm plan for every pending retry. The returned plan's timers are
+       * forked by the caller AFTER the first `Tick` is enqueued. Returns an empty plan on a
+       * cold/empty start (nothing to restore).
+       */
+      const restoreFromCheckpoint: Effect.Effect<ReadonlyArray<ReArm>, never> = Effect.gen(
+        function* () {
+          const restored = yield* store.get;
+          const runningEntries = Object.entries(restored.running);
+          const retryEntries = Object.entries(restored.retry_attempts);
+          const restoredCompleted = restored.completed.length;
+          if (runningEntries.length === 0 && retryEntries.length === 0 && restoredCompleted === 0) {
+            return []; // cold start — nothing was restored.
+          }
+
+          const wallNow = yield* clock.currentTimeMillis;
+          const monoNow = yield* clock.monotonicMillis;
+          const plan: ReArm[] = [];
+
+          // 1) Orphaned `running` → due-immediately continuation retry. Each persisted
+          //    `running` issue has no live worker fiber after a restart, so we reduce it to
+          //    the existing retry/reconcile/dispatch machinery: clear it from `running`,
+          //    schedule a `kind:"continuation"` retry due now, and let `handleRetryDue`
+          //    re-dispatch it as a continuation against its on-disk workspace. The restored
+          //    continuation runs FRESH (no session resume) — `rec.sessionId` stays null;
+          //    session resume is #42 (workspace-on-disk is the true record of progress).
+          let orphanedRunningConverted = 0;
+          for (const [id, ra] of runningEntries) {
+            const rec = freshRuntime(restoredIssue(id, ra.issue_identifier));
+            rec.workspace = {
+              path: ra.workspace_path,
+              workspace_key: sanitizeWorkspaceKey(ra.issue_identifier),
+              created_now: false,
+            };
+            rec.turnCount = ra.turn ?? 0;
+            rec.failureAttempts = ra.failure_attempts ?? 0;
+            rec.lastEventAt = monoNow;
+            const attempt = rec.turnCount + 1;
+            rec.pendingKind = "continuation";
+            rec.pendingAttempt = attempt;
+            registry.set(id, rec);
+            yield* store.update((s) =>
+              setRetry(clearRunning(s, id), {
+                issue_id: id,
+                identifier: ra.issue_identifier,
+                attempt,
+                due_at_ms: monoNow,
+                scheduled_at: new Date(wallNow),
+                delay_ms: 0,
+                kind: "continuation",
+                error: null,
+              }),
+            );
+            plan.push({ rec, delayMs: 0 });
+            orphanedRunningConverted += 1;
+          }
+
+          // 2) Pending retries → re-arm from WALL-CLOCK. Reconstruct the registry record's
+          //    pending kind/attempt from the persisted `RetryEntry` so `handleRetryDue`
+          //    re-dispatches the correct shape, then schedule the timer with the residual
+          //    wall-clock delay (0 = already due).
+          let reArmedRetries = 0;
+          for (const [id, entry] of retryEntries) {
+            if (registry.has(id)) {
+              continue; // running + retry are mutually exclusive; orphan handled above.
+            }
+            const rec = freshRuntime(restoredIssue(id, entry.identifier));
+            const kind = entry.kind ?? "failure";
+            rec.pendingKind = kind;
+            rec.pendingAttempt = entry.attempt;
+            rec.lastEventAt = monoNow;
+            if (kind === "continuation") {
+              rec.turnCount = Math.max(entry.attempt - 1, 0);
+            } else {
+              rec.failureAttempts = entry.attempt;
+            }
+            registry.set(id, rec);
+            plan.push({ rec, delayMs: remainingWallMs(entry, wallNow) });
+            reArmedRetries += 1;
+          }
+
+          yield* observer.emit({
+            _tag: "RestoredAfterRestart",
+            orphanedRunningConverted,
+            reArmedRetries,
+            restoredCompleted,
+          });
+          return plan;
+        },
+      );
+
       const initial = yield* store.get;
       yield* observer.emit({
         _tag: "Started",
         pollIntervalMs: initial.poll_interval_ms,
         maxConcurrent: initial.max_concurrent_agents,
       });
+      // Restore + reconcile + re-arm (#41): rebuild the registry and orphan→continuation
+      // BEFORE the first tick. The re-arm timers are forked below, AFTER the Tick is
+      // enqueued, so reconcile gates every restored RetryDue (no double-dispatch).
+      const reArmPlan = yield* restoreFromCheckpoint;
       yield* startupCleanup;
       yield* Queue.offer(mailbox, { _tag: "Tick" });
+      // Fork restored timers now that the first Tick is already in the FIFO mailbox: the
+      // single consumer drains the Tick (reconcile → dispatch) before any RetryDue these
+      // timers post, and forking them here means the restored issues already occupy
+      // concurrency slots when the first tick plans dispatch (no over-admission).
+      for (const arm of reArmPlan) {
+        yield* armRestoredRetry(arm);
+      }
 
       yield* Effect.forkScoped(
         Effect.forever(

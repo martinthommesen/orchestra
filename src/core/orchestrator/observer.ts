@@ -16,6 +16,20 @@ export type RetryKind = "continuation" | "failure";
 
 export type Observation =
   | { readonly _tag: "Started"; readonly pollIntervalMs: number; readonly maxConcurrent: number }
+  | {
+      /**
+       * Boot-time restore summary (Sprint 4 / #41). Emitted once, after the checkpoint is
+       * restored and the registry rebuilt, so the otherwise-empty observability feed and the
+       * logs honestly show the daemon resumed from a checkpoint (counts only — no secrets).
+       */
+      readonly _tag: "RestoredAfterRestart";
+      /** Orphaned `running` issues converted to due-immediately continuation retries. */
+      readonly orphanedRunningConverted: number;
+      /** Pending retries re-armed from their wall-clock due time. */
+      readonly reArmedRetries: number;
+      /** Completed issue IDs restored (bookkeeping). */
+      readonly restoredCompleted: number;
+    }
   | { readonly _tag: "StartupCleanup"; readonly removed: ReadonlyArray<string> }
   | { readonly _tag: "TickStart" }
   | {
