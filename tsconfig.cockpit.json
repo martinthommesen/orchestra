@@ -1,0 +1,12 @@
+{
+  // The browser SPA (#67) type-checks under a DOM lib + JSX, separate from the Node daemon
+  // program. `pnpm typecheck` runs this in addition to the root config so both stay green.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/cockpit"],
+  "exclude": ["node_modules", "dist", ".spike-copilot"]
+}

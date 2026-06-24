@@ -88,6 +88,47 @@ export type Observation =
       readonly paused: boolean;
       readonly limitTokens: number;
       readonly spentTokens: number;
+    }
+  | {
+      /**
+       * Operator-pause transition (Sprint 6 / #64, DD-3). Emitted when an operator
+       * `PauseDispatch`/`ResumeDispatch` command flips the runtime latch. `paused: true` =
+       * NEW dispatch is now withheld by the operator; `paused: false` = the operator
+       * cleared it (dispatch resumes, still subject to the budget gate). In-flight workers,
+       * retries, and reconciliation are unaffected either way — exactly like the budget gate.
+       */
+      readonly _tag: "OperatorControl";
+      readonly paused: boolean;
+    }
+  | {
+      /**
+       * An operator `CancelSession` interrupted exactly the named worker (Sprint 6 / #64).
+       * The issue is released and dropped from the registry; no other worker is touched.
+       */
+      readonly _tag: "SessionCancelled";
+      readonly issueId: string;
+      readonly identifier: string;
+    }
+  | {
+      /**
+       * An operator `RetryNow` request (Sprint 6 / #64). `accepted: true` when a pending
+       * retry was fired early / an eligible issue re-dispatched; `accepted: false` for an
+       * unknown or ineligible id (a typed no-op).
+       */
+      readonly _tag: "RetryNowRequested";
+      readonly issueId: string;
+      readonly accepted: boolean;
+    }
+  | {
+      /**
+       * Settings hot-reload applied (Sprint 6 / #66, DD-4). Emitted after an operator `PUT
+       * /api/v1/settings` atomically rewrote the whitelisted front-matter and the owner
+       * fiber swapped its live config. The new orchestration knobs apply on the next tick;
+       * no in-flight worker, retry, or reconciliation is disturbed.
+       */
+      readonly _tag: "ConfigReloaded";
+      readonly pollIntervalMs: number;
+      readonly maxConcurrent: number;
     };
 
 export class Observer extends Context.Tag("orchestra/Observer")<

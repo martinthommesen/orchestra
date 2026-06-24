@@ -1,0 +1,504 @@
+/* Sprint 6 / #68 — app shell + shared primitive styles. Uses only design tokens (tokens.css). */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.app-shell__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-shell__brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.app-shell__glyph {
+  color: var(--status-info);
+}
+
+.app-shell__name {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.app-shell__sub {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  text-transform: lowercase;
+}
+
+.app-shell__nav {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.nav-link {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  border: 1px solid transparent;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.nav-link--active {
+  color: var(--text);
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+.app-shell__main {
+  flex: 1;
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* Panel primitive. */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+
+.panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel__title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.panel__actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.panel__body {
+  padding: var(--sp-4);
+}
+
+/* Status chip primitive. */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.status-chip__glyph {
+  line-height: 1;
+}
+
+/* Placeholder view scaffold (replaced by real views in #69–#71). */
+.view-placeholder {
+  color: var(--text-muted);
+}
+
+/* ─── Fleet / Events views (#69) ─────────────────────────────────────────────── */
+
+.conn-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.conn-banner__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.conn-banner__label {
+  font-weight: 600;
+}
+
+.conn-banner__error {
+  color: var(--status-danger);
+}
+
+.control-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.control-banner__glyph {
+  font-size: var(--fs-lg);
+}
+
+.metric-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  min-width: 96px;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.metric__value {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.metric__label {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.workspace {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phase-hint {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-1) var(--sp-4);
+  margin: 0;
+}
+
+.kv dt {
+  color: var(--text-muted);
+}
+
+.kv dd {
+  margin: 0;
+  text-align: right;
+}
+
+.filters {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.filters select,
+.filters input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.event-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: 1.2em 6em auto auto 1fr;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.event-row:last-child {
+  border-bottom: none;
+}
+
+.event-row__time {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-row__kind {
+  color: var(--text-muted);
+}
+
+.event-row__id {
+  color: var(--accent);
+}
+
+/* ─── Kanban board (#70) ─────────────────────────────────────────────────────── */
+
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.kanban__col {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+}
+
+.kanban__col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.kanban__col-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.kanban__col-count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--bg-elevated);
+  border-radius: 999px;
+  padding: 0 var(--sp-2);
+}
+
+.kanban__cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.kanban__count-only,
+.kanban__empty {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.card__id {
+  font-weight: 600;
+}
+
+.card__detail {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.card__error {
+  color: var(--status-danger);
+  font-size: var(--fs-xs);
+}
+
+.btn {
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  transition: background var(--motion-fast) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn--sm {
+  font-size: var(--fs-xs);
+  padding: var(--sp-1) var(--sp-2);
+}
+
+/* ─── Settings + pause/resume (#71) ──────────────────────────────────────────── */
+
+.pause-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.pause-toggle p {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-sm);
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: 480px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.field label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.field input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-mono);
+}
+
+.field input[aria-invalid="true"] {
+  border-color: var(--status-danger);
+}
+
+.field__error {
+  color: var(--status-danger);
+  font-size: var(--fs-xs);
+}
+
+.settings-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.settings-fieldset legend {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  padding: 0 var(--sp-2);
+}
+
+.settings-ok {
+  color: var(--status-success);
+  font-size: var(--fs-sm);
+  margin: 0;
+}

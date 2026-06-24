@@ -6,7 +6,7 @@ import { RunAttempt } from "../src/core/domain/run-attempt";
 import type { ActivityEntry } from "../src/core/observability/live-activity";
 import type { RecentCompletion } from "../src/core/observability/recent-completions";
 import type { EventEnvelope } from "../src/core/observability/recent-events";
-import { toSnapshot } from "../src/core/observability/snapshot-server";
+import { toSnapshot } from "../src/core/observability/snapshot";
 import { initialState, setRetry, setRunning } from "../src/core/orchestrator/state";
 import { buildDef } from "./fakes/harness";
 

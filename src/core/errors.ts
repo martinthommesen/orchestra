@@ -33,6 +33,17 @@ export class WorkflowFrontMatterNotAMap extends Data.TaggedError("WorkflowFrontM
   readonly message: string;
 }> {}
 
+/**
+ * `settings_rejected` — a cockpit `PUT /api/v1/settings` patch was rejected (Sprint 6 / #66,
+ * DD-4). Either the patch failed validation, or applying it would produce a `WORKFLOW.md`
+ * that no longer parses — in both cases the write is refused BEFORE it lands on disk. The
+ * message is actionable and secret-free (it never echoes resolved credentials).
+ */
+export class SettingsRejected extends Data.TaggedError("SettingsRejected")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
+
 /** `template_parse_error` — prompt template has invalid Liquid syntax. */
 export class TemplateParseError extends Data.TaggedError("TemplateParseError")<{
   readonly message: string;

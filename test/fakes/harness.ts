@@ -2,8 +2,11 @@ import { Effect, Layer, Queue, Schema } from "effect";
 import { ClockLive } from "../../src/core/clock/live";
 import { Issue, IssueStateRef } from "../../src/core/domain/issue";
 import { ServiceConfig, type WorkflowDefinition } from "../../src/core/domain/workflow";
+import { ControlStatusLive } from "../../src/core/observability/control-status";
+import { LiveBudgetLive } from "../../src/core/observability/live-budget";
 import { RecentCompletionsLive } from "../../src/core/observability/recent-completions";
 import { RestoreStatusLive } from "../../src/core/observability/restore-status";
+import { CommandBusLive } from "../../src/core/orchestrator/command";
 import type { OrchestratorDeps } from "../../src/core/orchestrator/loop";
 import type { Observation, Observer } from "../../src/core/orchestrator/observer";
 import { layerOrchestratorStore } from "../../src/core/orchestrator/state";
@@ -120,6 +123,9 @@ export const loopLayer = (
     layerOrchestratorStore(def.config),
     RecentCompletionsLive,
     RestoreStatusLive,
+    ControlStatusLive,
+    LiveBudgetLive(def.config.budget),
+    CommandBusLive,
   );
 
 /**

@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { AgentTotals } from "../src/core/domain/orchestrator-state";
 import { ServiceConfig } from "../src/core/domain/workflow";
-import { toSnapshot } from "../src/core/observability/snapshot-server";
+import { toSnapshot } from "../src/core/observability/snapshot";
 import { evaluateBudget } from "../src/core/orchestrator/budget";
 import { initialState, zeroTotals } from "../src/core/orchestrator/state";
 

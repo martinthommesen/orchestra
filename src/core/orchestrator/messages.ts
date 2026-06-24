@@ -1,4 +1,6 @@
+import type { Deferred } from "effect";
 import type { AgentEvent } from "../domain/agent-event";
+import type { Command, CommandResult } from "./command";
 
 /**
  * The orchestrator mailbox protocol. Workers and timers never touch state directly
@@ -22,4 +24,14 @@ export type Msg =
   /** A worker fiber finished (clean or failed). */
   | { readonly _tag: "WorkerDone"; readonly issueId: string; readonly outcome: WorkerOutcome }
   /** A scheduled retry/continuation timer fired for an issue. */
-  | { readonly _tag: "RetryDue"; readonly issueId: string };
+  | { readonly _tag: "RetryDue"; readonly issueId: string }
+  /**
+   * An operator command pumped off the {@link CommandBus} (Sprint 6 / #64, DD-2). It flows
+   * through this same mailbox so the owner fiber applies it serially — in the same place it
+   * applies every other message — then completes `reply` with a {@link CommandResult}.
+   */
+  | {
+      readonly _tag: "Command";
+      readonly command: Command;
+      readonly reply: Deferred.Deferred<CommandResult>;
+    };

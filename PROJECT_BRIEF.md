@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — Orchestra
 
-> Last updated: 2026-06-24 | Sprint 4 complete | Status: Durable orchestrator shipped
+> Last updated: 2026-06-24 | Sprint 5 complete · Sprint 6 (Web Cockpit) in planning | Status: Operator experience shipped; web cockpit + control plane next
 >
 > **This file is the single source of truth across all team chats.** Each chat is a
 > fresh context — this file and `docs/sprint-N/progress.md` are the only things that
@@ -99,14 +99,15 @@ necessarily `Done`.
 
 | Area | Path | Status | Contents |
 |------|------|--------|----------|
-| CLI / daemon entry | `src/cli/main.ts`, `src/cli/daemon.ts`, `src/cli/args.ts` | ✅ created | Thin top-level dispatcher (`main.ts`: `argv[0]==="dashboard"` → dashboard, else daemon). `daemon.ts` = `runDaemon(argv)` + `appLayer` (logfmt logger, `AppLive` Layer → `runOrchestrator` fiber + forked snapshot server, `runMain`); `args.ts` parses the daemon's `--port`. |
-| Dashboard (Ink TUI) | `src/cli/dashboard.tsx`, `src/cli/dashboard/` | ✅ created | Standalone read-only terminal UI (Ink/React 19). `args.ts` (separate `--port/--host/--interval-ms/--ascii/--help` parser), `snapshot-client.ts` (defensive `parseSnapshot` + injectable `makeFetchSnapshot`), `poller.ts` (non-overlapping `SnapshotPoller`, `connecting/live/stale`), `use-snapshot.ts` (React hook), `view-model.ts` (pure `toViewModel`), `components.tsx`/`app.tsx`/`run.tsx` (Ink render). Reuses `glyphs.ts`; core untouched. |
+| CLI / daemon entry | `src/cli/main.ts`, `src/cli/daemon.ts`, `src/cli/args.ts` | ✅ created | Single daemon CLI surface. `main.ts` = `runDaemon(process.argv.slice(2))`; `daemon.ts` = `runDaemon(argv)` + `appLayer` (logfmt logger, `AppLive` Layer → `runOrchestrator` fiber + forked **cockpit server** via `runCockpit`, `runMain`); `args.ts` parses the daemon's `--port`. |
+| Web cockpit (SPA) | `src/cockpit/` | ✅ created (Sprint 6) | Vite + React + TS browser cockpit served by the daemon: views Fleet/Session-overview · Kanban · Events · Settings; plain-`fetch` typed API client (`api/client.ts`, token from injected `window.__ORCHESTRA_COCKPIT_TOKEN__`); pure mappers + column derivation in vitest-tested `model/*` modules (no Effect, no DOM in the browser test path). `vite build` → `dist/cockpit/` (served statically by the `HttpApi`). |
+| Cockpit API + control plane | `src/core/cockpit/{api,auth,handlers,security,server,static,token}.ts`; `src/core/orchestrator/{command,messages}.ts`; `src/core/workflow/workflow-file.ts` | ✅ created (Sprint 6) | One `@effect/platform` `HttpApi` (`CockpitApi`, `api.ts`) exposing the read snapshot + mutating endpoints (DD-1) — `snapshot-server.ts` is **gone**, replaced by the pure `snapshot.ts` projection it now serves. `command.ts` = `CommandBus` service (`Queue` + per-command `Deferred` ack) delivering operator commands through the existing serial mailbox (`Msg.Command`); `workflow-file.ts` = `WorkflowFile` service doing the atomic, secret-safe settings read/persist + hot-reload (DD-2/DD-4). `auth.ts`/`security.ts` = bearer-token + loopback-Origin/Host middleware; `static.ts` = SPA serving + token injection; `server.ts` = `runCockpit(...)`. |
 | Domain model | `src/core/domain/` | ✅ created | `Schema` types: Issue, AgentEvent (union), ServiceConfig + **front-matter schema** (`workflow.ts`), Workspace, RunAttempt, LiveSession, RetryEntry, OrchestratorState |
 | Ports | `src/core/ports/` | ✅ created | `IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock` as `Context.Tag` (signatures only) |
 | Errors | `src/core/errors.ts` | ✅ created | Tagged error for every SPEC error class + workspace-safety errors; unioned |
 | Workflow config | `src/core/workflow/` | ✅ created | WORKFLOW.md loader, `$VAR`, path resolution, strict Liquid render (front-matter `Schema` lives in `domain/workflow.ts`); watcher deferred |
 | Workspace safety | `src/core/workspace/` | ✅ created | `safety.ts` — workspace-key sanitization + path-under-root checks (used by the adapter) |
-| Observability | `src/core/observability/` | ✅ created | `glyphs.ts` status design system, `live-observer.ts` (logfmt + glyphs), `snapshot-server.ts` (loopback `GET /api/v1/state`) |
+| Observability | `src/core/observability/` | ✅ created | `glyphs.ts` status design system, `live-observer.ts` (logfmt + glyphs), `snapshot.ts` (pure `GET /api/v1/state` projection, served by the cockpit `HttpApi`) |
 | Util | `src/core/util/` | ✅ created | Small shared helpers (e.g. `errorMessage`) |
 | Orchestrator | `src/core/orchestrator/` | ✅ created | Single state-owning fiber: state service, selection, concurrency, backoff, reconciliation, preflight, poll loop, `Observer` |
 | GitHub adapter | `src/adapters/tracker-github/` | ✅ created | Octokit client + pure `normalize.ts` (GitHub→domain), `layerGitHubTracker(config)` |
@@ -122,8 +123,10 @@ necessarily `Done`.
 > the front-matter `Schema` lives in `core/domain/workflow.ts` (not `core/workflow/`),
 > a small `core/util/` was added, and the real `WorkspaceManager` lives under
 > `adapters/workspace/` (the `core/workspace/` dir holds only the pure safety helpers).
-> Sprint 2 split the CLI entry into a thin `main.ts` dispatcher + `daemon.ts`, and added
-> the standalone `src/cli/dashboard/` Ink island (the daemon core is unchanged).
+> Sprint 2 split the CLI entry into a thin `main.ts` dispatcher + `daemon.ts`. Sprint 6
+> removed the standalone Ink dashboard island entirely (the web cockpit under
+> `src/cockpit/` + `src/core/cockpit/` supersedes it) and reduced `main.ts` to the single
+> daemon path (the daemon core is unchanged).
 
 ## 6. Team Roles
 
@@ -147,10 +150,11 @@ necessarily `Done`.
 | 3 | Observability v2 + Durability Spike | ✅ Done | Strictly-additive snapshot enrichment + new dashboard panels: live **event feed**, per-session **activity**, rich **completed/retry** (`recent_events`, `recent_completed`, `running[].last_activity`, retry wall-clock `scheduled_at`+`delay_ms`). New `RecentEvents`/`LiveActivity`/`RecentCompletions` services via a tee observer; exactly two sanctioned `loop.ts` edits. Plus the **#39 durability design spike** (`docs/sprint-3/durability-spike.md`). **Phase B durability build (#40–#43) rolled to Sprint 4** at the #39 gate. QA: SHIP-WITH-FOLLOW-UPS (#45 fixed). |
 | 4 | Durable Orchestrator | ✅ Done | The daemon survives a restart. Versioned (`Schema.parseJson`) **atomic** temp+rename checkpoint at `<workspace.root>/.orchestra/state.json`, written by a scoped **debounced** writer (default 500 ms, coalesced) with a **guaranteed final flush**; corrupt/missing → rename-aside + clean start, never crashes (#40). On boot: restore bookkeeping intact, **orphaned `running` → due-immediately continuation retry** (rides existing reconcile/dispatch, exactly-once is structural), **wall-clock retry re-arm** (`scheduled_at + delay_ms`, never monotonic `due_at_ms`), one synthetic `RestoredAfterRestart` (#41). Additive `RunAttempt.{turn,failure_attempts,session_id}` + `RetryEntry.{kind,session_id}`; **opt-in self-healing session resume** (`persistence.resume_sessions`, default off) (#42). Snapshot stayed **strictly additive** (no `/api/v2`); core-loop edits minimal. #43 stabilized the pre-existing #40 debounce `TestClock` flake (deterministic, 20/20 loop), filled audited coverage gaps, and shipped the docs/handoff. Post-merge QA (Ivy) verdict **SHIP, no blockers**; two minor follow-ups fixed (#50 rate-limit field degradation, #51 `0700`/`0600` checkpoint perms). |
 | 5 | Operator Experience | ✅ Done | Make spend controllable and the daemon legible. **Budget guardrails** (#53): additive optional `budget.max_total_tokens`; a pure pre-`planDispatch` guard pauses **new** dispatch at the token ceiling (in-flight work, retries, and reconcile provably untouched — no kills), emits `BudgetExceeded` once per transition, and projects a strictly-additive snapshot `budget` block + dashboard `BUDGET` panel. **Durability/restore visibility** (#54): a set-once `RestoreStatus` context service promotes #41's one-shot `RestoredAfterRestart` fact to a display-only, strictly-additive snapshot `restore` block (omitted on cold start) + dashboard `RESTORED` indicator — #41's restore stays byte-identical. **Humanized agent-event summaries** (#55): a pure, compile-checked-table `humanizeAgentEvent` renders friendly one-liners in the logfmt line and the dashboard last-activity line (unknown tags fall back to the raw label; maps by tag only, never payload; deliberately not flooded into `recent_events`). #56 audited/filled cross-feature coverage (3 new co-occurrence tests, no duplication) and shipped docs/handoff. Snapshot stayed **strictly additive** (no `/api/v2`); only #53 touched the dispatch path. Post-merge QA (Ivy) verdict **✅ SHIP** after two determinism fixes the sign-off surfaced — #60 (humanizer prototype-key own-property guard) and #61 (the residual #40 debounce flake, re-fixed in the `awaitFileExists` test helper); the `pnpm test` gate is now deterministic (117 clean full-suite runs). |
+| 6 | The Web Cockpit | ✅ Done | A **daemon-served Vite+React SPA** (`src/cockpit/`) with **full operator control**, replacing the read-only Ink TUI. Backend on one `@effect/platform` `HttpApi` (`CockpitApi`) that **replaced** the hand-rolled snapshot router — `snapshot-server.ts` is gone, its read `GET /api/v1/state` re-served byte-compatibly from the pure `snapshot.ts` projection; new mutating endpoints (`POST /control/{pause,resume}`, `POST /issues/:id/{retry,cancel}`, `PUT /settings`) added (#65). Mutations reach the single state-owning fiber via a new `CommandBus` (`Queue` + per-command `Deferred` ack) through the **same serial mailbox** (`Msg.Command`) — exactly-once stays structural; operator **pause/resume** gate beside the budget gate (additive `control` block, in-flight work untouched), **retry-now**, **cancel** (interrupts only the named worker) (#64). `WorkflowFile` service live-edits + persists a **whitelisted** subset of `WORKFLOW.md` front-matter via an **atomic** write keeping the Liquid body + every `$VAR`/`api_key` **byte-identical** (resolved secrets NEVER serialized; a surgical CST scalar edit keeps untouched front-matter byte-verbatim too, #73), then **hot-reloads** the safe knobs (#66). SPA: scaffold + plain-`fetch` typed client (#67), design-system parity + app shell (#68), Fleet + Events views (#69), Kanban with actionable cards (#70), Settings + global pause/resume (#71). Security: loopback bind, read token-free, mutating endpoints need a bearer token (`ORCHESTRA_COCKPIT_TOKEN` or CSPRNG, logged once; injected same-origin) + loopback-Origin/Host allowlist. Forward-only close-out (#72): the **Ink dashboard removed entirely** (`ink`/`ink-testing-library`/`react-devtools-core` dropped; `vite`/`@vitejs/plugin-react`/`react-dom` added). Issues #64–#72 (`docs/sprint-6/plan.md`, `done.md`). |
 
 ## 8. Current State (rewrite every sprint)
 
-**What works (Sprint 5 complete — operator experience on the durable Sprint 4 orchestrator + Sprint 2 dashboard + Sprint 3 observability v2):**
+**What works (Sprint 6 complete — the web cockpit operator surface on the durable Sprint 4 orchestrator + Sprint 3 observability v2 + Sprint 5 budget/restore/humanize):**
 - Everything from Sprint 0 (monorepo, Effect, strict `tsconfig` + **Biome**, domain `Schema`,
   ports, tagged errors, WORKFLOW.md loader, glyph design system, CI on Node 22+24).
 - **Single state-owning orchestrator fiber** (`src/core/orchestrator/`): startup terminal
@@ -175,33 +179,49 @@ necessarily `Done`.
     `copilot` CLI with `cwd === workspacePath`, maps stdout JSONL → `AgentEvent` stream (pure
     `map.ts`), token via env (never logged); the Command `Scope` finalizer SIGTERMs the PID
     on interrupt/stall. `layerCopilotRunner(config)`. Per `docs/sprint-0/spike-copilot.md`.
-- **CLI** = a thin dispatcher (`src/cli/main.ts`): `argv[0]==="dashboard"` → dashboard, else
-  the daemon (`src/cli/daemon.ts`). `pnpm dev ./WORKFLOW.md [--port N]` loads the workflow,
+- **CLI** = a single daemon entry (`src/cli/main.ts` → `runDaemon(process.argv.slice(2))` →
+  `src/cli/daemon.ts`). `pnpm dev ./WORKFLOW.md [--port N]` loads the workflow,
   builds the Layer graph over `NodeContext`, announces startup, and runs the loop until
-  interrupted (clean teardown of workers, timers, server). Workflow-load failures surface an
+  interrupted (clean teardown of workers, timers, cockpit server). Workflow-load failures surface an
   actionable top-line message with the real cause (no secrets).
-- **Dashboard** (`src/cli/dashboard/`): standalone `orchestra dashboard` (Ink/React 19),
-  authorized separately from the daemon arg parser. A plain React hook polls the loopback
-  `GET /api/v1/state` via an injectable `fetchSnapshot` (`AbortSignal.timeout`); polls never
-  overlap, a failed poll keeps the last good snapshot and flips `live → stale` (never blanks),
-  and `connecting` holds until the first success. A pure `toViewModel` then Ink `<Box>`
-  components render honestly — running with client-calculated elapsed/status/workspace/attempt
-  **plus a last-activity line** (`↳ <event_tag> · <rel> ago`, omitted when absent), retrying with
-  **no countdown** but an honest wall-clock `due HH:MM:SSZ` derived from `scheduled_at`+`delay_ms`
-  (the monotonic `due_at_ms` never surfaces), a live **EVENTS** feed (newest-first, glyph+colour
-  by level/kind), a rich **RECENTLY FINISHED** list (identifier + relative finished-at + outcome)
-  distinct from the authoritative IDs-only **COMPLETED (n)**, totals, and **defensive** rate-limits.
-  Every new panel is additive — absent fields → panel omitted, so an older daemon renders exactly
-  like Sprint 2. Reuses the `glyphs.ts` design system; honors `--ascii`, `NO_COLOR`, and non-TTY.
-  `q`/Ctrl-C unmount Ink, abort the in-flight fetch, and clear timers.
-  No Effect runtime is bridged into Ink; the orchestrator core is untouched.
+- **Web cockpit** (`src/cockpit/` SPA + `src/core/cockpit/` server, Sprint 6): with `--port N`
+  the daemon serves a **Vite+React SPA** plus a typed `@effect/platform` `HttpApi` (`CockpitApi`)
+  on loopback — the operator surface that **replaced** the read-only Ink TUI. Four views over a
+  non-overlapping 2 s poll of `GET /api/v1/state` (last-good-on-error, never blanks): **Fleet**
+  (running sessions with client-side elapsed/status/workspace/attempt + humanized last-activity,
+  totals, budget, restore, rate-limits, and the `control` banner), **Events** (the `recent_events`
+  feed, newest-first, filterable), **Kanban** (Candidate/Claimed → Running → Retrying → Completed
+  via a **pure, unit-tested** derivation, with **Cancel**/**Retry-now** buttons reflecting the
+  `CommandResult` and reverting on error), and **Settings** (a form over the whitelisted editable
+  knobs + a prominent global **Pause/Resume** toggle). Absent snapshot field → panel omitted (the
+  additive contract holds). The browser bundle is plain `fetch` + pure `model/*` mappers (no Effect,
+  no DOM test stack); the token is injected as `window.__ORCHESTRA_COCKPIT_TOKEN__` and attached to
+  mutating calls. **Control plane** (`src/core/orchestrator/command.ts`): every mutation reaches the
+  single state-owning fiber via a `CommandBus` (`Queue` + per-command `Deferred` ack) drained into
+  the **same serial mailbox** (`Msg.Command`) — exactly-once stays structural; no HTTP fiber ever
+  touches the store. Operator **pause/resume** is a runtime gate beside the budget gate (`(budget.paused
+  || operatorPaused) ? [] : planDispatch(...)`; additive `control: { dispatch_paused, paused_by }`
+  block; in-flight work untouched), **retry-now** re-arms a backing-off issue, **cancel** interrupts
+  only the named worker. **Settings** (`src/core/workflow/workflow-file.ts`): `GET /api/v1/settings`
+  returns a whitelisted, secret-free subset of the raw front-matter; `PUT` validates a typed patch,
+  applies it to **only** the whitelisted RAW keys via a **surgical** edit — a scalar change on an
+  existing key rewrites just that value's CST source token, leaving the rest of the front-matter
+  **byte-verbatim** (comment alignment, flow arrays, key order intact); structural edits (key
+  delete / map set / absent key) fall back to a Document re-serialize with `flowCollectionPadding:false`,
+  best-effort. The Liquid body, `$VAR`, and `tracker.api_key` stay **byte-identical** in all cases.
+  Writes are **atomic** (semaphore-serialized temp+rename), then `ReloadConfig` hot-applies the safe
+  knobs next tick **without killing in-flight work**. Secrets (`$VAR`, `tracker.api_key`) never reach
+  the wire or the disk-write path. **Security:** loopback bind; read endpoints token-free; mutating
+  endpoints require an `Authorization: Bearer <token>` (`ORCHESTRA_COCKPIT_TOKEN` or a CSPRNG hex token
+  logged once at INFO) **and** a loopback `Origin`/`Host` (401 missing token, 403 cross-origin).
 - **Observability** (`src/core/observability/`): one structured logfmt line per event with
   `issue_id`/`issue_identifier`/`session_id` context + status glyphs. **Observability v2** adds a
   bounded **`RecentEvents`** ring (cap 200, display-safe, monotonic `seq`), **`LiveActivity`**
   (per-issue last agent activity, cap 256), and **`RecentCompletions`** (rich finished ring, cap
   50) — all fed by a **tee observer** that preserves the logfmt output byte-for-byte AND appends
   to the rings (high-volume `AgentEvent` + loop-cadence ticks are dropped from the feed). The
-  loopback-only `GET /api/v1/state` snapshot (behind `--port`) is **strictly additive**: existing
+  loopback-only `GET /api/v1/state` snapshot (a pure `snapshot.ts` projection served by the cockpit
+  `HttpApi` behind `--port`) is **strictly additive**: existing
   fields byte-compatible (`completed` IDs-only, monotonic `due_at_ms` unchanged) plus
   `recent_events`, `recent_completed`, `running[].last_activity`, and retry `scheduled_at`+`delay_ms`.
 - **Durability** (`src/core/persistence/`, Sprint 4): the daemon **survives a restart**. State is
@@ -209,8 +229,8 @@ necessarily `Done`.
   (default 500 ms, bursts coalesced via a `Queue.sliding(1)` dirty signal) using an **atomic**
   temp-file + `rename`, with a **guaranteed final flush** on shutdown; the payload is **versioned**
   (`Schema.parseJson`, ISO `Date`s, forward-only `migrateToCurrent` seam). A transparent
-  `layerDurableOrchestratorStore` is a drop-in for `layerOrchestratorStore`, so `loop.ts`/
-  `snapshot-server.ts` are unedited. On boot the loop restores the full state then reconciles:
+  `layerDurableOrchestratorStore` is a drop-in for `layerOrchestratorStore`, so `loop.ts`/the
+  snapshot projection are unedited. On boot the loop restores the full state then reconciles:
   bookkeeping (completed/totals/rate-limits) survives intact; each **orphaned `running` issue
   becomes a due-immediately continuation retry** that rides the existing retry → reconcile →
   dispatch path (tracker reconcile gates terminal/vanished first — exactly-once is **structural**,
@@ -249,34 +269,41 @@ necessarily `Done`.
   - All three are **strictly additive** on `/api/v1/state` — the `budget` block appears only
     when a ceiling is configured, the `restore` block only after a real boot-time restore, and
     the humanized `last_activity.message` rides an already-existing field — so a pre-Sprint-5
-    dashboard renders identically. The dashboard adds a `BUDGET` panel (active vs. paused), a
+    the humanized `last_activity.message` rides an already-existing field — so a pre-Sprint-5
+    client renders identically. The cockpit adds a `BUDGET` panel (active vs. paused), a
     `RESTORED` indicator (`⟳ restored after restart · n running · n retrying · n completed ·
     restored Xs ago`), and prefers the humanized message over the raw tag on each running issue's
     last-activity line (falling back to the tag for older daemons).
 - **License:** Apache-2.0 (`LICENSE` + `NOTICE`; `package.json` `"license": "Apache-2.0"`).
-- **Tests:** **336 passing** across 30 files (vitest + @effect/vitest + fast-check + Ink) — pure
+- **Tests:** **349 passing** (vitest + @effect/vitest + fast-check) — pure
   unit + property (no-double-dispatch, concurrency caps incl. retry-backoff, backoff
   monotonic/capped), full-loop fake scenarios under `TestClock`, adapter integration tests,
-  a combined fake e2e, the `RecentEvents` ring + snapshot-enrichment suites, the dashboard
-  view-model/poller (fake-timer)/render suites (incl. backward-safety + relative-time width
-  invariants), the **durability suites** — persisted-state codec fixed-point + additive-field
+  a combined fake e2e, the `RecentEvents` ring + snapshot-enrichment suites, the **durability suites**
+  — persisted-state codec fixed-point + additive-field
   survival, atomic save/load + corruption rename-aside, debounce gating/coalescing/final-flush
   under `TestClock` (deterministic — the #40 debounce flake was narrowed in #43 and fully closed in
   **#61**, whose `awaitFileExists` test helper now bounds on a real wall-clock deadline rather than a
-  `setImmediate`-iteration count; 117 clean full-suite runs across dev/Producer/QA), and the
-  restore/reconcile/re-arm + opt-in-resume scenarios, **plus the
+  `setImmediate`-iteration count), and the
+  restore/reconcile/re-arm + opt-in-resume scenarios, **the
   Sprint 5 operator suites** — the pure budget evaluator + config decode + additive snapshot
   projection (`budget-pure`), the loop-level dispatch gate proving in-flight work is untouched
   (`budget-gate`), the set-once restore holder + projection (`restore-pure`) and its real-loop
-  capture (`restore-reconcile`), the compile-checked humanizer table + fallback (`humanize`), the
-  dashboard budget/restore/last-activity parse + VM + render, and a **cross-feature** suite pinning
-  all three additive blocks co-occurring on one snapshot, cold-start older-dashboard safety, and
-  the full raw-bytes → VM decode of a fully-loaded snapshot. `pnpm
-  typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green; a live PTY smoke
-  confirms the dashboard renders, polls without overlap, goes stale-with-data on disconnect, and
-  exits cleanly.
+  capture (`restore-reconcile`), the compile-checked humanizer table + fallback (`humanize`), and a
+  **cross-feature** suite pinning all three additive blocks co-occurring on one snapshot (now decoded
+  through the cockpit's `toFleetView`), **plus the Sprint 6 cockpit suites** — the command-control
+  loop test (operator-pause withholds new dispatch only; cancel scoped to one fiber; the `RetryNow`↔
+  firing-backoff race proven exactly-once), the cockpit `HttpApi` auth matrix (401/403/200) +
+  read-wire byte-compatibility round-trip, the secret-safe settings read/persist (`tracker.api_key`
+  + Liquid body byte-identical across a write; invalid patch rejected before the write lands;
+  overlapping PUTs both land via the `Semaphore(1)`; a scalar PUT leaves the file byte-verbatim
+  except the edited value, #73), the token-bootstrap injection (incl. a
+  `</script>`-bearing token escaped), and the pure cockpit `model/*` mappers (poller, fleet, events,
+  kanban, settings, client, design). `pnpm typecheck` (both tsconfigs) `/lint/test/build` and
+  `pnpm install --frozen-lockfile` all green; a live e2e smoke confirmed the built daemon serves the
+  cockpit (HTML token injection, read snapshot, secret-free settings, the 401/403/200 pause matrix,
+  and operator-pause reflected in the snapshot `control` block).
 
-**What doesn't work yet (Sprint 6+):**
+**What doesn't work yet (Sprint 7+):**
 - **Session resume is unproven against a live Copilot.** `persistence.resume_sessions` is
   default-off and self-healing by design; enabling it for real workloads needs an integration
   validation that Copilot honors `--resume` across daemon downtime (today only the fake-agent
@@ -284,21 +311,24 @@ necessarily `Done`.
   resume itself works. Schema migration is V1-only (the `migrateToCurrent` seam awaits its first
   real bump).
 - **Budget is token-only.** The optional USD cost ceiling (`max_cost_usd` +
-  `usd_per_million_tokens`) was intentionally deferred — a clean, separately-addable follow-up. The
-  runtime budget-*resume* latch is unreachable in production today (spend only grows, config loads
-  once); it stays correct for a future config-reload / hot-reload feature.
+  `usd_per_million_tokens`) was intentionally deferred — a clean, separately-addable follow-up.
 - No live PR creation / branch push flow, no GitHub status write-back beyond reading issues.
-- WORKFLOW.md hot-reload (watcher) still deferred.
-- Snapshot API + dashboard are read-only; no control plane, auth, or metrics export. The event
-  feed is a **bounded recent ring**, not a long-term forensic timeline / raw-stdout log tail.
+- WORKFLOW.md hot-reload is now driven by the cockpit's `PUT /api/v1/settings` (the whitelisted,
+  safe-knob subset); a general file-watcher for out-of-band edits is still deferred.
+- **Cockpit known/intentional limitations (Sprint 6, accepted):** the Kanban **Claimed** column is
+  **count-only** — the snapshot wire emits `counts.claimed` but not claimed issue IDs, so real
+  Claimed cards would need an additive backend change (out of scope); the UI poll cadence is fixed
+  at 2 s (`COCKPIT_POLL_MS`); and cockpit test coverage is **pure-module unit only** (no jsdom/DOM
+  test stack, per the dependency budget). The event feed is still a **bounded recent ring**, not a
+  long-term forensic timeline / raw-stdout log tail.
 - Not yet exercised against a real GitHub repo + live Copilot in CI (adapters are unit-tested;
   the loop is proven against fakes). Manual real-repo validation is the operator's step.
 
 **What's next:**
-- Sprint 6 scope is the Producer's call. Candidates from the Sprint 5 carry-forwards
-  (`docs/sprint-5/done.md`): a live-Copilot resume validation, the optional USD budget ceiling,
-  WORKFLOW.md hot-reload (which would also make the budget-resume path reachable), and the
-  control-plane / PR write-back flow.
+- **Sprint 7 — TBD.** The web cockpit is the live operator surface; remaining carry-forwards are a
+  live-Copilot session-resume validation, the optional USD budget ceiling, the PR write-back flow,
+  and a general WORKFLOW.md file-watcher (`docs/sprint-5/done.md` + `docs/sprint-6/done.md`
+  carry-forwards).
 
 ## 9. Security Rules
 
@@ -338,8 +368,8 @@ Orchestra is a daemon, deployed as a long-running process:
   in a container (Sprint 0/Dash provides a `Dockerfile` + recipe).
 - Provide secrets via environment (`GITHUB_TOKEN`, any `$VAR`s referenced in
   `WORKFLOW.md`).
-- Structured JSON logs to stdout/stderr; optional `--port` enables the JSON snapshot
-  API (`GET /api/v1/state`), loopback-bound by default.
+- Structured JSON logs to stdout/stderr; optional `--port` serves the **web cockpit** + JSON
+  API (`GET /api/v1/state` + control endpoints), loopback-bound by default.
 - Graceful shutdown on SIGTERM; in-memory scheduler state is intentionally not
   persisted (restart recovery is tracker- + filesystem-driven per spec §14.3).
 

@@ -3,8 +3,9 @@ import type { AgentEventTag } from "../domain/agent-event";
 /**
  * Sprint 5 / #55 — **pure agent-event humanizer**. The `AgentEvent` observation carries a
  * raw `eventTag` (one of the {@link AgentEventTag} `_tag`s the runner normalizes to). On its
- * own that reads fairly raw in the logfmt line and the dashboard's per-session activity
- * label; this maps each known tag to a friendly, operator-facing one-liner
+ * own that reads fairly raw in the logfmt line and the cockpit's per-session activity
+ * label (`running[].last_activity.message`); this maps each known tag to a friendly,
+ * operator-facing one-liner
  * ("started session", "finished turn", "waiting for input") while the caller keeps the raw
  * tag on the wire for fidelity/debugging.
  *
