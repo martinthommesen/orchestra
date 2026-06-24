@@ -41,3 +41,21 @@ export const formatRelative = (now: number, iso: string): string => {
 /** Attempt label: `#3`, or `—` when the attempt is unknown. */
 export const attemptLabel = (attempt: number | null): string =>
   attempt === null ? UNKNOWN_TIME : `#${attempt}`;
+
+const pad2utc = (n: number): string => String(n).padStart(2, "0");
+
+/**
+ * Honest wall-clock retry due time ("due 00:01:05Z") from `scheduled_at` + `delay_ms`, in UTC.
+ * `null` when either field is absent or `scheduled_at` is unparseable. NEVER a live countdown and
+ * NEVER derived from the monotonic `due_at_ms` (which the client cannot turn into wall-clock).
+ */
+export const formatDueAt = (
+  scheduledAt: string | undefined,
+  delayMs: number | undefined,
+): string | null => {
+  if (scheduledAt === undefined || delayMs === undefined) return null;
+  const base = Date.parse(scheduledAt);
+  if (!Number.isFinite(base)) return null;
+  const due = new Date(base + delayMs);
+  return `due ${pad2utc(due.getUTCHours())}:${pad2utc(due.getUTCMinutes())}:${pad2utc(due.getUTCSeconds())}Z`;
+};

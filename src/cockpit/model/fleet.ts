@@ -42,6 +42,11 @@ const UNKNOWN_BADGE: StatusBadgeVM = {
 export const badgeForPhase = (phase: string): StatusBadgeVM => {
   const status = (PHASE_TO_STATUS as Record<string, Status | undefined>)[phase];
   if (status === undefined) return UNKNOWN_BADGE;
+  return badgeOf(status);
+};
+
+/** Build a badge directly from a known design-system status. */
+export const badgeOf = (status: Status): StatusBadgeVM => {
   const style = statusStyle(status);
   return { glyph: style.glyph, label: style.label, colorVar: cssVar(status), known: true };
 };

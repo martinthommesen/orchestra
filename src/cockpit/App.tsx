@@ -5,11 +5,12 @@ import { ROUTE_LABELS } from "./router";
 import { useRoute } from "./useRoute";
 import { EventsView } from "./views/EventsView";
 import { FleetView } from "./views/FleetView";
+import { KanbanView } from "./views/KanbanView";
 
 /**
  * Sprint 6 — the cockpit app root. Owns route state (via `useRoute`) and renders the persistent
- * app shell around the active view. Fleet (#69, default) and Events (#69) are live; Kanban (#70)
- * and Settings (#71) are placeholders until their issues land.
+ * app shell around the active view. Fleet (#69, default), Events (#69) and Kanban (#70) are live;
+ * Settings (#71) is a placeholder until its issue lands.
  */
 
 const Placeholder = ({ route }: { route: Route }) => (
@@ -26,6 +27,8 @@ const viewFor = (route: Route) => {
       return <FleetView />;
     case "events":
       return <EventsView />;
+    case "kanban":
+      return <KanbanView />;
     default:
       return <Placeholder route={route} />;
   }

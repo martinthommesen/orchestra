@@ -14,7 +14,7 @@ Branch: `feature/sprint-6` (off `main`, all Sprint 5 work merged).
 | #67 | Vite+React cockpit scaffold, daemon static serving, dev proxy, token bootstrap, build wiring, API client | Nova | M · Low | ✅ done |
 | #68 | Cockpit design system + app shell (web parity of `glyphs.ts`/`design-system.md`) | Milo | S–M · Low | ✅ done |
 | #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ✅ done |
-| #70 | Kanban board view with actionable cards (Cancel / Retry-now) | Nova | M · Med | ☐ todo |
+| #70 | Kanban board view with actionable cards (Cancel / Retry-now) | Nova | M · Med | ✅ done |
 | #71 | Settings view + global pause/resume control | Nova (art: Milo) | M · Med | ☐ todo |
 | #72 | Remove Ink dashboard + deps; tests + docs + handoff close-out | Nova (docs: Remy) | M · Low | ☐ todo |
 
@@ -50,7 +50,7 @@ typecheck + lint + 336 tests).
 - [x] #68 — web design tokens (status colors/glyph parity) + nav shell + shared primitives
 - [x] #69 — Fleet/Session overview view (non-overlapping poll, last-good-on-error)
 - [x] #69 — Events feed view (newest-first, filterable)
-- [ ] #70 — Kanban columns (pure derivation) + Cancel/Retry-now buttons
+- [x] #70 — Kanban columns (pure derivation) + Cancel/Retry-now buttons
 - [ ] #71 — Settings form (whitelist, client validation, no secrets) + Pause/Resume toggle
 
 ### Phase 3 — Close-out
@@ -270,3 +270,27 @@ Decisions:
   level, kind, and free text over message+identifier. The view owns only the filter UI state.
 Gates: typecheck (both configs) + lint clean, **403 tests** (+22: fleet/events/poller), `pnpm
 build` emits `dist/cockpit/index.html` + assets.
+### #70 — Kanban board with actionable cards (Nova, dep #67/#68/#64)
+Files (new): `src/cockpit/model/kanban.ts`, `src/cockpit/views/KanbanView.tsx`,
+`test/cockpit-kanban.test.ts`. Modified: `src/cockpit/model/{format.ts,fleet.ts}` (export
+`badgeOf`, add `formatDueAt`), `src/cockpit/App.tsx` (route Kanban → view), `src/cockpit/app.css`.
+
+Decisions:
+- **Columns are a pure, unit-tested derivation; no drag.** `toKanban(snapshot, now)` projects the
+  snapshot into four ordered columns: Claimed → Running → Retrying → Completed. Running cards
+  carry a `cancel` action, Retrying cards a `retry` action, Completed/Claimed none.
+- **Claimed is count-only — honestly.** The snapshot does NOT carry the claimed issue IDs (only
+  `counts.claimed`, the reserved∪running∪retrying superset). Rather than invent cards, the Claimed
+  column shows the *pending* count = `claimed - running - retrying`, clamped ≥ 0 against transient
+  count drift. Running/Retrying/Completed carry real per-issue cards.
+- **Actions reflect the `CommandResult` and revert on error.** A button enters a `pending` state,
+  awaits the authorized POST, then: `accepted` → "requested ✓" (the next poll moves the card);
+  a rejected ack (`accepted:false`) or a thrown `ApiError` → the reason is surfaced inline and the
+  button is re-enabled (reverted) for another attempt. The board itself re-derives from the poll,
+  so no client-side mutation of orchestrator state.
+- **Badges reuse the one design source.** Running phase → `badgeForPhase`; Retrying → `retrying`;
+  Completed outcome → done/failed/blocked via `badgeOf`. Retry detail shows attempt + honest UTC
+  due time (`formatDueAt` from `scheduled_at`+`delay_ms`, never the monotonic `due_at_ms`).
+Gates: typecheck (both configs) + lint clean, **410 tests** (+7 kanban), `pnpm build` emits the
+SPA. (Note: the control-banner's left-accent border was removed per the design hook — the
+"side-tab accent" AI tell — in favor of a uniform border.)
