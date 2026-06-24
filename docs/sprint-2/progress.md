@@ -3,7 +3,7 @@
 Live tracker for cross-chat recovery. Update after each phase. See `plan.md` for
 full task detail and `done.md` (written at sprint end) for the handoff.
 
-## Status: NOT STARTED — issues seeded, awaiting dev kickoff
+## Status: IN PROGRESS — #29 approved, #30 done
 
 Branch: `feature/sprint-2` (from `main` @ 5d84402).
 
@@ -11,12 +11,28 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
 
 | # | Task | Depends on | Status |
 |----|------|-----------|--------|
-| #29 | Ink toolchain spike & gate (BLOCKING) | — | pending |
-| #30 | CLI dispatcher + `dashboard` subcommand | #29 | pending |
+| #29 | Ink toolchain spike & gate (BLOCKING) | — | ✅ done (Producer-approved) |
+| #30 | CLI dispatcher + `dashboard` subcommand | #29 | ✅ done |
 | #31 | Snapshot client + polling hook | #29 | pending |
 | #32 | Dashboard view-model + Ink rendering | #29, #31 | pending |
 | #33 | Test suite (view-model + hook + light render) | #29, #31, #32 | pending |
 | #34 | Apache-2.0 license + dashboard docs + handoff | (docs ← #32) | pending |
+
+## Progress log
+
+- **#29** (commit `7634076`): ink@7.1.0 + react@19.2.7 + react-devtools-core +
+  @types/react + ink-testing-library wired; `jsx:react-jsx` (no `react` in
+  `types`); vitest include widened to `{ts,tsx}`; second tsup entry. Toolchain
+  verdict: integrates cleanly. Approved by Producer.
+- **#30**: extracted the daemon into `src/cli/daemon.ts` (`runDaemon(argv)` +
+  `appLayer`); `src/cli/main.ts` is now a thin dispatcher (`argv[0]==="dashboard"`
+  → `runDashboard`, else `runDaemon`). Separate dashboard arg parser at
+  `src/cli/dashboard/args.ts` (`--port/--host/--interval-ms/--ascii/--help`) — the
+  daemon's `parseArgs` is untouched, its tests still green. Throwaway
+  `dashboard.tsx` replaced with a real standalone entry that calls `runDashboard`;
+  the #29 spike test removed (its purpose was served) and replaced by
+  `test/dashboard/args.test.ts`. Placeholder Ink shell (`src/cli/dashboard/app.tsx`)
+  renders + exits on q/Ctrl-C; the live fleet view lands in #32.
 
 ## Decisions (from the Sprint 2 design review)
 - **Operational status, not history.** MVP = live fleet view; event feed / ring

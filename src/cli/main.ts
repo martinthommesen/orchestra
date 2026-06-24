@@ -1,80 +1,29 @@
-import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect, Layer, Logger } from "effect";
-import { layerCopilotRunner } from "../adapters/agent-copilot";
-import { layerGitHubTracker } from "../adapters/tracker-github";
-import { layerWorkspaceManager } from "../adapters/workspace";
-import { ClockLive } from "../core/clock/live";
-import type { ServiceConfig } from "../core/domain/workflow";
-import { ObserverLive } from "../core/observability/live-observer";
-import { runSnapshotServer } from "../core/observability/snapshot-server";
-import { runOrchestrator } from "../core/orchestrator/loop";
-import { layerOrchestratorStore } from "../core/orchestrator/state";
-import { loadWorkflow } from "../core/workflow/loader";
-import { parseArgs } from "./args";
+import { runDaemon } from "./daemon";
+import { runDashboard } from "./dashboard/run";
 
 /**
- * Orchestra CLI / daemon entry point.
+ * Orchestra CLI entry point and **thin top-level dispatcher**.
  *
- * Boots the control loop: parse the WORKFLOW.md path (+ optional `--port`), load and
- * validate the workflow into a typed {@link ServiceConfig}, build the application
- * `Layer` graph (store + GitHub tracker + Copilot runner + workspace manager + clock +
- * live observer over the Node platform), announce startup, and hand off to the single
- * state-owning orchestrator fiber via {@link runOrchestrator}. Everything stays inside
- * Effect — `NodeRuntime.runMain` installs SIGINT/SIGTERM handlers that interrupt the
- * root fiber, tearing down the orchestrator scope (and with it every worker, retry
- * timer, and the optional snapshot server).
+ *   orchestra dashboard [--port N] [--host H] [--interval-ms N] [--ascii]
+ *       → the live read-only Ink dashboard (a plain React island; see
+ *         {@link file://./dashboard/run.tsx}).
+ *   orchestra <WORKFLOW.md> [--port N]
+ *       → the orchestrator daemon (an Effect program; see {@link file://./daemon.ts}).
+ *
+ * The two paths keep entirely separate argument grammars — the daemon's `parseArgs`
+ * is never overloaded with subcommand logic (Sprint 2 design-review constraint). The
+ * `dashboard` token is peeled off here and the remaining flags are handed to the
+ * dashboard's own parser.
  */
 
-const VERSION = process.env.npm_package_version ?? "0.0.0";
+const argv = process.argv.slice(2);
 
-/**
- * Build the application Layer graph from a loaded workflow's {@link ServiceConfig}. The
- * platform-dependent layers (workspace manager, Copilot runner) take their
- * `FileSystem`/`CommandExecutor` from the ambient {@link NodeContext.layer}, provided
- * once at the program root.
- */
-export const appLayer = (config: ServiceConfig) =>
-  Layer.mergeAll(
-    layerOrchestratorStore(config),
-    layerGitHubTracker(config),
-    layerCopilotRunner(config),
-    layerWorkspaceManager(config),
-    ClockLive,
-    ObserverLive,
-  );
-
-/** The top-level program: parse args, load workflow, wire layers, run the loop. */
-const program = Effect.gen(function* () {
-  const { workflowPath, port } = yield* parseArgs(process.argv.slice(2));
-  const def = yield* loadWorkflow(workflowPath);
-
-  yield* Effect.logInfo("orchestra started").pipe(
-    Effect.annotateLogs({
-      event: "started",
-      version: VERSION,
-      workflow_path: workflowPath,
-      pid: String(process.pid),
-      ...(port === null ? {} : { snapshot_port: String(port) }),
-    }),
-  );
-
-  const run = Effect.scoped(
-    Effect.gen(function* () {
-      if (port !== null) {
-        yield* Effect.forkScoped(runSnapshotServer(port));
-      }
-      yield* runOrchestrator(def);
-    }),
-  );
-
-  yield* run.pipe(Effect.provide(appLayer(def.config)));
-}).pipe(Effect.provide(NodeContext.layer));
-
-/** logfmt logger → stable `key=value` lines per PROJECT_BRIEF §13.1. */
-const LoggerLive = Logger.logFmt;
-
-NodeRuntime.runMain(program.pipe(Effect.provide(LoggerLive)), {
-  // We install our own logfmt logger; suppress runMain's built-in pretty logger so
-  // there is a single, stable structured line per event.
-  disablePrettyLogger: true,
-});
+if (argv[0] === "dashboard") {
+  runDashboard(argv.slice(1)).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`orchestra dashboard: ${message}\n`);
+    process.exitCode = 1;
+  });
+} else {
+  runDaemon(argv);
+}
