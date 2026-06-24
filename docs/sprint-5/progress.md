@@ -10,7 +10,7 @@ humanized event summaries). Branch: `feature/sprint-5` (off `main` @ `ec31b4c`).
 | #53 | Budget guardrails (pause dispatch at a spend ceiling) | M · Med | ✅ done |
 | #54 | Surface durability/restore state in snapshot + dashboard | S–M · Low | ✅ done |
 | #55 | Humanized agent-event summaries | M · Low | ✅ done |
-| #56 | Tests + docs + handoff close-out | M · Low | ⏳ pending |
+| #56 | Tests + docs + handoff close-out | M · Low | ✅ done |
 
 Dependencies: #53/#54/#55 independent · #56 → all.
 Build order: #53 (review-gated) → #54 → #55 → #56.
@@ -259,3 +259,34 @@ unchanged — the line still uses the existing `glyph("running")` helper, so
 
 **Determinism.** No sleeps; the humanizer is pure; the property test is fast-check over
 strings; existing `TestClock`-based timing assertions untouched.
+
+### #56 — Tests + docs + handoff close-out ✅
+
+Close-out. No source/behavior changes — coverage fill + docs only.
+
+**Cross-feature coverage (audit + fill).** Audited the three suites as a whole. They are
+complete in isolation, but each only ever sets a **single** additive extra on `toSnapshot` /
+a single dashboard panel — the **interactions** were the gap. Added one file,
+`test/cross-feature.test.ts` (**3 tests**), no per-feature duplication:
+
+1. `budget` + `restore` + a humanized `running[].last_activity.message` all present on one
+   snapshot at once — correctly shaped, non-interfering, JSON round-tripping.
+2. Cold-start older-dashboard safety asserted **together**: a bare projection carries NONE of
+   the new blocks (`budget`/`restore` absent, `last_activity` undefined) in one place.
+3. Full dashboard decode of a fully-loaded wire body → `parseSnapshot` → `toViewModel`
+   populates the budget, restore, and humanized last-activity panels together (message
+   derived from the real humanizer table, so the path is end-to-end raw-bytes → VM).
+
+Everything else the issue floated was already covered and not duplicated (evaluator/gate,
+set-once holder + real-loop capture, humanizer table/fallback, per-panel parse/render).
+
+**Docs.** README gained a **Budget guardrails** section (+ `budget.max_total_tokens` config
+table) and an **Operator visibility** section (additive `budget`/`restore` snapshot blocks +
+humanized event summaries). Wrote `docs/sprint-5/done.md`; updated `PROJECT_BRIEF.md` §7
+(Sprint 5 → ✅ Done) and rewrote §8 to the post-Sprint-5 system; synced every test-count
+reference to the new total.
+
+**Gate results.** `pnpm typecheck` ✅ · `pnpm lint` ✅ (109 files) · `pnpm build` ✅ ·
+`pnpm test` ✅ **336 passed** (333 at feature-merge + 3 cross-feature, 0 regressions).
+
+**Sprint 5 final: 336 tests, all gates green.** Sprint complete — all four issues done.

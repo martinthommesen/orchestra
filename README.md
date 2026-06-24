@@ -122,6 +122,50 @@ decodes):
 | `debounce_ms` | `500` | Write-coalescing window in milliseconds |
 | `resume_sessions` | `false` | Opt-in best-effort agent session resume on restart |
 
+## Budget guardrails
+
+Orchestra can **cap agent spend** before it runs away. The optional `budget` block sets a
+cumulative token ceiling; when the running total of agent tokens
+(`totals.total_tokens`) reaches it, the orchestrator **pauses new dispatch** and the
+snapshot/dashboard show the pause. The guard is deliberately narrow:
+
+- **In-flight work always completes.** A budget pauses *new* dispatch only — running
+  workers stream to the end and reconcile normally; nothing is killed or interrupted.
+- **Retries still dispatch.** Continuations and retry backoffs ride a separate path the
+  guard never touches, so a paused budget never strands an issue mid-flight.
+- **Absent → unlimited.** With no `budget` block (or no `max_total_tokens`) the guard is
+  inert and the daemon behaves exactly as before.
+- **Raising/clearing the ceiling resumes dispatch** on the next tick (spend only grows, so
+  resume happens via a config change, not by itself).
+
+A pause/resume emits one lifecycle event on the transition (no per-tick spam).
+
+The optional `budget` block in `WORKFLOW.md` (all-defaults, so an unchanged config still
+decodes):
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `max_total_tokens` | _(unset → unlimited)_ | Positive integer token ceiling; new dispatch pauses once cumulative agent token spend reaches it |
+
+## Operator visibility
+
+Two further additions make the daemon legible at a glance, both **display-only** (no
+dispatch/retry/persistence behavior changes) and **strictly additive** on
+`/api/v1/state` — absent fields mean an omitted panel, so older dashboards keep working:
+
+- **Snapshot `budget` block** — present only when a ceiling is configured; carries
+  `limit_tokens`, `spent_tokens`, `remaining_tokens`, and `paused`. The dashboard renders a
+  `BUDGET` panel (active vs. paused).
+- **Snapshot `restore` block** — present only after a real boot-time restore (absent on a
+  cold start); carries the wall-clock `at` plus the counts of orphaned-running
+  continuations, re-armed retries, and restored completions. The dashboard renders a
+  `RESTORED` indicator (`⟳ restored after restart · n running · n retrying · n completed ·
+  restored Xs ago`).
+- **Humanized event summaries** — agent events are rendered as plain-language one-liners in
+  the logfmt line and on each running issue's last-activity line in the dashboard (e.g.
+  `finished turn`, `waiting for input`). Unknown event tags fall back to the raw label, so
+  the feed never blanks out. The raw `event_tag` is kept on the wire for debugging.
+
 ## Configuration
 
 `WORKFLOW.md` is YAML front matter (configuration) plus a Liquid body (the per-issue

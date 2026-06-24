@@ -146,11 +146,11 @@ necessarily `Done`.
 | 2 | Live Ink Dashboard | ✅ Done | Standalone `orchestra dashboard` (Ink/React 19) polling the loopback snapshot API: thin CLI dispatcher, defensive snapshot client + non-overlapping poller, pure view-model + honest Ink rendering (reuses the glyph design system), `connecting/live/stale` resilience, `--ascii`/`NO_COLOR`. Apache-2.0 license added. Core orchestrator untouched. |
 | 3 | Observability v2 + Durability Spike | ✅ Done | Strictly-additive snapshot enrichment + new dashboard panels: live **event feed**, per-session **activity**, rich **completed/retry** (`recent_events`, `recent_completed`, `running[].last_activity`, retry wall-clock `scheduled_at`+`delay_ms`). New `RecentEvents`/`LiveActivity`/`RecentCompletions` services via a tee observer; exactly two sanctioned `loop.ts` edits. Plus the **#39 durability design spike** (`docs/sprint-3/durability-spike.md`). **Phase B durability build (#40–#43) rolled to Sprint 4** at the #39 gate. QA: SHIP-WITH-FOLLOW-UPS (#45 fixed). |
 | 4 | Durable Orchestrator | ✅ Done | The daemon survives a restart. Versioned (`Schema.parseJson`) **atomic** temp+rename checkpoint at `<workspace.root>/.orchestra/state.json`, written by a scoped **debounced** writer (default 500 ms, coalesced) with a **guaranteed final flush**; corrupt/missing → rename-aside + clean start, never crashes (#40). On boot: restore bookkeeping intact, **orphaned `running` → due-immediately continuation retry** (rides existing reconcile/dispatch, exactly-once is structural), **wall-clock retry re-arm** (`scheduled_at + delay_ms`, never monotonic `due_at_ms`), one synthetic `RestoredAfterRestart` (#41). Additive `RunAttempt.{turn,failure_attempts,session_id}` + `RetryEntry.{kind,session_id}`; **opt-in self-healing session resume** (`persistence.resume_sessions`, default off) (#42). Snapshot stayed **strictly additive** (no `/api/v2`); core-loop edits minimal. #43 stabilized the pre-existing #40 debounce `TestClock` flake (deterministic, 20/20 loop), filled audited coverage gaps, and shipped the docs/handoff. Post-merge QA (Ivy) verdict **SHIP, no blockers**; two minor follow-ups fixed (#50 rate-limit field degradation, #51 `0700`/`0600` checkpoint perms). |
-| 5 | Operator Experience | 🔵 In progress | Make spend controllable and the daemon legible: **budget guardrails** that pause new dispatch (never kill in-flight work) at a configured token/cost ceiling (#53); **durability/restore visibility** — promote #41's `RestoredAfterRestart` to an additive snapshot field + dashboard indicator (#54); **humanized agent-event summaries** in the feed/logs/dashboard (#55); tests + docs + handoff (#56). Snapshot stays strictly additive; only #53 touches the dispatch path (an additive pre-`planDispatch` guard). |
+| 5 | Operator Experience | ✅ Done | Make spend controllable and the daemon legible. **Budget guardrails** (#53): additive optional `budget.max_total_tokens`; a pure pre-`planDispatch` guard pauses **new** dispatch at the token ceiling (in-flight work, retries, and reconcile provably untouched — no kills), emits `BudgetExceeded` once per transition, and projects a strictly-additive snapshot `budget` block + dashboard `BUDGET` panel. **Durability/restore visibility** (#54): a set-once `RestoreStatus` context service promotes #41's one-shot `RestoredAfterRestart` fact to a display-only, strictly-additive snapshot `restore` block (omitted on cold start) + dashboard `RESTORED` indicator — #41's restore stays byte-identical. **Humanized agent-event summaries** (#55): a pure, compile-checked-table `humanizeAgentEvent` renders friendly one-liners in the logfmt line and the dashboard last-activity line (unknown tags fall back to the raw label; maps by tag only, never payload; deliberately not flooded into `recent_events`). #56 audited/filled cross-feature coverage (3 new co-occurrence tests, no duplication) and shipped docs/handoff. Snapshot stayed **strictly additive** (no `/api/v2`); only #53 touched the dispatch path. |
 
 ## 8. Current State (rewrite every sprint)
 
-**What works (Sprint 4 complete — durable orchestrator on the Sprint 1 loop + Sprint 2 dashboard + Sprint 3 observability v2):**
+**What works (Sprint 5 complete — operator experience on the durable Sprint 4 orchestrator + Sprint 2 dashboard + Sprint 3 observability v2):**
 - Everything from Sprint 0 (monorepo, Effect, strict `tsconfig` + **Biome**, domain `Schema`,
   ports, tagged errors, WORKFLOW.md loader, glyph design system, CI on Node 22+24).
 - **Single state-owning orchestrator fiber** (`src/core/orchestrator/`): startup terminal
@@ -222,26 +222,69 @@ necessarily `Done`.
   falls back to a fresh turn against the on-disk workspace (the true record of progress). All
   persisted continuity fields (`RunAttempt.{turn,failure_attempts,session_id}`,
   `RetryEntry.{kind,session_id}`) are optional/additive; `/api/v1/state` stayed strictly additive.
+- **Operator experience** (Sprint 5): the daemon's spend is controllable and its state legible.
+  - **Budget guardrails** (`src/core/orchestrator/budget.ts`, #53): an additive optional
+    `budget.max_total_tokens` config. A **pure** `evaluateBudget` runs once per tick as a
+    pre-`planDispatch` guard — when cumulative agent spend (`agent_totals.total_tokens`)
+    reaches the ceiling the loop plans **zero** fresh dispatches (`toDispatch = paused ? [] :
+    planDispatch(...)`). It pauses **NEW** dispatch only: in-flight workers, pending retries
+    (the separate `handleRetryDue` path), and reconcile are provably untouched — no kills, no
+    change to concurrency/retry math. A runtime latch emits one `BudgetExceeded` observation
+    per pause/resume transition (no per-tick spam), rendered in the feed + logfmt. Absent
+    ceiling → inert. The optional USD cost ceiling was intentionally deferred; the runtime
+    *resume* path is unreachable in production today (spend only grows, config loads once) but
+    stays correct for a future config-reload.
+  - **Durability/restore visibility** (`src/core/observability/restore-status.ts`, #54): a
+    set-once `RestoreStatus` context service (same family as `LiveActivity`/`RecentCompletions`)
+    holds #41's boot-time `RestoreSummary`, written **once** by the loop on the same path that
+    emits `RestoredAfterRestart` (cold start → never recorded). Display-only; #41's restore stays
+    byte-identical.
+  - **Humanized agent-event summaries** (`src/core/observability/humanize.ts`, #55): a pure,
+    total, never-blank `humanizeAgentEvent` maps each `AgentEvent` tag to a friendly one-liner
+    via a compile-checked `Record<AgentEventTag, string>` table (a new variant trips a type
+    error; unknown tags fall back to the raw label). It maps by **tag only** — never agent
+    payload — so it can't leak issue content. Wired into the logfmt line and per-issue
+    `LiveActivity.message` (which flows onto `running[].last_activity`); deliberately **not**
+    pushed into `recent_events` (per-turn chatter would flood the feed).
+  - All three are **strictly additive** on `/api/v1/state` — the `budget` block appears only
+    when a ceiling is configured, the `restore` block only after a real boot-time restore, and
+    the humanized `last_activity.message` rides an already-existing field — so a pre-Sprint-5
+    dashboard renders identically. The dashboard adds a `BUDGET` panel (active vs. paused), a
+    `RESTORED` indicator (`⟳ restored after restart · n running · n retrying · n completed ·
+    restored Xs ago`), and prefers the humanized message over the raw tag on each running issue's
+    last-activity line (falling back to the tag for older daemons).
 - **License:** Apache-2.0 (`LICENSE` + `NOTICE`; `package.json` `"license": "Apache-2.0"`).
-- **Tests:** **295 passing** across 25 files (vitest + @effect/vitest + fast-check + Ink) — pure
+- **Tests:** **336 passing** across 30 files (vitest + @effect/vitest + fast-check + Ink) — pure
   unit + property (no-double-dispatch, concurrency caps incl. retry-backoff, backoff
   monotonic/capped), full-loop fake scenarios under `TestClock`, adapter integration tests,
   a combined fake e2e, the `RecentEvents` ring + snapshot-enrichment suites, the dashboard
   view-model/poller (fake-timer)/render suites (incl. backward-safety + relative-time width
-  invariants), **plus the durability suites** — persisted-state codec fixed-point + additive-field
+  invariants), the **durability suites** — persisted-state codec fixed-point + additive-field
   survival, atomic save/load + corruption rename-aside, debounce gating/coalescing/final-flush
   under `TestClock` (deterministic — the pre-existing #40 flake was fixed in #43, verified 20/20 in
-  a parallel-load loop), and the restore/reconcile/re-arm + opt-in-resume scenarios. `pnpm
+  a parallel-load loop), and the restore/reconcile/re-arm + opt-in-resume scenarios, **plus the
+  Sprint 5 operator suites** — the pure budget evaluator + config decode + additive snapshot
+  projection (`budget-pure`), the loop-level dispatch gate proving in-flight work is untouched
+  (`budget-gate`), the set-once restore holder + projection (`restore-pure`) and its real-loop
+  capture (`restore-reconcile`), the compile-checked humanizer table + fallback (`humanize`), the
+  dashboard budget/restore/last-activity parse + VM + render, and a **cross-feature** suite pinning
+  all three additive blocks co-occurring on one snapshot, cold-start older-dashboard safety, and
+  the full raw-bytes → VM decode of a fully-loaded snapshot. `pnpm
   typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green; a live PTY smoke
   confirms the dashboard renders, polls without overlap, goes stale-with-data on disconnect, and
   exits cleanly.
 
-**What doesn't work yet (Sprint 5+):**
+**What doesn't work yet (Sprint 6+):**
 - **Session resume is unproven against a live Copilot.** `persistence.resume_sessions` is
   default-off and self-healing by design; enabling it for real workloads needs an integration
   validation that Copilot honors `--resume` across daemon downtime (today only the fake-agent
-  self-heal path is tested). The checkpoint is not surfaced in the dashboard/snapshot, and schema
-  migration is V1-only (the `migrateToCurrent` seam awaits its first real bump).
+  self-heal path is tested). Sprint 5 surfaces *that* a restore happened (#54), not whether session
+  resume itself works. Schema migration is V1-only (the `migrateToCurrent` seam awaits its first
+  real bump).
+- **Budget is token-only.** The optional USD cost ceiling (`max_cost_usd` +
+  `usd_per_million_tokens`) was intentionally deferred — a clean, separately-addable follow-up. The
+  runtime budget-*resume* latch is unreachable in production today (spend only grows, config loads
+  once); it stays correct for a future config-reload / hot-reload feature.
 - No live PR creation / branch push flow, no GitHub status write-back beyond reading issues.
 - WORKFLOW.md hot-reload (watcher) still deferred.
 - Snapshot API + dashboard are read-only; no control plane, auth, or metrics export. The event
@@ -250,9 +293,10 @@ necessarily `Done`.
   the loop is proven against fakes). Manual real-repo validation is the operator's step.
 
 **What's next:**
-- Sprint 5 scope is the Producer's call. Candidates from the durability follow-ups
-  (`docs/sprint-4/done.md`): a live-Copilot resume validation, surfacing checkpoint/restore state
-  in the dashboard, and the control-plane / PR write-back flow.
+- Sprint 6 scope is the Producer's call. Candidates from the Sprint 5 carry-forwards
+  (`docs/sprint-5/done.md`): a live-Copilot resume validation, the optional USD budget ceiling,
+  WORKFLOW.md hot-reload (which would also make the budget-resume path reachable), and the
+  control-plane / PR write-back flow.
 
 ## 9. Security Rules
 
