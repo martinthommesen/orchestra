@@ -12,7 +12,7 @@ Branch: `feature/sprint-6` (off `main`, all Sprint 5 work merged).
 | #65 | Cockpit `HttpApi` server (read + mutating endpoints, auth/Origin, static SPA; replaces snapshot router) | Sage | M · Med | ✅ done |
 | #66 | Settings: read editable subset + persist whitelisted patch to `WORKFLOW.md` + hot-reload | Sage | M · Med | ✅ done |
 | #67 | Vite+React cockpit scaffold, daemon static serving, dev proxy, token bootstrap, build wiring, API client | Nova | M · Low | ✅ done |
-| #68 | Cockpit design system + app shell (web parity of `glyphs.ts`/`design-system.md`) | Milo | S–M · Low | ☐ todo |
+| #68 | Cockpit design system + app shell (web parity of `glyphs.ts`/`design-system.md`) | Milo | S–M · Low | ✅ done |
 | #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ☐ todo |
 | #70 | Kanban board view with actionable cards (Cancel / Retry-now) | Nova | M · Med | ☐ todo |
 | #71 | Settings view + global pause/resume control | Nova (art: Milo) | M · Med | ☐ todo |
@@ -47,7 +47,7 @@ typecheck + lint + 336 tests).
 - [x] #67 — `src/cockpit/` Vite+React+TS scaffold + `vite.config.ts` (build/proxy)
 - [x] #67 — typed plain-`fetch` API client (token from injected bootstrap)
 - [x] #67 — `pnpm build` runs `tsup` + `vite build`; biome covers `src/cockpit/`
-- [ ] #68 — web design tokens (status colors/glyph parity) + nav shell + shared primitives
+- [x] #68 — web design tokens (status colors/glyph parity) + nav shell + shared primitives
 - [ ] #69 — Fleet/Session overview view (non-overlapping poll, last-good-on-error)
 - [ ] #69 — Events feed view (newest-first, filterable)
 - [ ] #70 — Kanban columns (pure derivation) + Cancel/Retry-now buttons
@@ -215,3 +215,31 @@ Decisions:
 - The `App.tsx` is a minimal boot scaffold; the design-system shell + views land in #68–#71.
 Gates: typecheck (both configs) + lint clean, **373 tests** (+11 client), `pnpm build` emits
 the daemon bundle **and** `dist/cockpit/index.html` + assets.
+
+### #68 — Cockpit design system + app shell (Milo, dep #67)
+Files (new): `src/cockpit/design/{tokens.ts,tokens.css}`, `src/cockpit/router.ts`,
+`src/cockpit/useRoute.ts`, `src/cockpit/components/{StatusChip.tsx,Panel.tsx,AppShell.tsx}`,
+`src/cockpit/app.css`, `test/cockpit-design.test.ts`. Modified: `src/cockpit/App.tsx` (renders
+the shell + placeholder views), `src/cockpit/main.tsx` (imports the token + app CSS).
+
+Decisions:
+- **One status vocabulary, reused — not duplicated.** `design/tokens.ts` imports `Status`,
+  `ColorToken`, `STATUS_STYLES`, `PHASE_TO_STATUS`, `phaseStatus` straight from
+  `core/observability/glyphs.ts` (the single source of truth shared with the CLI). `glyphs.ts`
+  is pure and its only import is an `import type`, so the bundler erases it — no Effect/Schema
+  reaches the browser. The web layer adds **only** the binding each semantic color token → a CSS
+  custom property (`COLOR_TOKEN_VAR`). `tokens.css` renders those five tokens (info=cyan,
+  warn=yellow, muted=gray, success=green, danger=red), parity pinned by `cockpit-design.test.ts`.
+- **Accessibility posture mirrors the CLI's NO_COLOR / --ascii spirit.** `StatusChip` always
+  renders glyph **and** label (color is never the only signal); `tokens.css` drops all motion
+  under `prefers-reduced-motion: reduce` and reinforces borders/contrast under
+  `prefers-contrast: more`.
+- **Tiny hash router, no react-router.** `router.ts` is pure (`parseRoute`/`routeHref`/`ROUTES`,
+  Node-testable); `useRoute.ts` holds the DOM binding (`hashchange`). Four nav targets
+  (Fleet · Kanban · Events · Settings) map 1:1 to the four views; Fleet is the default.
+- **Shared primitives reused by #69–#71.** `StatusChip` (status glyph+label chip), `Panel`
+  (titled card; omitted when its additive data is absent), `AppShell` (presentational nav frame;
+  route state owned above in `App`). Views are placeholders until #69/#70/#71 replace them.
+Gates: typecheck (both configs) + lint clean (`!important` reduced-motion reset suppressed with
+justified `biome-ignore`), **381 tests** (+8 design/router), `pnpm build` emits the SPA with the
+bundled CSS (`dist/cockpit/assets/index-*.css`).

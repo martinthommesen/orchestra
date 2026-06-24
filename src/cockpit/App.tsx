@@ -1,27 +1,28 @@
-import { createClient } from "./api/client";
+import { AppShell } from "./components/AppShell";
+import { Panel } from "./components/Panel";
+import type { Route } from "./router";
+import { ROUTE_LABELS } from "./router";
+import { useRoute } from "./useRoute";
 
 /**
- * Sprint 6 / #67 — the cockpit app root. A minimal scaffold for now: it constructs the typed
- * API client and confirms the SPA boots and can reach the daemon. The design-system shell
- * (nav: Fleet · Kanban · Events · Settings) and the views land in #68–#71.
+ * Sprint 6 / #68 — the cockpit app root. Owns route state (via `useRoute`) and renders the
+ * persistent app shell around the active view. The four views are placeholders for now; #69
+ * (Fleet/Events), #70 (Kanban), and #71 (Settings) replace each in turn.
  */
 
-const client = createClient();
+const Placeholder = ({ route }: { route: Route }) => (
+  <Panel title={ROUTE_LABELS[route]}>
+    <p className="view-placeholder">
+      The {ROUTE_LABELS[route]} view lands in a later Phase-2 issue.
+    </p>
+  </Panel>
+);
 
 export const App = () => {
+  const { route, navigate } = useRoute();
   return (
-    <main>
-      <h1>Orchestra Cockpit</h1>
-      <p>The control plane is online. The fleet, kanban, events, and settings views arrive next.</p>
-      <button
-        type="button"
-        onClick={() => {
-          // Smoke check: the scaffold can reach the read API. Replaced by the Fleet view (#69).
-          void client.getState();
-        }}
-      >
-        Ping state
-      </button>
-    </main>
+    <AppShell route={route} onNavigate={navigate}>
+      <Placeholder route={route} />
+    </AppShell>
   );
 };

@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import "./design/tokens.css";
+import "./app.css";
 
 /**
  * Sprint 6 / #67 — the cockpit SPA entry. Mounts the React app into the `#root` the daemon

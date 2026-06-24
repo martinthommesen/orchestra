@@ -1,0 +1,132 @@
+/* Sprint 6 / #68 — app shell + shared primitive styles. Uses only design tokens (tokens.css). */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.app-shell__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-shell__brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.app-shell__glyph {
+  color: var(--status-info);
+}
+
+.app-shell__name {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.app-shell__sub {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  text-transform: lowercase;
+}
+
+.app-shell__nav {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.nav-link {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  border: 1px solid transparent;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.nav-link--active {
+  color: var(--text);
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+.app-shell__main {
+  flex: 1;
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* Panel primitive. */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+
+.panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel__title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.panel__actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.panel__body {
+  padding: var(--sp-4);
+}
+
+/* Status chip primitive. */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.status-chip__glyph {
+  line-height: 1;
+}
+
+/* Placeholder view scaffold (replaced by real views in #69–#71). */
+.view-placeholder {
+  color: var(--text-muted);
+}
