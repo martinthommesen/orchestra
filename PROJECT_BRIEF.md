@@ -222,7 +222,7 @@ necessarily `Done`.
   persisted continuity fields (`RunAttempt.{turn,failure_attempts,session_id}`,
   `RetryEntry.{kind,session_id}`) are optional/additive; `/api/v1/state` stayed strictly additive.
 - **License:** Apache-2.0 (`LICENSE` + `NOTICE`; `package.json` `"license": "Apache-2.0"`).
-- **Tests:** **291 passing** across 25 files (vitest + @effect/vitest + fast-check + Ink) — pure
+- **Tests:** **295 passing** across 25 files (vitest + @effect/vitest + fast-check + Ink) — pure
   unit + property (no-double-dispatch, concurrency caps incl. retry-backoff, backoff
   monotonic/capped), full-loop fake scenarios under `TestClock`, adapter integration tests,
   a combined fake e2e, the `RecentEvents` ring + snapshot-enrichment suites, the dashboard
