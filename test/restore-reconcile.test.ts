@@ -8,6 +8,7 @@ import type { OrchestratorState } from "../src/core/domain/orchestrator-state";
 import { ServiceConfig, type WorkflowDefinition } from "../src/core/domain/workflow";
 import { TurnFailed } from "../src/core/errors";
 import { ControlStatusLive } from "../src/core/observability/control-status";
+import { LiveBudgetLive } from "../src/core/observability/live-budget";
 import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
 import { RestoreStatus, RestoreStatusLive } from "../src/core/observability/restore-status";
 import { toSnapshot } from "../src/core/observability/snapshot";
@@ -137,6 +138,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 
@@ -222,6 +224,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 
@@ -289,6 +292,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 
@@ -359,6 +363,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 
@@ -422,6 +427,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
           RecentCompletionsLive,
           RestoreStatusLive,
           ControlStatusLive,
+          LiveBudgetLive(def.config.budget),
           CommandBusLive,
         );
 
@@ -493,6 +499,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 
@@ -558,6 +565,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 
@@ -609,6 +617,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 
@@ -682,6 +691,7 @@ describe("opt-in session resume on continuation (#42)", () => {
           RecentCompletionsLive,
           RestoreStatusLive,
           ControlStatusLive,
+          LiveBudgetLive(def.config.budget),
           CommandBusLive,
         );
 
@@ -750,6 +760,7 @@ describe("opt-in session resume on continuation (#42)", () => {
           RecentCompletionsLive,
           RestoreStatusLive,
           ControlStatusLive,
+          LiveBudgetLive(def.config.budget),
           CommandBusLive,
         );
 
@@ -823,6 +834,7 @@ describe("opt-in session resume on continuation (#42)", () => {
         RecentCompletionsLive,
         RestoreStatusLive,
         ControlStatusLive,
+        LiveBudgetLive(def.config.budget),
         CommandBusLive,
       );
 

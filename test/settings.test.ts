@@ -3,6 +3,9 @@ import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
 import { Duration, Effect, Fiber, TestClock } from "effect";
 import { describe, expect } from "vitest";
+import { LiveBudget } from "../src/core/observability/live-budget";
+import { toSnapshot } from "../src/core/observability/snapshot";
+import { evaluateBudget } from "../src/core/orchestrator/budget";
 import { CommandBus } from "../src/core/orchestrator/command";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";
@@ -356,6 +359,63 @@ describe("settings hot-reload via ReloadConfig (#66, DD-4)", () => {
         yield* waitFor(obs.queue, isDispatched("i2"));
         const overState = yield* store.get;
         expect(overState.running.i1).toBeDefined(); // in-flight worker never disturbed.
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
+  );
+
+  it.scopedLive("ReloadConfig updates the live budget ceiling the cockpit snapshot projects", () =>
+    Effect.gen(function* () {
+      const tracker = yield* makeFakeTracker({});
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+      const obs = yield* makeRecordingObserver();
+
+      // Start with NO ceiling → the snapshot omits the budget block entirely.
+      const def = buildDef({ maxConcurrent: 1, intervalMs: 10_000 });
+      // The reloaded config introduces a 9_000-token ceiling.
+      const reloaded = buildDef({
+        maxConcurrent: 1,
+        intervalMs: 10_000,
+        budgetMaxTotalTokens: 9_000,
+      });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obs.layer,
+      });
+
+      yield* Effect.gen(function* () {
+        const bus = yield* CommandBus;
+        const store = yield* OrchestratorStore;
+        const liveBudget = yield* LiveBudget;
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+
+        const buildBudgetBlock = Effect.gen(function* () {
+          const state = yield* store.get;
+          const budget = yield* liveBudget.get;
+          return toSnapshot(state, {
+            recentEvents: [],
+            recentCompleted: [],
+            activity: new Map(),
+            budget: evaluateBudget(budget, state.agent_totals),
+            operatorPaused: false,
+          }).budget;
+        });
+
+        // Before reload: no ceiling configured → additive budget block omitted.
+        expect(yield* buildBudgetBlock).toBeUndefined();
+
+        const ack = yield* bus.send({ _tag: "ReloadConfig", config: reloaded.config });
+        expect(ack).toEqual({ _tag: "Reloaded" });
+        yield* waitFor(obs.queue, (o) => o._tag === "ConfigReloaded");
+
+        // After reload: the live ceiling is the new value, so the snapshot now projects it.
+        const after = yield* buildBudgetBlock;
+        expect(after).toBeDefined();
+        expect(after?.limit_tokens).toBe(9_000);
 
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));

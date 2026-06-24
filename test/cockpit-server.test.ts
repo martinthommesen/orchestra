@@ -8,6 +8,7 @@ import { RunAttempt } from "../src/core/domain/run-attempt";
 import { BudgetConfig } from "../src/core/domain/workflow";
 import { ControlStatusLive } from "../src/core/observability/control-status";
 import { LiveActivityLive } from "../src/core/observability/live-activity";
+import { LiveBudgetLive } from "../src/core/observability/live-budget";
 import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
 import { RecentEventsLive } from "../src/core/observability/recent-events";
 import { RestoreStatusLive } from "../src/core/observability/restore-status";
@@ -73,6 +74,7 @@ const cockpitContext = (state = seededState()) =>
     LiveActivityLive,
     RestoreStatusLive,
     ControlStatusLive,
+    LiveBudgetLive(BudgetConfig.make({})),
     CommandBusLive,
   );
 
@@ -81,7 +83,6 @@ const bootCockpit = (port: number) =>
   Effect.forkScoped(
     runCockpit({
       port,
-      budgetConfig: BudgetConfig.make({}),
       workflowPath: `${ABSENT_STATIC_DIR}/WORKFLOW.md`,
       env: FIXTURE_ENV,
       staticDir: ABSENT_STATIC_DIR,

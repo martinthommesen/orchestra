@@ -7,6 +7,7 @@ import { ClockLive } from "../core/clock/live";
 import { runCockpit } from "../core/cockpit/server";
 import type { ServiceConfig } from "../core/domain/workflow";
 import { ControlStatusLive } from "../core/observability/control-status";
+import { LiveBudgetLive } from "../core/observability/live-budget";
 import { ObservabilityLive } from "../core/observability/observer-tee";
 import { RecentCompletionsLive } from "../core/observability/recent-completions";
 import { RestoreStatusLive } from "../core/observability/restore-status";
@@ -61,6 +62,9 @@ export const appLayer = (config: ServiceConfig) =>
     // Operator-pause latch mirror (loop-written; read by the cockpit server) + the
     // command bus the cockpit's mutating endpoints offer onto. #64.
     ControlStatusLive,
+    // Live budget ceiling mirror (loop-written on ReloadConfig; read by the cockpit server)
+    // so a hot settings reload is reflected in the next snapshot's budget block. #73/PR #74.
+    LiveBudgetLive(config.budget),
     CommandBusLive,
   );
 
@@ -89,9 +93,7 @@ export const runDaemon = (argv: ReadonlyArray<string>): void => {
     const run = Effect.scoped(
       Effect.gen(function* () {
         if (port !== null) {
-          yield* Effect.forkScoped(
-            runCockpit({ port, budgetConfig: def.config.budget, workflowPath }),
-          );
+          yield* Effect.forkScoped(runCockpit({ port, workflowPath }));
         }
         yield* runOrchestrator(def);
       }),

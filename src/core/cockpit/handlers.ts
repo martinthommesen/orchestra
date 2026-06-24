@@ -1,8 +1,8 @@
 import { type HttpApi, HttpApiBuilder, HttpApiError, HttpServerResponse } from "@effect/platform";
 import { Duration, Effect, Layer } from "effect";
-import type { BudgetConfig } from "../domain/workflow";
 import { ControlStatus } from "../observability/control-status";
 import { LiveActivity } from "../observability/live-activity";
+import { LiveBudget } from "../observability/live-budget";
 import { RecentCompletions } from "../observability/recent-completions";
 import { RecentEvents } from "../observability/recent-events";
 import { RestoreStatus } from "../observability/restore-status";
@@ -37,48 +37,50 @@ const toAckWire = (result: CommandResult): AckWire =>
     : { accepted: false, reason: "unexpected command result" };
 
 /**
- * The read group implementation. `budgetConfig` is closed over so the snapshot can project
- * a display-only budget block (pure `evaluateBudget`) exactly as the old server did.
+ * The read group implementation. The budget block is projected from the **live** ceiling
+ * ({@link LiveBudget}, written by the owner fiber on `ReloadConfig`) so a hot settings reload
+ * is reflected in the next snapshot — never the stale startup value.
  */
-export const readGroupLive = (budgetConfig: BudgetConfig) =>
-  HttpApiBuilder.group(CockpitApi, "read", (handlers) =>
-    handlers
-      .handle("state", () =>
-        Effect.gen(function* () {
-          const store = yield* OrchestratorStore;
-          const events = yield* RecentEvents;
-          const completions = yield* RecentCompletions;
-          const activity = yield* LiveActivity;
-          const restoreStatus = yield* RestoreStatus;
-          const controlStatus = yield* ControlStatus;
-          const state = yield* store.get;
-          const recentEvents = yield* events.list;
-          const recentCompleted = yield* completions.list;
-          const activityMap = yield* activity.snapshot;
-          const restore = yield* restoreStatus.get;
-          const operatorPaused = yield* controlStatus.get;
-          return yield* HttpServerResponse.json(
-            toSnapshot(state, {
-              recentEvents,
-              recentCompleted,
-              activity: activityMap,
-              budget: evaluateBudget(budgetConfig, state.agent_totals),
-              operatorPaused,
-              ...(restore === null ? {} : { restore }),
-            }),
-          ).pipe(Effect.orDie);
-        }),
-      )
-      .handle("settings", () =>
-        // The whitelisted editable subset (DD-4) — raw values, secrets excluded by construction.
-        Effect.gen(function* () {
-          const workflowFile = yield* WorkflowFile;
-          return yield* workflowFile.read.pipe(
-            Effect.catchAll(() => new HttpApiError.InternalServerError()),
-          );
-        }),
-      ),
-  );
+export const readGroupLive = HttpApiBuilder.group(CockpitApi, "read", (handlers) =>
+  handlers
+    .handle("state", () =>
+      Effect.gen(function* () {
+        const store = yield* OrchestratorStore;
+        const events = yield* RecentEvents;
+        const completions = yield* RecentCompletions;
+        const activity = yield* LiveActivity;
+        const restoreStatus = yield* RestoreStatus;
+        const controlStatus = yield* ControlStatus;
+        const liveBudget = yield* LiveBudget;
+        const state = yield* store.get;
+        const recentEvents = yield* events.list;
+        const recentCompleted = yield* completions.list;
+        const activityMap = yield* activity.snapshot;
+        const restore = yield* restoreStatus.get;
+        const operatorPaused = yield* controlStatus.get;
+        const budgetConfig = yield* liveBudget.get;
+        return yield* HttpServerResponse.json(
+          toSnapshot(state, {
+            recentEvents,
+            recentCompleted,
+            activity: activityMap,
+            budget: evaluateBudget(budgetConfig, state.agent_totals),
+            operatorPaused,
+            ...(restore === null ? {} : { restore }),
+          }),
+        ).pipe(Effect.orDie);
+      }),
+    )
+    .handle("settings", () =>
+      // The whitelisted editable subset (DD-4) — raw values, secrets excluded by construction.
+      Effect.gen(function* () {
+        const workflowFile = yield* WorkflowFile;
+        return yield* workflowFile.read.pipe(
+          Effect.catchAll(() => new HttpApiError.InternalServerError()),
+        );
+      }),
+    ),
+);
 
 /** Run one command through the bus, answering 503 if the owner fiber does not ack in time. */
 const sendCommand = (
@@ -120,9 +122,7 @@ export const controlGroupLive = HttpApiBuilder.group(CockpitApi, "control", (han
 );
 
 /** Assemble the full implemented API layer (read + control + auth), minus the auth impl. */
-export const cockpitApiLive = (
-  budgetConfig: BudgetConfig,
-): Layer.Layer<
+export const cockpitApiLive = (): Layer.Layer<
   HttpApi.Api,
   never,
   | OrchestratorStore
@@ -131,11 +131,12 @@ export const cockpitApiLive = (
   | LiveActivity
   | RestoreStatus
   | ControlStatus
+  | LiveBudget
   | CommandBus
   | CockpitAuth
   | WorkflowFile
 > =>
   HttpApiBuilder.api(CockpitApi).pipe(
-    Layer.provide(readGroupLive(budgetConfig)),
+    Layer.provide(readGroupLive),
     Layer.provide(controlGroupLive),
   );

@@ -16,6 +16,7 @@ import { RunAttempt } from "../domain/run-attempt";
 import type { WorkflowDefinition } from "../domain/workflow";
 import type { Workspace } from "../domain/workspace";
 import { ControlStatus } from "../observability/control-status";
+import { LiveBudget } from "../observability/live-budget";
 import { RecentCompletions } from "../observability/recent-completions";
 import { RestoreStatus } from "../observability/restore-status";
 import type { AgentRunParams } from "../ports/agent-runner";
@@ -128,6 +129,7 @@ export type OrchestratorDeps =
   | RecentCompletions
   | RestoreStatus
   | ControlStatus
+  | LiveBudget
   | CommandBus;
 
 /**
@@ -149,6 +151,7 @@ export const runOrchestrator = (
       const completions = yield* RecentCompletions;
       const restoreStatus = yield* RestoreStatus;
       const controlStatus = yield* ControlStatus;
+      const liveBudget = yield* LiveBudget;
       const commandBus = yield* CommandBus;
 
       const config = def.config;
@@ -847,6 +850,9 @@ export const runOrchestrator = (
                 poll_interval_ms: liveConfig.polling.interval_ms,
                 max_concurrent_agents: liveConfig.agent.max_concurrent_agents,
               }));
+              // Mirror the new ceiling into the live-budget holder so the cockpit read
+              // snapshot projects the reloaded budget block, not the stale startup ceiling.
+              yield* liveBudget.set(liveConfig.budget);
               yield* observer.emit({
                 _tag: "ConfigReloaded",
                 pollIntervalMs: liveConfig.polling.interval_ms,
