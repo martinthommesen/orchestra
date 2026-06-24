@@ -14,8 +14,19 @@ import { defineConfig } from "vite";
  * so mutating calls work against the dev daemon.
  */
 
+const DEFAULT_DEV_PORT = 4317;
+
+/** Parse `ORCHESTRA_PORT` robustly: a positive integer wins, anything else falls back. */
+const resolveDevPort = (raw: string | undefined): number => {
+  if (raw === undefined) {
+    return DEFAULT_DEV_PORT;
+  }
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_DEV_PORT;
+};
+
 const TOKEN_GLOBAL = "__ORCHESTRA_COCKPIT_TOKEN__"; // gitleaks:allow — JS global name, not a secret
-const devPort = Number(process.env.ORCHESTRA_PORT ?? 4317);
+const devPort = resolveDevPort(process.env.ORCHESTRA_PORT);
 
 /** Inject the operator token into the dev-served index (parity with the daemon's injection). */
 const tokenDevInject = () => ({

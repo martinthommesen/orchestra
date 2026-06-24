@@ -43,7 +43,16 @@ const contentType = (path: string): string =>
  * leading `/` is stripped, the query/hash dropped, and the result must stay within `root`.
  */
 export const resolveAssetPath = (root: string, url: string): string | null => {
-  const pathname = decodeURIComponent((url.split("?")[0] ?? "").split("#")[0] ?? "");
+  const raw = (url.split("?")[0] ?? "").split("#")[0] ?? "";
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(raw);
+  } catch {
+    // A malformed percent-escape (e.g. `GET /%`) makes `decodeURIComponent` throw a
+    // `URIError`. Treat it as "no such asset" (→ null) so the handler answers cleanly via
+    // the SPA fallback instead of defecting the request fiber into a 500 (a trivial DoS).
+    return null;
+  }
   const rel = pathname.replace(/^\/+/, "");
   const abs = nodePath.resolve(root, rel);
   const rootResolved = nodePath.resolve(root);

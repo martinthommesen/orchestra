@@ -26,7 +26,7 @@ export type Msg =
   /** A scheduled retry/continuation timer fired for an issue. */
   | { readonly _tag: "RetryDue"; readonly issueId: string }
   /**
-   * An operator command pumped off the {@link Command}Bus (Sprint 6 / #64, DD-2). It flows
+   * An operator command pumped off the {@link CommandBus} (Sprint 6 / #64, DD-2). It flows
    * through this same mailbox so the owner fiber applies it serially — in the same place it
    * applies every other message — then completes `reply` with a {@link CommandResult}.
    */
