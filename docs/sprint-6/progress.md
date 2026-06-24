@@ -13,7 +13,7 @@ Branch: `feature/sprint-6` (off `main`, all Sprint 5 work merged).
 | #66 | Settings: read editable subset + persist whitelisted patch to `WORKFLOW.md` + hot-reload | Sage | M · Med | ✅ done |
 | #67 | Vite+React cockpit scaffold, daemon static serving, dev proxy, token bootstrap, build wiring, API client | Nova | M · Low | ✅ done |
 | #68 | Cockpit design system + app shell (web parity of `glyphs.ts`/`design-system.md`) | Milo | S–M · Low | ✅ done |
-| #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ☐ todo |
+| #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ✅ done |
 | #70 | Kanban board view with actionable cards (Cancel / Retry-now) | Nova | M · Med | ☐ todo |
 | #71 | Settings view + global pause/resume control | Nova (art: Milo) | M · Med | ☐ todo |
 | #72 | Remove Ink dashboard + deps; tests + docs + handoff close-out | Nova (docs: Remy) | M · Low | ☐ todo |
@@ -48,8 +48,8 @@ typecheck + lint + 336 tests).
 - [x] #67 — typed plain-`fetch` API client (token from injected bootstrap)
 - [x] #67 — `pnpm build` runs `tsup` + `vite build`; biome covers `src/cockpit/`
 - [x] #68 — web design tokens (status colors/glyph parity) + nav shell + shared primitives
-- [ ] #69 — Fleet/Session overview view (non-overlapping poll, last-good-on-error)
-- [ ] #69 — Events feed view (newest-first, filterable)
+- [x] #69 — Fleet/Session overview view (non-overlapping poll, last-good-on-error)
+- [x] #69 — Events feed view (newest-first, filterable)
 - [ ] #70 — Kanban columns (pure derivation) + Cancel/Retry-now buttons
 - [ ] #71 — Settings form (whitelist, client validation, no secrets) + Pause/Resume toggle
 
@@ -243,3 +243,30 @@ Decisions:
 Gates: typecheck (both configs) + lint clean (`!important` reduced-motion reset suppressed with
 justified `biome-ignore`), **381 tests** (+8 design/router), `pnpm build` emits the SPA with the
 bundled CSS (`dist/cockpit/assets/index-*.css`).
+### #69 — Fleet / session-overview + Events views (Nova, dep #67/#68)
+Files (new): `src/cockpit/model/{format.ts,fleet.ts,events.ts,poller.ts}`,
+`src/cockpit/usePolling.ts`, `src/cockpit/api/instance.ts`,
+`src/cockpit/components/ConnectionBanner.tsx`, `src/cockpit/views/{FleetView.tsx,EventsView.tsx}`,
+`test/{cockpit-fleet.test.ts,cockpit-events.test.ts,cockpit-poller.test.ts}`. Modified:
+`src/cockpit/App.tsx` (routes Fleet/Events to the real views), `src/cockpit/app.css` (view styles).
+
+Decisions:
+- **All derivation is pure + unit-tested; the views are dumb.** `toFleetView` and `toEventsView`
+  map a `SnapshotWire` + a client `now` into render-ready models, reusing the Ink dashboard's
+  honesty rules: client-side elapsed from `started_at`, an explicit `—` sentinel for unparseable
+  timestamps (never a fake "0s"), an honest "unknown" badge for a contract-drifted run phase
+  (never masquerading as active "running"), and a defensive opaque rate-limit summary that never
+  assumes a vendor schema. Status glyphs/colors come from the one `glyphs.ts` source.
+- **Non-overlapping poll, last-good-on-error — and that logic is itself tested.** Rather than bury
+  the scheduling in a hook, the generic DOM-free `Poller` class (web parity of the Ink poller)
+  holds the guarantees (no overlap; a failed poll keeps the last-good value and flips
+  live→stale; stays `connecting` until the first success; clean teardown) and is unit-tested with
+  fake timers + an injected fetcher. `usePolling` is a thin React adapter over it.
+- **Additive contract honored.** budget/restore/rate-limits/control panels are omitted when the
+  daemon doesn't send the block; the new `control` banner (#64) distinguishes operator vs budget
+  pause and states plainly that in-flight work continues.
+- **Events feed.** `recent_events` rides the wire newest-last (append-only ring); `toEventsView`
+  reverses to newest-first and precomputes per-kind glyph/color. `filterEvents` (pure) filters by
+  level, kind, and free text over message+identifier. The view owns only the filter UI state.
+Gates: typecheck (both configs) + lint clean, **403 tests** (+22: fleet/events/poller), `pnpm
+build` emits `dist/cockpit/index.html` + assets.
