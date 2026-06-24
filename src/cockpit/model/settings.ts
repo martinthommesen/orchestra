@@ -68,8 +68,31 @@ const parsePositiveInt = (raw: string): number | null => {
   return Number.isInteger(n) && n > 0 ? n : null;
 };
 
-/** Validate the form against the whitelist schema and, when valid, build the patch. */
-export const validateSettings = (form: SettingsFormModel): ValidationResult => {
+/** Shallow value-equality for the by-state concurrency map (keys are fixed by the schema). */
+const sameByState = (
+  a: Readonly<Record<string, number>>,
+  b: Readonly<Record<string, number>>,
+): boolean => {
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  return ak.length === bk.length && ak.every((k) => a[k] === b[k]);
+};
+
+/**
+ * Validate the form against the whitelist schema and, when valid, build a **sparse** patch
+ * containing ONLY the fields that actually changed vs. `baseline` (the originally-loaded
+ * settings). The backend treats field *presence* as "set this key", so an over-broad patch
+ * (e.g. always including the structural `max_concurrent_agents_by_state`) forces the YAML
+ * structural-edit path and reformats untouched front matter — defeating the #73 byte-verbatim
+ * scalar-edit guarantee. A sparse patch keeps a scalar-only edit on the byte-verbatim path.
+ *
+ * Every field is still fully validated (any input may be edited); only the emitted patch is
+ * trimmed to the diff. A no-op save yields an empty patch.
+ */
+export const validateSettings = (
+  form: SettingsFormModel,
+  baseline: EditableSettingsWire,
+): ValidationResult => {
   const errors: Record<string, string> = {};
 
   const interval = parsePositiveInt(form.intervalMs);
@@ -105,16 +128,40 @@ export const validateSettings = (form: SettingsFormModel): ValidationResult => {
     return { ok: false, errors: errors as FieldErrors };
   }
 
-  // All parsed — non-null assertions are safe here.
-  const patch: SettingsPatchWire = {
-    polling: { interval_ms: interval as number },
-    agent: {
-      max_concurrent_agents: maxAgents as number,
-      max_turns: maxTurns as number,
-      max_retry_backoff_ms: backoff as number,
-      max_concurrent_agents_by_state: byState,
-    },
-    budget: { max_total_tokens: ceiling },
-  };
+  // All parsed — non-null assertions are safe here. Emit only the changed keys.
+  const agentPatch: {
+    max_concurrent_agents?: number;
+    max_turns?: number;
+    max_retry_backoff_ms?: number;
+    max_concurrent_agents_by_state?: Record<string, number>;
+  } = {};
+  if ((maxAgents as number) !== baseline.agent.max_concurrent_agents) {
+    agentPatch.max_concurrent_agents = maxAgents as number;
+  }
+  if ((maxTurns as number) !== baseline.agent.max_turns) {
+    agentPatch.max_turns = maxTurns as number;
+  }
+  if ((backoff as number) !== baseline.agent.max_retry_backoff_ms) {
+    agentPatch.max_retry_backoff_ms = backoff as number;
+  }
+  if (!sameByState(byState, baseline.agent.max_concurrent_agents_by_state)) {
+    agentPatch.max_concurrent_agents_by_state = byState;
+  }
+
+  const patch: {
+    polling?: { interval_ms: number };
+    agent?: typeof agentPatch;
+    budget?: { max_total_tokens: number | null };
+  } = {};
+  if ((interval as number) !== baseline.polling.interval_ms) {
+    patch.polling = { interval_ms: interval as number };
+  }
+  if (Object.keys(agentPatch).length > 0) {
+    patch.agent = agentPatch;
+  }
+  if (ceiling !== baseline.budget.max_total_tokens) {
+    patch.budget = { max_total_tokens: ceiling };
+  }
+
   return { ok: true, errors: {}, patch };
 };

@@ -48,29 +48,45 @@ describe("toFormModel", () => {
 });
 
 describe("validateSettings", () => {
-  it("accepts a valid form and builds the whitelisted patch", () => {
-    const r = validateSettings(validForm());
+  it("accepts an unchanged valid form and produces an empty (no-op) patch", () => {
+    const r = validateSettings(validForm(), WIRE);
     expect(r.ok).toBe(true);
-    expect(r.patch).toEqual({
-      polling: { interval_ms: 30000 },
-      agent: {
-        max_concurrent_agents: 10,
-        max_turns: 20,
-        max_retry_backoff_ms: 60000,
-        max_concurrent_agents_by_state: { triage: 2, build: 4 },
+    expect(r.patch).toEqual({});
+  });
+
+  it("a scalar-only change produces a sparse patch without max_concurrent_agents_by_state", () => {
+    const r = validateSettings({ ...validForm(), maxTurns: "30" }, WIRE);
+    expect(r.ok).toBe(true);
+    expect(r.patch).toEqual({ agent: { max_turns: 30 } });
+    // The structural by-state key must be ABSENT so the backend keeps the byte-verbatim path.
+    expect(r.patch?.agent?.max_concurrent_agents_by_state).toBeUndefined();
+    expect(r.patch?.polling).toBeUndefined();
+    expect(r.patch?.budget).toBeUndefined();
+  });
+
+  it("includes max_concurrent_agents_by_state only when it actually changed", () => {
+    const r = validateSettings(
+      {
+        ...validForm(),
+        byState: [
+          { state: "build", value: "8" },
+          { state: "triage", value: "2" },
+        ],
       },
-      budget: { max_total_tokens: 100000 },
-    });
+      WIRE,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.patch).toEqual({ agent: { max_concurrent_agents_by_state: { build: 8, triage: 2 } } });
   });
 
   it("the built patch contains only whitelisted keys (no secret leaks)", () => {
-    const r = validateSettings(validForm());
-    expect(Object.keys(r.patch ?? {}).sort()).toEqual(["agent", "budget", "polling"]);
+    const r = validateSettings({ ...validForm(), intervalMs: "15000" }, WIRE);
+    expect(Object.keys(r.patch ?? {})).toEqual(["polling"]);
     expect(JSON.stringify(r.patch).toLowerCase()).not.toContain("tracker");
   });
 
   it("maps a blank token field to a null ceiling (clears it)", () => {
-    const r = validateSettings({ ...validForm(), maxTotalTokens: "  " });
+    const r = validateSettings({ ...validForm(), maxTotalTokens: "  " }, WIRE);
     expect(r.ok).toBe(true);
     expect(r.patch?.budget?.max_total_tokens).toBeNull();
   });
@@ -82,7 +98,7 @@ describe("validateSettings", () => {
     ["maxTurns", "abc"],
     ["maxRetryBackoffMs", ""],
   ])("rejects %s = %j as not a positive integer", (field, value) => {
-    const r = validateSettings({ ...validForm(), [field]: value } as SettingsFormModel);
+    const r = validateSettings({ ...validForm(), [field]: value } as SettingsFormModel, WIRE);
     expect(r.ok).toBe(false);
     expect(r.patch).toBeUndefined();
     expect(r.errors[field as keyof typeof r.errors]).toBeDefined();
@@ -96,15 +112,15 @@ describe("validateSettings", () => {
         { state: "build", value: "0" },
       ],
     };
-    const r = validateSettings(form);
+    const r = validateSettings(form, WIRE);
     expect(r.ok).toBe(false);
     expect(r.errors["byState:build"]).toBeDefined();
     expect(r.errors["byState:triage"]).toBeUndefined();
   });
 
   it("rejects a non-integer token ceiling but accepts a valid one", () => {
-    expect(validateSettings({ ...validForm(), maxTotalTokens: "1.5" }).ok).toBe(false);
-    const ok = validateSettings({ ...validForm(), maxTotalTokens: "5000" });
+    expect(validateSettings({ ...validForm(), maxTotalTokens: "1.5" }, WIRE).ok).toBe(false);
+    const ok = validateSettings({ ...validForm(), maxTotalTokens: "5000" }, WIRE);
     expect(ok.ok).toBe(true);
     expect(ok.patch?.budget?.max_total_tokens).toBe(5000);
   });

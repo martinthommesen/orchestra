@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
 import { COCKPIT_POLL_MS, client } from "../api/instance";
+import type { EditableSettingsWire } from "../api/types";
 import { ConnectionBanner } from "../components/ConnectionBanner";
 import { Panel } from "../components/Panel";
 import {
@@ -34,6 +35,10 @@ export const SettingsView = () => {
   const control = poll.data?.control ?? null;
 
   const [form, setForm] = useState<SettingsFormModel | null>(null);
+  // The originally-loaded settings, retained so a save can send a SPARSE patch (only the
+  // fields that actually changed) — a scalar-only edit then stays on the backend's
+  // byte-verbatim front-matter path (#73) instead of forcing a structural reformat.
+  const [baseline, setBaseline] = useState<EditableSettingsWire | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>({ phase: "idle" });
   const [pauseBusy, setPauseBusy] = useState(false);
@@ -43,7 +48,10 @@ export const SettingsView = () => {
     client
       .getSettings()
       .then((s) => {
-        if (alive) setForm(toFormModel(s));
+        if (alive) {
+          setForm(toFormModel(s));
+          setBaseline(s);
+        }
       })
       .catch((err) => {
         if (alive) setLoadError(messageOf(err));
@@ -53,7 +61,7 @@ export const SettingsView = () => {
     };
   }, []);
 
-  const validation = form === null ? null : validateSettings(form);
+  const validation = form === null || baseline === null ? null : validateSettings(form, baseline);
 
   const onSave = async () => {
     if (form === null || validation === null || !validation.ok || validation.patch === undefined) {
@@ -63,17 +71,25 @@ export const SettingsView = () => {
     try {
       const updated = await client.putSettings(validation.patch);
       setForm(toFormModel(updated));
+      setBaseline(updated);
       setSave({ phase: "saved" });
     } catch (err) {
       setSave({ phase: "error", message: messageOf(err) });
     }
   };
 
+  // Only the operator latch is clearable from here: `ResumeDispatch` clears ONLY the operator
+  // pause, so offering "Resume" while dispatch is held by the BUDGET gate would be a no-op
+  // (confusing UX). When paused by budget we render guidance instead of a dead button.
+  const dispatchPaused = control?.dispatch_paused ?? false;
+  const pausedBy = control?.paused_by ?? null;
+  const canResume = dispatchPaused && pausedBy === "operator";
+  const pausedByBudget = dispatchPaused && pausedBy === "budget";
+
   const togglePause = async () => {
-    const paused = control?.dispatch_paused ?? false;
     setPauseBusy(true);
     try {
-      await (paused ? client.resume() : client.pause());
+      await (dispatchPaused ? client.resume() : client.pause());
     } finally {
       setPauseBusy(false);
     }
@@ -90,23 +106,27 @@ export const SettingsView = () => {
         <div className="pause-toggle">
           <div>
             <strong>
-              {control?.dispatch_paused
-                ? `Dispatch is paused${control.paused_by ? ` (by ${control.paused_by})` : ""}`
+              {dispatchPaused
+                ? `Dispatch is paused${pausedBy ? ` (by ${pausedBy})` : ""}`
                 : "Dispatch is running"}
             </strong>
             <p className="muted">
-              Pausing withholds <em>new</em> sessions only — in-flight work keeps running.
+              {pausedByBudget
+                ? "Paused by the budget gate — raise or clear the token ceiling below to resume."
+                : "Pausing withholds new sessions only — in-flight work keeps running."}
             </p>
           </div>
-          <button
-            type="button"
-            className="btn"
-            disabled={pauseBusy}
-            onClick={togglePause}
-            aria-pressed={control?.dispatch_paused ?? false}
-          >
-            {pauseBusy ? "…" : control?.dispatch_paused ? "Resume dispatch" : "Pause dispatch"}
-          </button>
+          {pausedByBudget ? null : (
+            <button
+              type="button"
+              className="btn"
+              disabled={pauseBusy}
+              onClick={togglePause}
+              aria-pressed={dispatchPaused}
+            >
+              {pauseBusy ? "…" : canResume ? "Resume dispatch" : "Pause dispatch"}
+            </button>
+          )}
         </div>
       </Panel>
 
