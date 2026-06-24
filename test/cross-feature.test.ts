@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { parseSnapshot, type Snapshot } from "../src/cli/dashboard/snapshot-client";
-import { toViewModel, type ViewModelOptions } from "../src/cli/dashboard/view-model";
+import type { SnapshotWire } from "../src/cockpit/api/types";
+import { toFleetView } from "../src/cockpit/model/fleet";
 import { AgentTotals } from "../src/core/domain/orchestrator-state";
 import { RunAttempt } from "../src/core/domain/run-attempt";
 import { ServiceConfig } from "../src/core/domain/workflow";
@@ -14,14 +14,17 @@ import { initialState, setRunning } from "../src/core/orchestrator/state";
 
 /**
  * Sprint 5 / #56 — **cross-feature** coverage. The per-feature suites
- * (`budget-pure`, `budget-gate`, `restore-pure`, `restore-reconcile`, `humanize`,
- * `dashboard/*`) each prove ONE feature in isolation, and each only ever sets a SINGLE
- * additive extra on `toSnapshot` / a single dashboard panel. This file pins the
+ * (`budget-pure`, `budget-gate`, `restore-pure`, `restore-reconcile`, `humanize`, and the
+ * cockpit model suites) each prove ONE feature in isolation, and each only ever sets a
+ * SINGLE additive extra on `toSnapshot` / a single cockpit panel. This file pins the
  * **interactions** they don't: the three Sprint 5 additive blocks (`budget`, `restore`,
  * and a humanized `running[].last_activity.message`) all present **at once** and correctly
- * shaped, and the older-dashboard safety contract that a cold start carries **none** of
- * them. No assertion here duplicates a per-feature suite — every case is a co-occurrence
- * the single-feature tests cannot reach.
+ * shaped, and the additive-safety contract that a cold start carries **none** of them. No
+ * assertion here duplicates a per-feature suite — every case is a co-occurrence the
+ * single-feature tests cannot reach.
+ *
+ * Sprint 6 / #72: the wire's surviving consumer is the web cockpit, so the decode-side case
+ * exercises the cockpit's `toFleetView`.
  */
 
 const config = Schema.decodeUnknownSync(ServiceConfig)({});
@@ -89,7 +92,7 @@ describe("cross-feature: budget + restore + last_activity coexist on one snapsho
     expect(row.last_activity?.message).toBe("finished turn");
     expect(row.last_activity?.event_tag).toBe("TurnCompleted");
 
-    // The whole thing must JSON round-trip (the wire is the dashboard's only input).
+    // The whole thing must JSON round-trip (the wire is the cockpit's only input).
     const json = JSON.parse(JSON.stringify(snap));
     expect(json.budget.paused).toBe(true);
     expect(json.restore.at).toBe("2026-06-24T10:00:00.000Z");
@@ -97,9 +100,9 @@ describe("cross-feature: budget + restore + last_activity coexist on one snapsho
   });
 
   it("cold start (no budget, no restore, no activity) carries NONE of the new blocks", () => {
-    // Older-dashboard safety: a bare projection (unconfigured budget, never restored, no
-    // observed activity) must look byte-identical to a pre-Sprint-5 snapshot — every new
-    // additive field absent, asserted together in one place.
+    // Additive safety: a bare projection (unconfigured budget, never restored, no observed
+    // activity) must look byte-identical to a pre-Sprint-5 snapshot — every new additive
+    // field absent, asserted together in one place.
     const snap = toSnapshot(runningState(), {
       budget: evaluateBudget({}, runningState().agent_totals),
     });
@@ -109,22 +112,15 @@ describe("cross-feature: budget + restore + last_activity coexist on one snapsho
   });
 });
 
-describe("cross-feature: dashboard decodes a fully-loaded snapshot (#56)", () => {
+describe("cross-feature: the cockpit view-model resolves a fully-loaded snapshot (#56)", () => {
   // NOW is 60s after the running row's started_at and the restore `at`, so relative
   // labels render as a round "1m 00s".
   const NOW = Date.parse("2026-06-24T10:01:00.000Z");
 
-  const opts: ViewModelOptions = {
-    connection: "live",
-    error: null,
-    lastUpdatedAtMs: NOW,
-    baseUrl: "http://127.0.0.1:4317",
-  };
-
-  it("parseSnapshot → toViewModel populates the budget, restore, and last-activity panels together", () => {
+  it("toFleetView populates the budget, restore, and last-activity panels together", () => {
     // A single wire body carrying all three Sprint 5 additions; the message is derived
-    // from the real humanizer table so the decode path is end-to-end (raw bytes → VM).
-    const wire: Record<string, unknown> = {
+    // from the real humanizer table so the path is end-to-end (wire → view model).
+    const wire: SnapshotWire = {
       poll_interval_ms: 1000,
       max_concurrent_agents: 4,
       counts: { running: 1, retrying: 1, completed: 3, claimed: 0 },
@@ -160,12 +156,11 @@ describe("cross-feature: dashboard decodes a fully-loaded snapshot (#56)", () =>
       },
     };
 
-    const snap: Snapshot = parseSnapshot(wire);
-    const vm = toViewModel(snap, NOW, opts);
+    const vm = toFleetView(wire, NOW);
 
-    // All three panels resolve from the same decode, none clobbering another.
+    // All three panels resolve from the same projection, none clobbering another.
     expect(vm.budget?.paused).toBe(true);
-    expect(vm.restore?.stateLabel).toBe("restored after restart");
+    expect(vm.budget?.stateLabel).toBe("paused");
     expect(vm.restore?.summary).toBe("1 running · 2 retrying · 3 completed · restored 1m 00s ago");
     // The running row prefers the humanized message ("finished turn") over the raw tag.
     expect(vm.running[0]?.lastActivityLabel).toBe(

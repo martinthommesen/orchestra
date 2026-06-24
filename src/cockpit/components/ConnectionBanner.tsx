@@ -2,8 +2,8 @@ import type { ConnectionState } from "../model/poller";
 
 /**
  * Sprint 6 / #69 — the connection banner: a small live/stale/connecting indicator plus the last
- * poll error and an "updated Ns ago" hint. Mirrors the Ink dashboard's honesty: a failed poll
- * flips to `stale` while the last-good data stays on screen (never blanks).
+ * poll error and an "updated Ns ago" hint. Honest by design: a failed poll flips to `stale`
+ * while the last-good data stays on screen (never blanks).
  */
 
 const CONNECTION_STYLE: Record<ConnectionState, { label: string; colorVar: string }> = {

@@ -3,7 +3,7 @@ import { defineConfig } from "tsup";
 // Build the CLI/daemon to dist/. Source uses extensionless ESM imports; esbuild
 // (via tsup) resolves and bundles them, so we avoid hand-written .js extensions.
 export default defineConfig({
-  entry: ["src/cli/main.ts", "src/cli/dashboard.tsx"],
+  entry: ["src/cli/main.ts"],
   outDir: "dist/cli",
   format: ["esm"],
   target: "node22",

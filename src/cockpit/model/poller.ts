@@ -1,8 +1,8 @@
 import { ApiError } from "../api/client";
 
 /**
- * Sprint 6 / #69 — a framework-agnostic, non-overlapping poller (web parity of the Ink
- * dashboard poller). Kept DOM/React-free so its scheduling + connection logic is unit-tested
+ * Sprint 6 / #69 — a framework-agnostic, non-overlapping poller for the cockpit. Kept
+ * DOM/React-free so its scheduling + connection logic is unit-tested
  * under Node with fake timers and an injected fetcher. `usePolling` is the thin React adapter.
  *
  * Guarantees:

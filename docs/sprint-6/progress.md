@@ -16,7 +16,7 @@ Branch: `feature/sprint-6` (off `main`, all Sprint 5 work merged).
 | #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ✅ done |
 | #70 | Kanban board view with actionable cards (Cancel / Retry-now) | Nova | M · Med | ✅ done |
 | #71 | Settings view + global pause/resume control | Nova (art: Milo) | M · Med | ✅ done |
-| #72 | Remove Ink dashboard + deps; tests + docs + handoff close-out | Nova (docs: Remy) | M · Low | ☐ todo |
+| #72 | Remove Ink dashboard + deps; tests + docs + handoff close-out | Nova (docs: Remy) | M · Low | ✅ done |
 
 Dependencies: `#64 → #65 → #66` · `#65 → #67 → #68 → {#69, #70, #71}` · `#64 → #70` ·
 `#66 → #71` · `#72 → all`.
@@ -54,11 +54,11 @@ typecheck + lint + 336 tests).
 - [x] #71 — Settings form (whitelist, client validation, no secrets) + Pause/Resume toggle
 
 ### Phase 3 — Close-out
-- [ ] #72 — delete `src/cli/dashboard/` + `dashboard.tsx` + `dashboard` subcommand
-- [ ] #72 — remove `ink` / `ink-testing-library` / `react-devtools-core`; add `vite` / `@vitejs/plugin-react` / `react-dom` / `@types/react-dom`
-- [ ] #72 — cross-feature coverage audit/fill
-- [ ] #72 — README (cockpit usage, `--port`, token, settings whitelist, security posture)
-- [ ] #72 — `docs/sprint-6/done.md` + this close record + `PROJECT_BRIEF.md` §5/§7/§8
+- [x] #72 — delete `src/cli/dashboard/` + `dashboard.tsx` + `dashboard` subcommand
+- [x] #72 — remove `ink` / `ink-testing-library` / `react-devtools-core`; add `vite` / `@vitejs/plugin-react` / `react-dom` / `@types/react-dom`
+- [x] #72 — cross-feature coverage audit/fill
+- [x] #72 — README (cockpit usage, `--port`, token, settings whitelist, security posture)
+- [x] #72 — `docs/sprint-6/done.md` + this close record + `PROJECT_BRIEF.md` §5/§7/§8
 
 ## Notes
 
@@ -317,3 +317,22 @@ Decisions:
   withholds *new* sessions only — in-flight work keeps running.
 Gates: typecheck (both configs) + lint clean, **423 tests** (+13 settings), `pnpm build` emits the
 SPA (`dist/cockpit/index.html` + assets).
+
+### #72 — Remove Ink dashboard + finalize docs (close-out)
+Deleted: `src/cli/dashboard.tsx`, `src/cli/dashboard/` (whole dir), `test/dashboard/` (whole dir).
+Rewrote `src/cli/main.ts` to a single daemon entry (no `dashboard` subcommand dispatch); cleaned
+stale `dashboard`/`snapshot-server` comments in `daemon.ts`; `tsup.config.ts` entry is now just
+`src/cli/main.ts`. Removed deps `ink`, `ink-testing-library`, `react-devtools-core` (kept `react` —
+the SPA uses it) and the `dev:dashboard` script; `pnpm install` updated the lockfile (all three gone,
+verified by search). Re-pointed `test/cross-feature.test.ts` block #2 from the deleted Ink
+`parseSnapshot`/`toViewModel` to the surviving cockpit consumer `toFleetView` (strengthened, not
+weakened — same fully-loaded-snapshot co-occurrence, now exercised on the live view path).
+
+Docs: README's `## Dashboard` section replaced with `## Web cockpit` (endpoints, auth model, token
+source, editable whitelist, `pnpm dev:cockpit`); prose "dashboard" → "cockpit" throughout.
+`docs/sprint-6/done.md` written (handoff); `PROJECT_BRIEF.md` §5/§7/§8 finalized.
+
+Accepted limitations (known/intentional, not bugs): (1) Kanban "Claimed" column is count-only — the
+snapshot wire emits `counts.claimed` but not claimed issue IDs; real Claimed cards need an additive
+backend change, out of scope. (2) UI poll cadence fixed at 2s (`COCKPIT_POLL_MS`). (3) Pure-module
+unit coverage only — no jsdom/DOM test stack, per the dep budget.

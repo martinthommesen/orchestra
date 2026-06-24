@@ -1,9 +1,9 @@
 /**
  * Sprint 6 / #69 — pure, DOM-free formatting helpers shared by the cockpit view-models. These
- * mirror the Ink dashboard's honesty rules (Sprint 2 review): client-side elapsed from
- * `started_at`, an explicit `—` sentinel for unparseable timestamps (never a fake "0s"), and a
- * clamped duration so fixed-width labels stay honest. Kept separate + pure so the Fleet/Events
- * mappers stay unit-testable under Node.
+ * encode the cockpit's honesty rules: client-side elapsed from `started_at`, an explicit `—`
+ * sentinel for unparseable timestamps (never a fake "0s"), and a clamped duration so
+ * fixed-width labels stay honest. Kept separate + pure so the Fleet/Events mappers stay
+ * unit-testable under Node.
  */
 
 /** The sentinel shown when a timestamp cannot be parsed — never a plausible "0s". */

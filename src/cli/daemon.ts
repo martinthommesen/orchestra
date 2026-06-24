@@ -26,11 +26,10 @@ import { parseArgs } from "./args";
  * state-owning orchestrator fiber via {@link runOrchestrator}. Everything stays inside
  * Effect — `NodeRuntime.runMain` installs SIGINT/SIGTERM handlers that interrupt the
  * root fiber, tearing down the orchestrator scope (and with it every worker, retry
- * timer, and the optional snapshot server).
+ * timer, and the optional cockpit server).
  *
- * The top-level dispatcher in {@link file://./main.ts} routes everything that is *not*
- * the `dashboard` subcommand here, so the daemon's argument grammar (and its tests)
- * stay exactly as they were.
+ * This is the single CLI surface ({@link file://./main.ts} runs it directly): the daemon
+ * run path, which serves the web cockpit on loopback when given `--port`.
  */
 
 const VERSION = process.env.npm_package_version ?? "0.0.0";
@@ -45,7 +44,7 @@ export const appLayer = (config: ServiceConfig) =>
   Layer.mergeAll(
     // Durable store (#40): loads the checkpoint, seeds bookkeeping, and persists every
     // mutation via an atomic, debounced, scope-flushed writer. Drop-in for the in-memory
-    // `layerOrchestratorStore` — `loop.ts`/`snapshot-server.ts` are unchanged. Its
+    // `layerOrchestratorStore` — `loop.ts` and the cockpit server read it unchanged. Its
     // `FileSystem` comes from the ambient `NodeContext.layer` provided at the program root.
     layerDurableOrchestratorStore(config),
     layerGitHubTracker(config),
@@ -53,13 +52,13 @@ export const appLayer = (config: ServiceConfig) =>
     layerWorkspaceManager(config),
     ClockLive,
     // Tee observer + recent-events ring + live-activity map (one shared instance each,
-    // read by the snapshot server). #36/#37.
+    // read by the cockpit server). #36/#37.
     ObservabilityLive,
-    // Rich completion history (loop-fed; read by the snapshot server). #37.
+    // Rich completion history (loop-fed; read by the cockpit server). #37.
     RecentCompletionsLive,
-    // Boot-time restore fact (loop-written once; read by the snapshot server). #54.
+    // Boot-time restore fact (loop-written once; read by the cockpit server). #54.
     RestoreStatusLive,
-    // Operator-pause latch mirror (loop-written; read by the snapshot server) + the
+    // Operator-pause latch mirror (loop-written; read by the cockpit server) + the
     // command bus the cockpit's mutating endpoints offer onto. #64.
     ControlStatusLive,
     CommandBusLive,
@@ -69,9 +68,8 @@ export const appLayer = (config: ServiceConfig) =>
 const LoggerLive = Logger.logFmt;
 
 /**
- * Run the daemon for the given CLI arguments (everything after `orchestra`, with the
- * `dashboard` subcommand already peeled off by the dispatcher — here that means the
- * full argv, since the daemon path is the default).
+ * Run the daemon for the given CLI arguments (everything after `orchestra`). Pass a
+ * `WORKFLOW.md` path and optional `--port N` to serve the web cockpit on loopback.
  */
 export const runDaemon = (argv: ReadonlyArray<string>): void => {
   const program = Effect.gen(function* () {

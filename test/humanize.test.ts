@@ -7,8 +7,9 @@ import { AGENT_EVENT_SUMMARIES, humanizeAgentEvent } from "../src/core/observabi
  * Sprint 5 / #55 — pure coverage for the agent-event humanizer. Known tags map to friendly
  * one-liners; unknown tags fall back to the raw label; the result is never blank; and the
  * map covers exactly the tags the `AgentEvent` union actually emits (no speculative
- * taxonomy). The wiring (logfmt line + LiveActivity message + dashboard label) is proven in
- * `live-observer.test.ts`, `recent-events.test.ts`, and `dashboard/view-model.test.ts`.
+ * taxonomy). The wiring (logfmt line + LiveActivity message + cockpit per-session activity
+ * label) is proven in `live-observer.test.ts`, `recent-events.test.ts`, and the cockpit Fleet
+ * mapper suite (`cockpit-fleet.test.ts`, which asserts `running[].lastActivityLabel`).
  */
 
 // The literal tags the AgentEvent union actually emits (the humanizer maps exactly these,
