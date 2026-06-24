@@ -6,6 +6,7 @@ import type { OrchestratorState } from "../domain/orchestrator-state";
 import type { BudgetConfig } from "../domain/workflow";
 import { type BudgetStatus, evaluateBudget } from "../orchestrator/budget";
 import { OrchestratorStore } from "../orchestrator/state";
+import { ControlStatus } from "./control-status";
 import { type ActivityEntry, LiveActivity } from "./live-activity";
 import { type RecentCompletion, RecentCompletions } from "./recent-completions";
 import { type EventEnvelope, RecentEvents } from "./recent-events";
@@ -44,7 +45,26 @@ export interface SnapshotExtras {
    * so a cold start — and every older dashboard — sees no `restore` field at all.
    */
   readonly restore?: RestoreSummary;
+  /**
+   * Operator-pause latch (#64). Strictly additive: the projected `control` block is
+   * emitted ONLY when dispatch is actually withheld (operator OR budget), so a daemon
+   * dispatching normally — and every older dashboard — sees no `control` field at all.
+   */
+  readonly operatorPaused?: boolean;
 }
+
+/** Project the operator/budget pause into the additive `control` block, or null to omit. */
+const controlProjection = (operatorPaused: boolean, budget: BudgetStatus | undefined) => {
+  const budgetPaused = budget?.paused ?? false;
+  const dispatchPaused = operatorPaused || budgetPaused;
+  if (!dispatchPaused) {
+    return null;
+  }
+  return {
+    dispatch_paused: true,
+    paused_by: operatorPaused ? ("operator" as const) : ("budget" as const),
+  };
+};
 
 /** Project the budget status onto the additive wire block, or null to omit it. */
 const budgetProjection = (budget: BudgetStatus | undefined) =>
@@ -78,6 +98,7 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
   const retrying = Object.values(s.retry_attempts);
   const budget = budgetProjection(extra.budget);
   const restore = restoreProjection(extra.restore);
+  const control = controlProjection(extra.operatorPaused ?? false, extra.budget);
   return {
     poll_interval_ms: s.poll_interval_ms,
     max_concurrent_agents: s.max_concurrent_agents,
@@ -102,6 +123,8 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
     ...(budget === null ? {} : { budget }),
     // Restore/durability status (#54), additive — only present after a real restore.
     ...(restore === null ? {} : { restore }),
+    // Control/pause status (#64), additive — only present when dispatch is withheld.
+    ...(control === null ? {} : { control }),
   };
 };
 
@@ -122,17 +145,20 @@ const makeRouter = (budgetConfig: BudgetConfig) =>
         const completions = yield* RecentCompletions;
         const activity = yield* LiveActivity;
         const restoreStatus = yield* RestoreStatus;
+        const controlStatus = yield* ControlStatus;
         const state = yield* store.get;
         const recentEvents = yield* events.list;
         const recentCompleted = yield* completions.list;
         const activityMap = yield* activity.snapshot;
         const restore = yield* restoreStatus.get;
+        const operatorPaused = yield* controlStatus.get;
         return yield* HttpServerResponse.json(
           toSnapshot(state, {
             recentEvents,
             recentCompleted,
             activity: activityMap,
             budget: evaluateBudget(budgetConfig, state.agent_totals),
+            operatorPaused,
             // Additive (#54): absent until a real restore was captured at boot.
             ...(restore === null ? {} : { restore }),
           }),
@@ -152,7 +178,13 @@ export const runSnapshotServer = (
 ): Effect.Effect<
   void,
   never,
-  Scope.Scope | OrchestratorStore | RecentEvents | RecentCompletions | LiveActivity | RestoreStatus
+  | Scope.Scope
+  | OrchestratorStore
+  | RecentEvents
+  | RecentCompletions
+  | LiveActivity
+  | RestoreStatus
+  | ControlStatus
 > =>
   HttpServer.serveEffect(makeRouter(budgetConfig)).pipe(
     // `serveEffect` installs the server and returns; the listener lives for as long as

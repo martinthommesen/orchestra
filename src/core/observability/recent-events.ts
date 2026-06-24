@@ -163,6 +163,29 @@ export const toEventDraft = (obs: Observation): EventDraft | null => {
               `budget cleared: new dispatch resumed ` +
               `(${obs.spentTokens}/${obs.limitTokens} tokens)`,
           };
+    case "OperatorControl":
+      return obs.paused
+        ? { level: "warn", kind: "operator_paused", message: "operator paused new dispatch" }
+        : { level: "info", kind: "operator_resumed", message: "operator resumed new dispatch" };
+    case "SessionCancelled":
+      return {
+        level: "warn",
+        kind: "session_cancelled",
+        issue_id: obs.issueId,
+        identifier: obs.identifier,
+        message: `cancelled ${obs.identifier} (operator)`,
+      };
+    case "RetryNowRequested":
+      // Only surface accepted retry-now requests in the feed; an ignored no-op for an
+      // unknown/ineligible id is not operator-meaningful (the HTTP result already says so).
+      return obs.accepted
+        ? {
+            level: "info",
+            kind: "retry_now",
+            issue_id: obs.issueId,
+            message: `retry-now ${obs.issueId}`,
+          }
+        : null;
   }
 };
 

@@ -1,10 +1,21 @@
-import { Cause, Duration, Effect, Either, Fiber, Queue, type Scope, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Duration,
+  Effect,
+  Either,
+  Fiber,
+  Queue,
+  type Scope,
+  Stream,
+} from "effect";
 import type { AgentEvent, Usage } from "../domain/agent-event";
 import { Issue, type IssueStateRef, normalizeState } from "../domain/issue";
 import type { RetryEntry } from "../domain/retry-entry";
 import { RunAttempt } from "../domain/run-attempt";
 import type { WorkflowDefinition } from "../domain/workflow";
 import type { Workspace } from "../domain/workspace";
+import { ControlStatus } from "../observability/control-status";
 import { RecentCompletions } from "../observability/recent-completions";
 import { RestoreStatus } from "../observability/restore-status";
 import type { AgentRunParams } from "../ports/agent-runner";
@@ -16,6 +27,7 @@ import { renderPrompt } from "../workflow/render";
 import { computeWorkspacePath, sanitizeWorkspaceKey } from "../workspace/safety";
 import { CONTINUATION_DELAY_MS, failureBackoffMs } from "./backoff";
 import { type BudgetStatus, evaluateBudget } from "./budget";
+import { type Command, CommandBus, type CommandResult, type ControlState } from "./command";
 import { concurrencyContext, planDispatch } from "./concurrency";
 import type { Msg, WorkerOutcome } from "./messages";
 import { Observer, type RetryKind } from "./observer";
@@ -114,7 +126,9 @@ export type OrchestratorDeps =
   | Clock
   | Observer
   | RecentCompletions
-  | RestoreStatus;
+  | RestoreStatus
+  | ControlStatus
+  | CommandBus;
 
 /**
  * Build and run the orchestrator loop for a loaded workflow. The returned effect never
@@ -134,6 +148,8 @@ export const runOrchestrator = (
       const observer = yield* Observer;
       const completions = yield* RecentCompletions;
       const restoreStatus = yield* RestoreStatus;
+      const controlStatus = yield* ControlStatus;
+      const commandBus = yield* CommandBus;
 
       const config = def.config;
       const template = def.prompt_template;
@@ -148,6 +164,20 @@ export const runOrchestrator = (
       // (entering paused / resuming) rather than every tick. It is pure display/transition
       // bookkeeping and never gates worker, retry, or reconcile paths.
       let budgetPaused = false;
+
+      // Operator-pause latch (#64, DD-3) — a runtime-only gate, distinct from the budget
+      // gate. When set (via a PauseDispatch command) the tick plans ZERO new dispatches,
+      // exactly like the budget gate, and touches nothing else (in-flight workers, retries,
+      // reconcile are unaffected). It is owner-fiber-local (only this fiber reads/writes it),
+      // mirrored into the ControlStatus service so the snapshot server can project it. It is
+      // never persisted: a restart resumes dispatch.
+      let operatorPaused = false;
+
+      /** The live dispatch-gate state for a control CommandResult / the snapshot block. */
+      const controlState = (): ControlState => ({
+        dispatchPaused: operatorPaused || budgetPaused,
+        pausedBy: operatorPaused ? "operator" : budgetPaused ? "budget" : null,
+      });
 
       const freshRuntime = (issue: Issue): IssueRuntime => ({
         issue,
@@ -590,14 +620,14 @@ export const runOrchestrator = (
           runningTotal: runningTotal(),
           runningByState: runningByState(),
         });
-        const toDispatch = budget.paused ? [] : planDispatch(sorted, conCtx);
+        const toDispatch = budget.paused || operatorPaused ? [] : planDispatch(sorted, conCtx);
         for (const issue of toDispatch) {
           yield* dispatch(issue, { kind: "fresh", attempt: null });
         }
         yield* observer.emit({
           _tag: "TickEnd",
           dispatched: toDispatch.map((i) => i.id),
-          dispatchSkipped: budget.paused,
+          dispatchSkipped: budget.paused || operatorPaused,
         });
       });
 
@@ -691,6 +721,111 @@ export const runOrchestrator = (
           }
         });
 
+      // ───────────────────────────── Commands (#64, DD-2) ─────────────────────────────
+
+      /**
+       * Apply one operator {@link Command} serially on the owner fiber and complete its
+       * `reply` Deferred with a {@link CommandResult}. This runs in the exact same place,
+       * and under the same single-consumer guarantee, as every other mailbox message — so
+       * commands can never race a tick, a worker-done, or each other.
+       */
+      const handleCommand = (
+        command: Command,
+        reply: Deferred.Deferred<CommandResult>,
+      ): Effect.Effect<void, never, Scope.Scope> =>
+        Effect.gen(function* () {
+          switch (command._tag) {
+            case "PauseDispatch": {
+              if (!operatorPaused) {
+                operatorPaused = true;
+                yield* controlStatus.setOperatorPaused(true);
+                yield* observer.emit({ _tag: "OperatorControl", paused: true });
+              }
+              yield* Deferred.succeed(reply, { _tag: "Control", state: controlState() });
+              break;
+            }
+            case "ResumeDispatch": {
+              if (operatorPaused) {
+                operatorPaused = false;
+                yield* controlStatus.setOperatorPaused(false);
+                yield* observer.emit({ _tag: "OperatorControl", paused: false });
+              }
+              yield* Deferred.succeed(reply, { _tag: "Control", state: controlState() });
+              break;
+            }
+            case "RetryNow": {
+              const rec = registry.get(command.issueId);
+              // Eligible only when a retry/continuation backoff timer is pending: fire it
+              // NOW. Interrupt the armed timer first so it cannot also post a RetryDue later
+              // (double-dispatch), then run the normal re-dispatch path.
+              if (rec !== undefined && rec.timerFiber !== null) {
+                yield* Fiber.interrupt(rec.timerFiber);
+                rec.timerFiber = null;
+                yield* handleRetryDue(command.issueId);
+                yield* observer.emit({
+                  _tag: "RetryNowRequested",
+                  issueId: command.issueId,
+                  accepted: true,
+                });
+                yield* Deferred.succeed(reply, { _tag: "Ack", accepted: true, reason: null });
+                break;
+              }
+              const reason =
+                rec === undefined
+                  ? "no such tracked issue"
+                  : rec.workerFiber !== null
+                    ? "issue is already running"
+                    : "issue has no pending retry";
+              yield* observer.emit({
+                _tag: "RetryNowRequested",
+                issueId: command.issueId,
+                accepted: false,
+              });
+              yield* Deferred.succeed(reply, { _tag: "Ack", accepted: false, reason });
+              break;
+            }
+            case "CancelSession": {
+              const rec = registry.get(command.issueId);
+              if (rec === undefined) {
+                yield* Deferred.succeed(reply, {
+                  _tag: "Ack",
+                  accepted: false,
+                  reason: "no such tracked issue",
+                });
+                break;
+              }
+              // Interrupt ONLY this issue's worker + its pending timer, then fully release
+              // it (not a completion — it can be re-picked later) and drop the registry
+              // entry. No other worker is touched. Dropping the entry first means the
+              // interrupted worker's onExit posts no spurious WorkerDone.
+              const fiber = rec.workerFiber;
+              const timer = rec.timerFiber;
+              const identifier = rec.issue.identifier;
+              registry.delete(command.issueId);
+              if (fiber !== null) {
+                yield* Fiber.interrupt(fiber);
+              }
+              if (timer !== null) {
+                yield* Fiber.interrupt(timer);
+              }
+              yield* store.update((s) => release(s, command.issueId));
+              yield* observer.emit({
+                _tag: "SessionCancelled",
+                issueId: command.issueId,
+                identifier,
+              });
+              yield* Deferred.succeed(reply, { _tag: "Ack", accepted: true, reason: null });
+              break;
+            }
+            case "ReloadConfig": {
+              // Wired in #66 (settings hot-reload). Acknowledged here so the union stays
+              // exhaustive; the no-op is harmless until #66 patches the live config.
+              yield* Deferred.succeed(reply, { _tag: "Reloaded" });
+              break;
+            }
+          }
+        });
+
       const handle = (msg: Msg): Effect.Effect<void, never, Scope.Scope> => {
         switch (msg._tag) {
           case "Tick":
@@ -701,6 +836,8 @@ export const runOrchestrator = (
             return handleWorkerDone(msg.issueId, msg.outcome);
           case "RetryDue":
             return handleRetryDue(msg.issueId);
+          case "Command":
+            return handleCommand(msg.command, msg.reply);
         }
       };
 
@@ -939,6 +1076,24 @@ export const runOrchestrator = (
             yield* Effect.sleep(Duration.millis(s.poll_interval_ms));
             yield* Queue.offer(mailbox, { _tag: "Tick" });
           }),
+        ),
+      );
+
+      // Command pump (#64, DD-2): drain the CommandBus into the SAME mailbox the owner
+      // fiber consumes, so every operator command is applied serially alongside ticks /
+      // worker-done / retry-due. The HTTP handler offered the command and is awaiting its
+      // reply Deferred, which `handleCommand` completes.
+      yield* Effect.forkScoped(
+        Effect.forever(
+          commandBus.take.pipe(
+            Effect.flatMap((enq) =>
+              Queue.offer(mailbox, {
+                _tag: "Command",
+                command: enq.command,
+                reply: enq.reply,
+              }),
+            ),
+          ),
         ),
       );
 

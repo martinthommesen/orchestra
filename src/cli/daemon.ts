@@ -5,10 +5,12 @@ import { layerGitHubTracker } from "../adapters/tracker-github";
 import { layerWorkspaceManager } from "../adapters/workspace";
 import { ClockLive } from "../core/clock/live";
 import type { ServiceConfig } from "../core/domain/workflow";
+import { ControlStatusLive } from "../core/observability/control-status";
 import { ObservabilityLive } from "../core/observability/observer-tee";
 import { RecentCompletionsLive } from "../core/observability/recent-completions";
 import { RestoreStatusLive } from "../core/observability/restore-status";
 import { runSnapshotServer } from "../core/observability/snapshot-server";
+import { CommandBusLive } from "../core/orchestrator/command";
 import { runOrchestrator } from "../core/orchestrator/loop";
 import { layerDurableOrchestratorStore } from "../core/persistence";
 import { loadWorkflow } from "../core/workflow/loader";
@@ -57,6 +59,10 @@ export const appLayer = (config: ServiceConfig) =>
     RecentCompletionsLive,
     // Boot-time restore fact (loop-written once; read by the snapshot server). #54.
     RestoreStatusLive,
+    // Operator-pause latch mirror (loop-written; read by the snapshot server) + the
+    // command bus the cockpit's mutating endpoints offer onto. #64.
+    ControlStatusLive,
+    CommandBusLive,
   );
 
 /** logfmt logger → stable `key=value` lines per PROJECT_BRIEF §13.1. */

@@ -188,6 +188,38 @@ export const formatObservation = (obs: Observation): LogLine => {
               limit_tokens: String(obs.limitTokens),
             }),
           };
+    case "OperatorControl":
+      return obs.paused
+        ? {
+            level: "warn",
+            message: `${glyph("blocked")} operator paused dispatch`,
+            annotations: ev("operator_paused", { paused: "true" }),
+          }
+        : {
+            level: "info",
+            message: "operator resumed dispatch",
+            annotations: ev("operator_resumed", { paused: "false" }),
+          };
+    case "SessionCancelled":
+      return {
+        level: "warn",
+        message: `${glyph("failed")} cancelled ${obs.identifier} (operator)`,
+        annotations: ev("session_cancelled", {
+          issue_id: obs.issueId,
+          issue_identifier: obs.identifier,
+        }),
+      };
+    case "RetryNowRequested":
+      return {
+        level: "info",
+        message: `${glyph("retrying")} retry-now ${obs.issueId} (${
+          obs.accepted ? "accepted" : "ignored"
+        })`,
+        annotations: ev("retry_now_requested", {
+          issue_id: obs.issueId,
+          accepted: String(obs.accepted),
+        }),
+      };
   }
 };
 
