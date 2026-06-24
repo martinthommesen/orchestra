@@ -714,14 +714,26 @@ export const runOrchestrator = (
       const handleRetryDue = (issueId: string): Effect.Effect<void, never, Scope.Scope> =>
         Effect.gen(function* () {
           const rec = registry.get(issueId);
-          if (rec === undefined) {
+          // Idempotent against a stale/duplicate RetryDue (exactly-once guard). When an
+          // operator `RetryNow` fires the backoff ahead of a still-queued `RetryDue`, the
+          // timer has already offered its `RetryDue` before being interrupted; that message
+          // is now stale. A running issue is never legitimately in backoff (`scheduleRetry`
+          // calls `clearRunning`, and the only path that re-dispatches a retrying issue is
+          // this one), so an already-running worker means this re-fire must be dropped —
+          // otherwise it would dispatch a second worker and orphan the first.
+          if (rec === undefined || rec.workerFiber !== null) {
             return;
           }
           rec.timerFiber = null;
+          // Consume the pending shape: clear it so a subsequent stale re-fire can't reuse it.
+          const kind = rec.pendingKind;
+          const attempt = rec.pendingAttempt;
+          rec.pendingKind = null;
+          rec.pendingAttempt = 0;
           yield* store.update((s) => clearRetry(s, issueId));
           yield* observer.emit({ _tag: "RetryFired", issueId, identifier: rec.issue.identifier });
-          if (rec.pendingKind === "continuation") {
-            yield* dispatch(rec.issue, { kind: "continuation", turn: rec.pendingAttempt });
+          if (kind === "continuation") {
+            yield* dispatch(rec.issue, { kind: "continuation", turn: attempt });
           } else {
             yield* dispatch(rec.issue, { kind: "fresh", attempt: rec.failureAttempts });
           }

@@ -1,10 +1,10 @@
 import { it } from "@effect/vitest";
-import { Duration, Effect, Fiber, TestClock } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer, Queue, TestClock } from "effect";
 import { describe, expect } from "vitest";
 import { TurnFailed } from "../src/core/errors";
 import { CommandBus } from "../src/core/orchestrator/command";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
-import type { Observation } from "../src/core/orchestrator/observer";
+import { type Observation, Observer } from "../src/core/orchestrator/observer";
 import { OrchestratorStore } from "../src/core/orchestrator/state";
 import * as Ev from "./fakes/events";
 import { makeFakeAgentRunner } from "./fakes/fake-agent-runner";
@@ -239,6 +239,98 @@ describe("operator control commands (#64)", () => {
         const done = yield* (yield* OrchestratorStore).get;
         expect(done.completed).toContain("i1");
         expect(done.retry_attempts.i1).toBeUndefined();
+        const runs = yield* runner.control.runs;
+        expect(runs.filter((r) => r.issueId === "i1")).toHaveLength(2);
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
+  );
+
+  // Regression (exactly-once): a `RetryNow` that fires the backoff just as the timer's own
+  // `RetryDue` lands must NOT double-dispatch. The window: the backoff timer has already
+  // offered its `RetryDue` (so `RetryNow`'s interrupt is a no-op) but the owner drains the
+  // `RetryNow` first; `handleRetryDue` must drop the now-stale `RetryDue` rather than
+  // dispatch a second worker and orphan the first. We force the interleaving deterministically
+  // by stalling the owner INSIDE the `RetryScheduled` emit (so the mailbox cannot drain) while
+  // the `RetryNow` is queued ahead of the timer's `RetryDue`, then releasing it.
+  it.scoped("RetryNow racing a fired backoff timer dispatches exactly one worker", () =>
+    Effect.gen(function* () {
+      const i1 = makeIssue({ id: "i1", identifier: "ORC-1", state: "In Progress" });
+      const tracker = yield* makeFakeTracker({
+        candidates: [i1],
+        states: [makeStateRef("i1", "In Progress")],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+
+      // Gated observer: record to a queue (like RecordingObserver) but block the owner fiber
+      // when it emits `RetryScheduled`, so a stale `RetryDue` can be queued behind a `RetryNow`
+      // while the single-consumer mailbox is unable to drain.
+      const queue = yield* Queue.unbounded<Observation>();
+      const gate = yield* Deferred.make<void>();
+      const obsLayer = Layer.succeed(Observer, {
+        emit: (obs: Observation) =>
+          Queue.offer(queue, obs).pipe(
+            Effect.zipRight(obs._tag === "RetryScheduled" ? Deferred.await(gate) : Effect.void),
+            Effect.asVoid,
+          ),
+      });
+
+      // Attempt 1 fails → schedules a (near-zero backoff) failure retry; attempts 2 and 3 are
+      // long-running, so a buggy double-dispatch shows up as a THIRD run for i1.
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s1"),
+        { _tag: "fail", error: new TurnFailed({ message: "boom" }) },
+      ]);
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s2"),
+        { _tag: "delay", ms: 60_000 },
+        { _tag: "complete" },
+      ]);
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s3"),
+        { _tag: "delay", ms: 60_000 },
+        { _tag: "complete" },
+      ]);
+
+      const def = buildDef({
+        maxConcurrent: 5,
+        maxTurns: 1,
+        intervalMs: 10_000,
+        maxRetryBackoffMs: 1, // near-zero backoff so a 1ms tick fires the timer
+        stallTimeoutMs: 3_600_000,
+      });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obsLayer,
+      });
+
+      yield* Effect.gen(function* () {
+        const bus = yield* CommandBus;
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+        yield* waitFor(queue, isDispatched("i1"));
+        // Owner is now STALLED inside the `RetryScheduled` emit; the backoff timer is armed.
+        yield* waitFor(queue, (o) => o._tag === "RetryScheduled" && o.issueId === "i1");
+
+        // Queue `RetryNow` into the mailbox ahead of the timer (the pump is sleepless, so this
+        // lands without advancing the clock).
+        const sendFiber = yield* Effect.forkScoped(bus.send({ _tag: "RetryNow", issueId: "i1" }));
+        yield* Effect.yieldNow().pipe(Effect.repeatN(10));
+
+        // Fire the armed timer: it offers its (now stale) `RetryDue` BEHIND the `RetryNow`.
+        yield* TestClock.adjust(Duration.millis(1));
+
+        // Release the owner: it drains `RetryNow` (re-dispatch), then the stale `RetryDue`.
+        yield* Deferred.succeed(gate, undefined);
+        const ack = yield* Fiber.join(sendFiber);
+        expect(ack).toEqual({ _tag: "Ack", accepted: true, reason: null });
+        yield* Effect.yieldNow().pipe(Effect.repeatN(20));
+
+        // Exactly-once: one initial run + one retry = two runs. A stale `RetryDue` that
+        // double-dispatched would orphan a worker and show a third run.
         const runs = yield* runner.control.runs;
         expect(runs.filter((r) => r.issueId === "i1")).toHaveLength(2);
 
