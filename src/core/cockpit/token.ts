@@ -46,7 +46,10 @@ export const TOKEN_GLOBAL = "__ORCHESTRA_COCKPIT_TOKEN__"; // gitleaks:allow —
 
 /** The `<script>` bootstrap injected just before `</head>` (token JSON-encoded → XSS-safe). */
 export const tokenBootstrapScript = (token: string): string =>
-  `<script>window.${TOKEN_GLOBAL}=${JSON.stringify(token)};</script>`;
+  // `JSON.stringify` escapes quotes/backslashes but NOT `/`, so a token containing
+  // `</script>` would close the inline tag early. Escape `<` → `\u003c` so the value can
+  // never break out of the script element (defends against a self-set malformed token).
+  `<script>window.${TOKEN_GLOBAL}=${JSON.stringify(token).replace(/</g, "\\u003c")};</script>`;
 
 /**
  * Inject the token bootstrap into an `index.html`. Inserts before `</head>` when present,

@@ -12,6 +12,7 @@ import {
   injectToken,
   resolveToken,
   TOKEN_ENV_VAR,
+  TOKEN_GLOBAL,
   tokenBootstrapScript,
 } from "../src/core/cockpit/token";
 
@@ -122,12 +123,26 @@ describe("injectToken", () => {
     }),
   );
 
-  it.effect("JSON-encodes the token so it cannot break out of the script", () =>
+  it.effect("escapes the token so it cannot break out of the inline <script>", () =>
     Effect.sync(() => {
-      const out = tokenBootstrapScript('a"</script>');
-      // The dangerous sequence is escaped by JSON.stringify, never emitted raw.
-      expect(out).not.toContain('a"</script>"');
-      expect(out).toContain(JSON.stringify('a"</script>'));
+      const out = tokenBootstrapScript('a"</script><img src=x>');
+      // JSON.stringify alone does NOT escape `<`/`/`, so a `</script>` in the token would
+      // close the inline tag early. We escape `<` → \u003c (a tag cannot open/close without
+      // `<`), so no raw `</script>` or `<img` survives — the value stays trapped in the tag.
+      expect(out).not.toContain("</script><img");
+      expect(out).not.toContain("<img");
+      expect(out).toContain('a\\"\\u003c/script>\\u003cimg src=x>');
+      // The only literal `</script>` in the output is our own closing tag.
+      expect(out.match(/<\/script>/g)).toHaveLength(1);
+      expect(out.endsWith("</script>")).toBe(true);
+    }),
+  );
+
+  it.effect("a normal CSPRNG-hex token round-trips unescaped", () =>
+    Effect.sync(() => {
+      const hex = "abc123";
+      const out = tokenBootstrapScript(hex);
+      expect(out).toBe(`<script>window.${TOKEN_GLOBAL}="${hex}";</script>`);
     }),
   );
 });
