@@ -119,9 +119,19 @@ export const loadWorkflow = (
 ): Effect.Effect<WorkflowDefinition, LoadWorkflowError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const content = yield* fs
-      .readFileString(path)
-      .pipe(Effect.mapError((e) => new MissingWorkflowFile({ path, cause: e })));
+    const content = yield* fs.readFileString(path).pipe(
+      Effect.mapError(
+        (e) =>
+          new MissingWorkflowFile({
+            // Actionable top line: without an explicit message the tagged error renders
+            // as the generic "An error has occurred", burying the real ENOENT/path in a
+            // nested cause (#21). The path is not a secret.
+            message: `could not read workflow file '${path}': ${errorMessage(e)}`,
+            path,
+            cause: e,
+          }),
+      ),
+    );
     const ctx = yield* hostContext(path);
     return yield* parseWorkflow(content, ctx);
   });

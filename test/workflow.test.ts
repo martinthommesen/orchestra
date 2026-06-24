@@ -211,10 +211,15 @@ describe("loadWorkflow (file IO via FileSystem)", () => {
     }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
-  effectIt.effect("missing file → MissingWorkflowFile", () =>
+  effectIt.effect("missing file → MissingWorkflowFile with an actionable message", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(loadWorkflow("/no/such/WORKFLOW.md"));
       expect(error).toBeInstanceOf(MissingWorkflowFile);
+      // #21: the top-line message must name the path and the real cause, not the generic
+      // "An error has occurred". (The path is not a secret.)
+      expect(error.message).toContain("/no/such/WORKFLOW.md");
+      expect(error.message).not.toBe("An error has occurred");
+      expect(error.message.toLowerCase()).toContain("could not read workflow file");
     }).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 });

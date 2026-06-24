@@ -11,7 +11,13 @@ import * as E from "../src/core/errors";
 // One representative instance per error class, paired with its expected `_tag`.
 const samples: ReadonlyArray<readonly [{ readonly _tag: string }, string]> = [
   // Workflow (§5.5)
-  [new E.MissingWorkflowFile({ path: "/x/WORKFLOW.md" }), "MissingWorkflowFile"],
+  [
+    new E.MissingWorkflowFile({
+      message: "could not read '/x/WORKFLOW.md'",
+      path: "/x/WORKFLOW.md",
+    }),
+    "MissingWorkflowFile",
+  ],
   [new E.WorkflowParseError({ message: "bad yaml" }), "WorkflowParseError"],
   [new E.WorkflowFrontMatterNotAMap({ message: "got array" }), "WorkflowFrontMatterNotAMap"],
   [new E.TemplateParseError({ message: "unterminated" }), "TemplateParseError"],
@@ -96,7 +102,7 @@ describe("tagged errors", () => {
     };
 
     expect(categorize(new E.TurnFailed({ message: "x" }))).toBe("agent");
-    expect(categorize(new E.MissingWorkflowFile({ path: "/x" }))).toBe("workflow");
+    expect(categorize(new E.MissingWorkflowFile({ message: "m", path: "/x" }))).toBe("workflow");
     expect(categorize(new E.TrackerApiStatus({ status: 500 }))).toBe("tracker");
     expect(categorize(new E.PathOutsideWorkspaceRoot({ path: "/a", root: "/b" }))).toBe(
       "workspace",

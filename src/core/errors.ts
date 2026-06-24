@@ -16,6 +16,8 @@ import { Data } from "effect";
 
 /** `missing_workflow_file` — the workflow file could not be read. */
 export class MissingWorkflowFile extends Data.TaggedError("MissingWorkflowFile")<{
+  /** Actionable top-line message (path + real cause, no secrets) for the log stream. */
+  readonly message: string;
   readonly path: string;
   readonly cause?: unknown;
 }> {}
