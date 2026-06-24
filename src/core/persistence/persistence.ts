@@ -3,7 +3,12 @@ import { FileSystem } from "@effect/platform";
 import { Clock, Context, Duration, Effect, Layer, Option, Queue, type Scope } from "effect";
 import type { ServiceConfig } from "../domain/workflow";
 import { errorMessage } from "../util/error";
-import { decodePersisted, encodePersisted, type PersistedState } from "./persisted-state";
+import {
+  decodePersisted,
+  encodePersisted,
+  guardRateLimits,
+  type PersistedState,
+} from "./persisted-state";
 
 /**
  * Sprint 4 / #40 — the durable persistence boundary (durability spike §2.3, §2.7).
@@ -160,7 +165,15 @@ export const makePersistence = (
       writeLock.withPermits(1)(
         Effect.gen(function* () {
           yield* fs.makeDirectory(paths.dir, { recursive: true, mode: DIR_MODE });
-          const json = yield* encodePersisted(value);
+          // #50: degrade only the fragile `agent_rate_limits` field if it cannot encode, so a
+          // pathological vendor passthrough can never cost the rest of the checkpoint (§2.2).
+          const guarded = guardRateLimits(value);
+          if (guarded.degraded) {
+            yield* Effect.logWarning(
+              "persistence: agent_rate_limits unencodable; degraded to null, rest of checkpoint preserved",
+            ).pipe(annotate("persistence_rate_limits_degraded", {}));
+          }
+          const json = yield* encodePersisted(guarded.value);
           // #51: write the temp file `0600`; rename(2) preserves the mode onto state.json.
           yield* fs.writeFileString(paths.tmp, json, { mode: FILE_MODE });
           // rename(2) is atomic on a single filesystem: a reader/crash sees either the

@@ -386,6 +386,66 @@ describe("persistence — #51 restrictive checkpoint permissions (POSIX)", () =>
   );
 });
 
+describe("persistence — #50 degrade agent_rate_limits on encode fault (spike §2.2)", () => {
+  /** A `Schema.Unknown` value the codec accepts but `JSON.stringify` rejects (BigInt). */
+  const unencodableRateLimits = {
+    primary: { remaining: 10n, reset_at: "2026-01-01T00:00:00.000Z" },
+  };
+
+  it.scoped(
+    "an unencodable agent_rate_limits degrades to null; the rest of the checkpoint is still written",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-persist-" });
+        const persistence = yield* makePersistence(makeConfig(dir));
+
+        const bad: OrchestratorState = {
+          ...sampleState(),
+          // BigInt reaches Schema.Unknown fine, but faults the whole-object JSON encode.
+          agent_rate_limits: unencodableRateLimits,
+        };
+        const p0 = toPersisted(bad, new Date("2026-06-24T10:00:01.000Z"));
+
+        // save is total: it must NOT skip the write (pre-#50 behavior) — it writes the rest.
+        yield* persistence.save(p0);
+
+        const loaded = yield* persistence.load;
+        expect(Option.isSome(loaded)).toBe(true);
+        if (Option.isSome(loaded)) {
+          // Just the fragile field degraded...
+          expect(loaded.value.state.agent_rate_limits).toBeNull();
+          // ...everything else (running/retry/completed/totals + #41/#42 continuity) intact.
+          expect(loaded.value.state.completed).toEqual(["done-1", "done-2"]);
+          expect(loaded.value.state.agent_totals.total_tokens).toBe(33);
+          expect(loaded.value.state.running.i1?.session_id).toBe("sess-i1");
+          expect(loaded.value.state.retry_attempts.i2?.kind).toBe("continuation");
+          expect(loaded.value.state.claimed).toEqual(["i1", "i2"]);
+        }
+      }).pipe(Effect.provide(platform)),
+  );
+
+  it.scoped("a normal (JSON-origin) agent_rate_limits is unaffected — no degradation", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-persist-" });
+      const persistence = yield* makePersistence(makeConfig(dir));
+
+      // sampleState carries a vendor-shaped, JSON-encodable agent_rate_limits.
+      const p0 = toPersisted(sampleState(), new Date("2026-06-24T10:00:01.000Z"));
+      yield* persistence.save(p0);
+
+      const loaded = yield* persistence.load;
+      expect(Option.isSome(loaded)).toBe(true);
+      if (Option.isSome(loaded)) {
+        expect(loaded.value.state.agent_rate_limits).toEqual({
+          primary: { remaining: 7, reset_at: "2026-01-01T00:00:00.000Z" },
+        });
+      }
+    }).pipe(Effect.provide(platform)),
+  );
+});
+
 describe("persistence — config layer wiring", () => {
   it.scoped("layerDurableOrchestratorStore is a drop-in OrchestratorStore (cold start)", () =>
     Effect.gen(function* () {
