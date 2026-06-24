@@ -7,8 +7,11 @@ sprint plan (or a GitHub Issue) when ready.
 
 - **Linear tracker adapter.** v1 ships the GitHub Issues adapter only. The tracker
   port stays Linear-shaped so a Linear adapter can drop in later (Symphony parity).
-- **Web dashboard (HTML/LiveView equivalent).** v1 ships structured logs + an
-  optional JSON API. A richer web UI is post-v1.
+- **Web dashboard (HTML/LiveView equivalent).** → **Promoted to Sprint 6 — The Web
+  Cockpit (#64–#72, in progress).** A Vite+React SPA served by the daemon on `--port`,
+  with full control (kanban, session overview, events feed, live-edit/persist of
+  `WORKFLOW.md` settings). Supersedes the Ink dashboard, which is removed. See
+  `docs/sprint-6/plan.md`.
 - **SSH / remote workers.** Symphony's `make e2e` exercises SSH workers. Orchestra
   v1 runs workers locally only.
 
@@ -33,7 +36,9 @@ sprint plan (or a GitHub Issue) when ready.
 
 ## Wild ideas (parked)
 
-- Multi-agent "fleet" view: visualize all running Copilot sessions live in a TUI.
+- Multi-agent "fleet" view: visualize all running Copilot sessions live in a TUI. →
+  **Promoted to Sprint 6** as the Web Cockpit's Fleet / Session-overview view (#69),
+  rendered in the browser rather than a TUI.
 - Auto-generated walkthrough videos as proof-of-work (Symphony demo parity).
 - ~~Cost guardrails: pause dispatch when token spend crosses a budget.~~ → **promoted
   to Sprint 5 (#53).**

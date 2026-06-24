@@ -1,6 +1,6 @@
 # PROJECT_BRIEF.md — Orchestra
 
-> Last updated: 2026-06-24 | Sprint 4 complete | Status: Durable orchestrator shipped
+> Last updated: 2026-06-24 | Sprint 5 complete · Sprint 6 (Web Cockpit) in planning | Status: Operator experience shipped; web cockpit + control plane next
 >
 > **This file is the single source of truth across all team chats.** Each chat is a
 > fresh context — this file and `docs/sprint-N/progress.md` are the only things that
@@ -100,7 +100,9 @@ necessarily `Done`.
 | Area | Path | Status | Contents |
 |------|------|--------|----------|
 | CLI / daemon entry | `src/cli/main.ts`, `src/cli/daemon.ts`, `src/cli/args.ts` | ✅ created | Thin top-level dispatcher (`main.ts`: `argv[0]==="dashboard"` → dashboard, else daemon). `daemon.ts` = `runDaemon(argv)` + `appLayer` (logfmt logger, `AppLive` Layer → `runOrchestrator` fiber + forked snapshot server, `runMain`); `args.ts` parses the daemon's `--port`. |
-| Dashboard (Ink TUI) | `src/cli/dashboard.tsx`, `src/cli/dashboard/` | ✅ created | Standalone read-only terminal UI (Ink/React 19). `args.ts` (separate `--port/--host/--interval-ms/--ascii/--help` parser), `snapshot-client.ts` (defensive `parseSnapshot` + injectable `makeFetchSnapshot`), `poller.ts` (non-overlapping `SnapshotPoller`, `connecting/live/stale`), `use-snapshot.ts` (React hook), `view-model.ts` (pure `toViewModel`), `components.tsx`/`app.tsx`/`run.tsx` (Ink render). Reuses `glyphs.ts`; core untouched. |
+| Dashboard (Ink TUI) | `src/cli/dashboard.tsx`, `src/cli/dashboard/` | ⚠️ to be removed (Sprint 6) | Standalone read-only terminal UI (Ink/React 19). **Superseded by the web cockpit** under the forward-only mandate — `#72` deletes this directory, `dashboard.tsx`, the `orchestra dashboard` subcommand, and the Ink-only deps. |
+| Web cockpit (SPA) | `src/cockpit/` | 🔵 reserved (Sprint 6) | Vite + React + TS browser cockpit served by the daemon: views Fleet/Session-overview · Kanban · Events · Settings; plain-`fetch` typed API client (no Effect in the browser); pure mappers + column derivation in vitest-tested modules. `vite build` → `dist/cockpit/` (served statically by the `HttpApi`). |
+| Cockpit API + control plane | `src/core/observability/snapshot-server.ts` → cockpit `HttpApi`; `src/core/orchestrator/command-bus.ts`, `messages.ts` (`Msg.Command`); `src/core/workflow/workflow-file.ts` | 🔵 reserved (Sprint 6) | `snapshot-server.ts` is rebuilt as one `@effect/platform` `HttpApi` (`CockpitApi`) exposing the read snapshot + mutating endpoints (DD-1). New `CommandBus` service (`Queue` + `Deferred` ack) delivers operator commands through the existing serial mailbox; new `WorkflowFile` service does the atomic, secret-safe settings read/persist + hot-reload (DD-2/DD-4). |
 | Domain model | `src/core/domain/` | ✅ created | `Schema` types: Issue, AgentEvent (union), ServiceConfig + **front-matter schema** (`workflow.ts`), Workspace, RunAttempt, LiveSession, RetryEntry, OrchestratorState |
 | Ports | `src/core/ports/` | ✅ created | `IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock` as `Context.Tag` (signatures only) |
 | Errors | `src/core/errors.ts` | ✅ created | Tagged error for every SPEC error class + workspace-safety errors; unioned |
@@ -147,6 +149,7 @@ necessarily `Done`.
 | 3 | Observability v2 + Durability Spike | ✅ Done | Strictly-additive snapshot enrichment + new dashboard panels: live **event feed**, per-session **activity**, rich **completed/retry** (`recent_events`, `recent_completed`, `running[].last_activity`, retry wall-clock `scheduled_at`+`delay_ms`). New `RecentEvents`/`LiveActivity`/`RecentCompletions` services via a tee observer; exactly two sanctioned `loop.ts` edits. Plus the **#39 durability design spike** (`docs/sprint-3/durability-spike.md`). **Phase B durability build (#40–#43) rolled to Sprint 4** at the #39 gate. QA: SHIP-WITH-FOLLOW-UPS (#45 fixed). |
 | 4 | Durable Orchestrator | ✅ Done | The daemon survives a restart. Versioned (`Schema.parseJson`) **atomic** temp+rename checkpoint at `<workspace.root>/.orchestra/state.json`, written by a scoped **debounced** writer (default 500 ms, coalesced) with a **guaranteed final flush**; corrupt/missing → rename-aside + clean start, never crashes (#40). On boot: restore bookkeeping intact, **orphaned `running` → due-immediately continuation retry** (rides existing reconcile/dispatch, exactly-once is structural), **wall-clock retry re-arm** (`scheduled_at + delay_ms`, never monotonic `due_at_ms`), one synthetic `RestoredAfterRestart` (#41). Additive `RunAttempt.{turn,failure_attempts,session_id}` + `RetryEntry.{kind,session_id}`; **opt-in self-healing session resume** (`persistence.resume_sessions`, default off) (#42). Snapshot stayed **strictly additive** (no `/api/v2`); core-loop edits minimal. #43 stabilized the pre-existing #40 debounce `TestClock` flake (deterministic, 20/20 loop), filled audited coverage gaps, and shipped the docs/handoff. Post-merge QA (Ivy) verdict **SHIP, no blockers**; two minor follow-ups fixed (#50 rate-limit field degradation, #51 `0700`/`0600` checkpoint perms). |
 | 5 | Operator Experience | ✅ Done | Make spend controllable and the daemon legible. **Budget guardrails** (#53): additive optional `budget.max_total_tokens`; a pure pre-`planDispatch` guard pauses **new** dispatch at the token ceiling (in-flight work, retries, and reconcile provably untouched — no kills), emits `BudgetExceeded` once per transition, and projects a strictly-additive snapshot `budget` block + dashboard `BUDGET` panel. **Durability/restore visibility** (#54): a set-once `RestoreStatus` context service promotes #41's one-shot `RestoredAfterRestart` fact to a display-only, strictly-additive snapshot `restore` block (omitted on cold start) + dashboard `RESTORED` indicator — #41's restore stays byte-identical. **Humanized agent-event summaries** (#55): a pure, compile-checked-table `humanizeAgentEvent` renders friendly one-liners in the logfmt line and the dashboard last-activity line (unknown tags fall back to the raw label; maps by tag only, never payload; deliberately not flooded into `recent_events`). #56 audited/filled cross-feature coverage (3 new co-occurrence tests, no duplication) and shipped docs/handoff. Snapshot stayed **strictly additive** (no `/api/v2`); only #53 touched the dispatch path. Post-merge QA (Ivy) verdict **✅ SHIP** after two determinism fixes the sign-off surfaced — #60 (humanizer prototype-key own-property guard) and #61 (the residual #40 debounce flake, re-fixed in the `awaitFileExists` test helper); the `pnpm test` gate is now deterministic (117 clean full-suite runs). |
+| 6 | The Web Cockpit | 🔵 Planned | Promote the deferred web-dashboard + fleet-view ideas into a **complete cockpit**: a Vite+React SPA **served by the daemon** on `--port`, with **full control**. Backend on one `@effect/platform` `HttpApi` (`CockpitApi`) that **replaces** the hand-rolled snapshot router (read `GET /api/v1/state` stays byte-compatible/additive; new mutating endpoints added). Mutating requests reach the single state-owning fiber via a new `CommandBus` (Effect `Queue` + per-command `Deferred` ack) flowing through the **same serial mailbox** (`Msg.Command`) — exactly-once stays structural. Commands: operator **pause/resume** dispatch (additive `control` snapshot block; a new runtime gate beside the budget gate — in-flight work untouched), **retry-now**, **cancel** (interrupts only the named worker). A new `WorkflowFile` service **live-edits + persists** a whitelisted subset of `WORKFLOW.md` front-matter (concurrency/poll/budget/turns/backoff) via an **atomic** write that keeps the Liquid body and every `$VAR`/`api_key` **byte-identical** (resolved secrets are NEVER serialized), then **hot-reloads** the safe knobs. Security: loopback bind, read token-free, mutating endpoints require a per-session bearer token (injected same-origin into `index.html`) + loopback-Origin allowlist (not trivially CSRF-able). Forward-only: the **Ink dashboard is removed** (the cockpit supersedes it; `ink`/`ink-testing-library`/`react-devtools-core` dropped, `vite`/`@vitejs/plugin-react`/`react-dom` added). Issues #64–#72 (`docs/sprint-6/plan.md`). |
 
 ## 8. Current State (rewrite every sprint)
 
@@ -295,10 +298,21 @@ necessarily `Done`.
   the loop is proven against fakes). Manual real-repo validation is the operator's step.
 
 **What's next:**
-- Sprint 6 scope is the Producer's call. Candidates from the Sprint 5 carry-forwards
-  (`docs/sprint-5/done.md`): a live-Copilot resume validation, the optional USD budget ceiling,
-  WORKFLOW.md hot-reload (which would also make the budget-resume path reachable), and the
-  control-plane / PR write-back flow.
+- **Sprint 6 — The Web Cockpit (🔵 in planning, `feature/sprint-6`).** A Vite+React SPA
+  served by the daemon on `--port`, with **full control**: fleet/session overview, kanban,
+  events feed, and **live-edit + persist** of the operationally-safe `WORKFLOW.md` settings.
+  Backend on one `@effect/platform` `HttpApi` that **replaces** the hand-rolled snapshot
+  router (read stays byte-compatible/additive). Mutating requests reach the single owner
+  fiber via a new `CommandBus` (Effect `Queue` + `Deferred` ack) through the existing serial
+  mailbox — exactly-once stays structural; operator-pause is a new runtime gate beside the
+  budget gate (in-flight work untouched); cancel interrupts only the named worker. Settings
+  persistence is an **atomic** front-matter write that keeps the Liquid body + any
+  `$VAR`/`api_key` byte-identical (resolved secrets never serialized) + a safe-knob
+  hot-reload. Loopback-only with a per-session bearer token + Origin allowlist on mutating
+  endpoints. Forward-only: the **Ink dashboard is removed** (the cockpit supersedes it).
+  Issues #64–#72; see `docs/sprint-6/plan.md`.
+- Still deferred beyond Sprint 6: a live-Copilot resume validation, the optional USD budget
+  ceiling, and the PR write-back flow (`docs/sprint-5/done.md` carry-forwards).
 
 ## 9. Security Rules
 
