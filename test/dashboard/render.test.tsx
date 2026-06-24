@@ -2,7 +2,7 @@ import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { DashboardView } from "../../src/cli/dashboard/components";
 import { toViewModel, type ViewModelOptions } from "../../src/cli/dashboard/view-model";
-import { makeRunning, makeSnapshot } from "./fixtures";
+import { makeCompletion, makeEvent, makeRunning, makeSnapshot, STARTED_AT } from "./fixtures";
 
 /**
  * #33 — light ink-testing-library render asserts. The view-model carries the logic and
@@ -83,5 +83,38 @@ describe("DashboardView", () => {
     expect(frame).not.toContain("▶ running");
     // The raw drifted phase is still surfaced subtly so the operator can diagnose it.
     expect(frame).toContain("phase=DriftedPhase");
+  });
+
+  it("renders the event feed, last-activity line, and rich completed panels (#38)", () => {
+    const frame = frameOf(
+      makeSnapshot({
+        running: [makeRunning({ last_activity: { event_tag: "TurnCompleted", at: STARTED_AT } })],
+        recent_events: [makeEvent({ kind: "completed", message: "completed ORC-1" })],
+        recent_completed: [makeCompletion({ identifier: "ORC-9", outcome: "completed" })],
+      }),
+      opts(),
+    );
+    expect(frame).toContain("EVENTS");
+    expect(frame).toContain("completed ORC-1");
+    expect(frame).toContain("TurnCompleted · 1m 00s ago");
+    expect(frame).toContain("RECENTLY FINISHED");
+    expect(frame).toContain("ORC-9");
+  });
+
+  it("omits the new panels for an older-daemon snapshot — identical Sprint 2 view (#38)", () => {
+    const frame = frameOf(makeSnapshot(), opts());
+    expect(frame).not.toContain("EVENTS");
+    expect(frame).not.toContain("RECENTLY FINISHED");
+    expect(frame).not.toContain("↳");
+  });
+
+  it("swaps event-feed glyphs for ASCII with --ascii (#38)", () => {
+    const snap = makeSnapshot({
+      recent_events: [makeEvent({ kind: "completed", message: "completed ORC-1" })],
+    });
+    expect(frameOf(snap, opts())).toContain("✓");
+    const ascii = frameOf(snap, opts(), true);
+    expect(ascii).toContain("+ ");
+    expect(ascii).not.toContain("✓");
   });
 });

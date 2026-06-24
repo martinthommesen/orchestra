@@ -7,7 +7,7 @@ Branch: `feature/sprint-3` (from `main` @ 5f31f76). Identity: martin-lammetun.th
 |---|-------|------|--------|
 | 36 | A | RecentEvents ring-buffer service + tee Observer | ✅ done (2274da4) |
 | 37 | A | Snapshot enrichment (additive fields) | ✅ done |
-| 38 | A | Dashboard event-log + activity + rich completed | pending |
+| 38 | A | Dashboard event-log + activity + rich completed | ✅ done |
 | 39 | B | **BLOCKING** durability design spike | pending |
 | 40 | B | Persistence layer (versioned, atomic, debounced) | pending |
 | 41 | B | Restore + reconcile on boot + retry re-arm | pending |
@@ -72,3 +72,40 @@ Branch: `feature/sprint-3` (from `main` @ 5f31f76). Identity: martin-lammetun.th
   the loop — this is how #37's last_activity reconciles with constraint #5's "only two
   loop changes".
 - Gates: typecheck/lint/build 0; tests 246 (+9). Full suite green.
+
+### #38 — Dashboard event-log + activity + rich completed (done)
+- **Pure client/dashboard work only** — no `src/core/**`, loop, or snapshot-server touched.
+- `snapshot-client.ts`: parser layer finalized (was already ~complete in the WIP tree).
+  Verified the new interfaces (`SnapshotActivity`/`SnapshotEvent`/`SnapshotCompletion`),
+  optional `running[].last_activity` + retry `scheduled_at`/`delay_ms`, and `parseSnapshot`
+  emitting `recent_events`/`recent_completed` via `optArray` (absent → `[]`, so older
+  daemons parse identically). One cleanup: reordered `asArray` above `optArray` (it
+  referenced it before declaration). Element parsers still throw on malformed shapes.
+- `view-model.ts`: wrote the `toViewModel` population behind the WIP type additions:
+  - `running[].lastActivityLabel` = `"<event_tag> · <rel> ago"`; **null** when absent or
+    `at` unparseable (no fake "0s").
+  - `retrying[].dueAtLabel` = honest UTC wall-clock `"due HH:MM:SSZ"` from
+    `scheduled_at + delay_ms`; **null** when either absent or `scheduled_at` unparseable.
+    Never a countdown, never derived from the monotonic `due_at_ms`.
+  - `events[]` (newest-first; wire is newest-last → reversed, bounded `RECENT_EVENTS=12`):
+    glyph+color via `EVENT_KIND_STYLE` (reuses glyphs.ts status glyphs ▶/⏳/✓/✗) with a
+    level fallback (warn→warn ⚠, info→muted ·); relative label (`"—"` when unparseable);
+    message via `truncateOneLine`.
+  - `recentCompleted[]` (newest-first, bounded `RECENT_COMPLETED=8`): identifier + relative
+    `finished_at` + outcome→color (`completed`→success, `killed`→danger, else muted).
+  - Both null-snapshot and populated branches now carry `events: []` / `recentCompleted: []`.
+- `components.tsx`: additive dumb panels — `EventRow` + `EVENTS` section (omitted when
+  empty), per-running-row last-activity line (`↳`/`-` ascii, omitted when null), `CompletedRow`
+  + `RECENTLY FINISHED` section (omitted when empty; the IDs-only `COMPLETED` summary stays).
+  Retrying rows gained an optional `dueAtLabel` cell. All `<Box>` layout; color gated by the
+  `color` flag; glyphs by `ascii` → `--ascii`/`NO_COLOR`/non-TTY render plain.
+- `test/dashboard/fixtures.ts`: `makeSnapshot` now defaults `recent_events`/`recent_completed`
+  to `[]` (required by the enriched `Snapshot`); added `makeEvent`/`makeCompletion`.
+- Tests: +15 view-model (relative-time, honest due-time, newest-first ordering, level/kind
+  →glyph+color, outcome→color, backward-safe omission) and +3 render (panels reach frame,
+  ascii glyph swap, older-daemon omission). Fixed one pre-existing retrying assertion that
+  checked `not.toContain("due")` — now legitimately matched by `dueAtLabel`; rewritten to
+  assert `dueAtLabel === null` + no `99999` (monotonic `due_at_ms`) leak.
+- **Decision:** rich completed panel titled `RECENTLY FINISHED` to stay visually distinct
+  from the authoritative IDs-only `COMPLETED (n)` summary, which is unchanged.
+- Gates: typecheck/lint/build 0; tests **263 (+17)**. Full suite green.

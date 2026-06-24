@@ -2,7 +2,9 @@ import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 import type { ColorToken } from "../../core/observability/glyphs";
 import type {
+  CompletedRowVM,
   DashboardViewModel,
+  EventRowVM,
   RetryingRowVM,
   RunningRowVM,
   StatusBadgeVM,
@@ -124,6 +126,13 @@ function RunningRow({ row, ascii, color }: { readonly row: RunningRowVM } & Them
           </Tinted>
         </Box>
       ) : null}
+      {row.lastActivityLabel !== null ? (
+        <Box marginLeft={2}>
+          <Dim color={color}>
+            {ascii ? "-" : "↳"} {row.lastActivityLabel}
+          </Dim>
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -137,8 +146,52 @@ function RetryingRow({ row, color }: { readonly row: RetryingRowVM; readonly col
       <Box width={6}>
         <Text>{row.attemptLabel}</Text>
       </Box>
+      {row.dueAtLabel !== null ? (
+        <Box width={16}>
+          <Dim color={color}>{row.dueAtLabel}</Dim>
+        </Box>
+      ) : null}
       <Box flexGrow={1}>
         <Dim color={color}>{row.error}</Dim>
+      </Box>
+    </Box>
+  );
+}
+
+function EventRow({ row, ascii, color }: { readonly row: EventRowVM } & Themed) {
+  return (
+    <Box>
+      <Box width={2}>
+        <Tinted tone={row.color} color={color}>
+          {ascii ? row.ascii : row.glyph}
+        </Tinted>
+      </Box>
+      <Box width={9}>
+        <Dim color={color}>{row.relativeLabel}</Dim>
+      </Box>
+      <Box flexGrow={1}>
+        <Text>
+          {row.identifier !== null ? `${row.identifier} ` : ""}
+          {row.message}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+function CompletedRow({ row, color }: { readonly row: CompletedRowVM; readonly color: boolean }) {
+  return (
+    <Box>
+      <Box width={14}>
+        <Text>{row.identifier}</Text>
+      </Box>
+      <Box width={11}>
+        <Tinted tone={row.outcomeColor} color={color}>
+          {row.outcome}
+        </Tinted>
+      </Box>
+      <Box flexGrow={1}>
+        <Dim color={color}>{row.relativeLabel}</Dim>
       </Box>
     </Box>
   );
@@ -216,6 +269,14 @@ export function DashboardView({ vm, ascii, color }: { readonly vm: DashboardView
         </Box>
       </Section>
 
+      {vm.recentCompleted.length > 0 ? (
+        <Section title="RECENTLY FINISHED" color={color}>
+          {vm.recentCompleted.map((row) => (
+            <CompletedRow key={row.issueId} row={row} color={color} />
+          ))}
+        </Section>
+      ) : null}
+
       <Section title="TOTALS" color={color}>
         {vm.totals === null ? (
           <Box marginLeft={2}>
@@ -235,6 +296,14 @@ export function DashboardView({ vm, ascii, color }: { readonly vm: DashboardView
           )}
         </Box>
       </Section>
+
+      {vm.events.length > 0 ? (
+        <Section title="EVENTS" color={color}>
+          {vm.events.map((row) => (
+            <EventRow key={row.seq} row={row} ascii={ascii} color={color} />
+          ))}
+        </Section>
+      ) : null}
 
       <Box marginTop={1}>
         <Dim color={color}>press q to quit</Dim>

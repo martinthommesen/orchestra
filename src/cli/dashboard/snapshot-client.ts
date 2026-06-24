@@ -22,6 +22,15 @@ export interface SnapshotRunning {
   /** A `RunAttemptPhase` string; mapped to an operator status in the view-model. */
   readonly status: string;
   readonly error?: string;
+  /** Last agent activity for this session (#37); absent when none observed yet. */
+  readonly last_activity?: SnapshotActivity;
+}
+
+/** Per-session last activity (#37). `at` is an ISO instant. */
+export interface SnapshotActivity {
+  readonly event_tag: string;
+  readonly at: string;
+  readonly message?: string;
 }
 
 /** A scheduled retry. `due_at_ms` is a MONOTONIC clock value — not wall-clock. */
@@ -31,6 +40,29 @@ export interface SnapshotRetrying {
   readonly attempt: number;
   readonly due_at_ms: number;
   readonly error: string | null;
+  /** Wall-clock ISO instant the retry was scheduled (#37); absent on older daemons. */
+  readonly scheduled_at?: string;
+  /** Backoff delay in ms applied at schedule time (#37); absent on older daemons. */
+  readonly delay_ms?: number;
+}
+
+/** A bounded, display-safe lifecycle event (#37). `emitted_at` is an ISO instant. */
+export interface SnapshotEvent {
+  readonly seq: number;
+  readonly emitted_at: string;
+  readonly level: "info" | "warn";
+  readonly kind: string;
+  readonly issue_id?: string;
+  readonly identifier?: string;
+  readonly message: string;
+}
+
+/** A rich completion record (#37). `finished_at` is an ISO instant. */
+export interface SnapshotCompletion {
+  readonly issue_id: string;
+  readonly identifier: string;
+  readonly finished_at: string;
+  readonly outcome: string;
 }
 
 export interface SnapshotTotals {
@@ -54,8 +86,12 @@ export interface Snapshot {
   readonly counts: SnapshotCounts;
   readonly running: ReadonlyArray<SnapshotRunning>;
   readonly retrying: ReadonlyArray<SnapshotRetrying>;
-  /** Completed *issue IDs only* (the API does not carry rich completion data). */
+  /** Completed *issue IDs only* (the authoritative list; rich data is in recent_completed). */
   readonly completed: ReadonlyArray<string>;
+  /** Bounded lifecycle event feed (#37), newest-last; empty on older daemons. */
+  readonly recent_events: ReadonlyArray<SnapshotEvent>;
+  /** Rich completion history (#37), newest-last; empty on older daemons. */
+  readonly recent_completed: ReadonlyArray<SnapshotCompletion>;
   readonly totals: SnapshotTotals;
   /** Vendor passthrough — rendered defensively; never assume a schema. */
   readonly rate_limits: unknown;
@@ -142,11 +178,30 @@ const optString = (obj: Record<string, unknown>, key: string): string | undefine
   return v;
 };
 
+const optInt = (obj: Record<string, unknown>, key: string): number | undefined => {
+  const v = obj[key];
+  if (v === undefined) {
+    return undefined;
+  }
+  if (typeof v !== "number" || !Number.isInteger(v)) {
+    throw new SnapshotParseError(`expected integer|undefined at "${key}"`);
+  }
+  return v;
+};
+
 const asArray = (v: unknown, key: string): ReadonlyArray<unknown> => {
   if (!Array.isArray(v)) {
     throw new SnapshotParseError(`expected array at "${key}"`);
   }
   return v;
+};
+
+/** An optional array: absent/undefined → `[]` (older daemons omit the new fields). */
+const optArray = (v: unknown, key: string): ReadonlyArray<unknown> => {
+  if (v === undefined) {
+    return [];
+  }
+  return asArray(v, key);
 };
 
 const asStringArray = (v: unknown, key: string): ReadonlyArray<string> => {
@@ -165,6 +220,16 @@ const asRecord = (v: unknown, key: string): Record<string, unknown> => {
   return v;
 };
 
+const parseActivity = (raw: unknown): SnapshotActivity => {
+  const obj = asRecord(raw, "running[].last_activity");
+  const base = {
+    event_tag: reqString(obj, "event_tag"),
+    at: reqString(obj, "at"),
+  };
+  const message = optString(obj, "message");
+  return message === undefined ? base : { ...base, message };
+};
+
 const parseRunning = (raw: unknown, i: number): SnapshotRunning => {
   const obj = asRecord(raw, `running[${i}]`);
   const base = {
@@ -176,18 +241,60 @@ const parseRunning = (raw: unknown, i: number): SnapshotRunning => {
     status: reqString(obj, "status"),
   };
   const error = optString(obj, "error");
-  // exactOptionalPropertyTypes: only attach `error` when actually present.
-  return error === undefined ? base : { ...base, error };
+  const lastActivity =
+    obj.last_activity === undefined ? undefined : parseActivity(obj.last_activity);
+  // exactOptionalPropertyTypes: only attach optional keys when actually present.
+  return {
+    ...base,
+    ...(error === undefined ? {} : { error }),
+    ...(lastActivity === undefined ? {} : { last_activity: lastActivity }),
+  };
 };
 
 const parseRetrying = (raw: unknown, i: number): SnapshotRetrying => {
   const obj = asRecord(raw, `retrying[${i}]`);
-  return {
+  const base = {
     issue_id: reqString(obj, "issue_id"),
     identifier: reqString(obj, "identifier"),
     attempt: reqInt(obj, "attempt"),
     due_at_ms: reqNumber(obj, "due_at_ms"),
     error: nullableString(obj, "error"),
+  };
+  const scheduledAt = optString(obj, "scheduled_at");
+  const delayMs = optInt(obj, "delay_ms");
+  return {
+    ...base,
+    ...(scheduledAt === undefined ? {} : { scheduled_at: scheduledAt }),
+    ...(delayMs === undefined ? {} : { delay_ms: delayMs }),
+  };
+};
+
+const parseEvent = (raw: unknown, i: number): SnapshotEvent => {
+  const obj = asRecord(raw, `recent_events[${i}]`);
+  const base = {
+    seq: reqInt(obj, "seq"),
+    emitted_at: reqString(obj, "emitted_at"),
+    // Defensive: only `warn` escalates; anything else renders as `info`.
+    level: (reqString(obj, "level") === "warn" ? "warn" : "info") as "info" | "warn",
+    kind: reqString(obj, "kind"),
+    message: reqString(obj, "message"),
+  };
+  const issueId = optString(obj, "issue_id");
+  const identifier = optString(obj, "identifier");
+  return {
+    ...base,
+    ...(issueId === undefined ? {} : { issue_id: issueId }),
+    ...(identifier === undefined ? {} : { identifier }),
+  };
+};
+
+const parseCompletion = (raw: unknown, i: number): SnapshotCompletion => {
+  const obj = asRecord(raw, `recent_completed[${i}]`);
+  return {
+    issue_id: reqString(obj, "issue_id"),
+    identifier: reqString(obj, "identifier"),
+    finished_at: reqString(obj, "finished_at"),
+    outcome: reqString(obj, "outcome"),
   };
 };
 
@@ -221,6 +328,8 @@ export const parseSnapshot = (raw: unknown): Snapshot => {
     running: asArray(obj.running, "running").map(parseRunning),
     retrying: asArray(obj.retrying, "retrying").map(parseRetrying),
     completed: asStringArray(obj.completed, "completed"),
+    recent_events: optArray(obj.recent_events, "recent_events").map(parseEvent),
+    recent_completed: optArray(obj.recent_completed, "recent_completed").map(parseCompletion),
     totals: parseTotals(obj.totals),
     // Keep rate_limits opaque: null when absent, otherwise the raw vendor value.
     rate_limits: obj.rate_limits ?? null,
