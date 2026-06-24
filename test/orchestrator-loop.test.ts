@@ -2,6 +2,7 @@ import { it } from "@effect/vitest";
 import { Duration, Effect, Fiber, TestClock } from "effect";
 import { describe, expect } from "vitest";
 import { TurnFailed } from "../src/core/errors";
+import { RecentCompletions } from "../src/core/observability/recent-completions";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";
 import { OrchestratorStore } from "../src/core/orchestrator/state";
@@ -59,6 +60,13 @@ describe("orchestrator loop (fakes + TestClock)", () => {
         expect(state.completed).toContain("i1");
         expect(state.running.i1).toBeUndefined();
         expect(state.agent_totals.total_tokens).toBe(7);
+
+        // #37: the natural completion is also recorded into the rich-completion ring,
+        // with wall-clock finished_at + outcome (kept OUT of the IDs-only `completed`).
+        const completions = yield* RecentCompletions;
+        const recent = yield* completions.list;
+        expect(recent.map((c) => c.issue_id)).toContain("i1");
+        expect(recent.find((c) => c.issue_id === "i1")?.outcome).toBe("completed");
 
         const runs = yield* runner.control.runs;
         expect(runs).toHaveLength(1);

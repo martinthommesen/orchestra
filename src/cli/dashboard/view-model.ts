@@ -6,7 +6,7 @@ import {
   truncateOneLine,
 } from "../../core/observability/glyphs";
 import type { ConnectionState } from "./poller";
-import type { Snapshot } from "./snapshot-client";
+import type { Snapshot, SnapshotActivity, SnapshotRetrying } from "./snapshot-client";
 
 /**
  * Pure presentation logic for the dashboard (#32). `toViewModel` turns a (possibly
@@ -68,6 +68,8 @@ export interface RunningRowVM {
   readonly attemptLabel: string;
   readonly workspace: string;
   readonly error: string | null;
+  /** "TurnCompleted · 3s ago" when the worker has reported activity, else null (#38). */
+  readonly lastActivityLabel: string | null;
 }
 
 export interface RetryingRowVM {
@@ -75,6 +77,31 @@ export interface RetryingRowVM {
   readonly identifier: string;
   readonly attemptLabel: string;
   readonly error: string;
+  /** Honest wall-clock due time ("due 00:01:05Z") from scheduled_at+delay_ms; null if absent.
+   *  NOT a countdown and NOT derived from the monotonic due_at_ms (#38). */
+  readonly dueAtLabel: string | null;
+}
+
+/** One lifecycle event row in the feed (#38). */
+export interface EventRowVM {
+  readonly seq: number;
+  readonly glyph: string;
+  readonly ascii: string;
+  readonly color: ColorToken;
+  readonly kind: string;
+  readonly message: string;
+  /** Relative time ("3s ago"), or "—" when emitted_at is unparseable. */
+  readonly relativeLabel: string;
+  readonly identifier: string | null;
+}
+
+/** One rich completed row (#38): identifier + relative finished-at + outcome. */
+export interface CompletedRowVM {
+  readonly issueId: string;
+  readonly identifier: string;
+  readonly outcome: string;
+  readonly outcomeColor: ColorToken;
+  readonly relativeLabel: string;
 }
 
 export interface CompletedVM {
@@ -99,6 +126,10 @@ export interface DashboardViewModel {
   readonly running: ReadonlyArray<RunningRowVM>;
   readonly retrying: ReadonlyArray<RetryingRowVM>;
   readonly completed: CompletedVM;
+  /** Rich recent completions (newest-first), or empty when the daemon doesn't send them. */
+  readonly recentCompleted: ReadonlyArray<CompletedRowVM>;
+  /** Lifecycle event feed (newest-first), or empty when the daemon doesn't send it. */
+  readonly events: ReadonlyArray<EventRowVM>;
   readonly totals: TotalsVM | null;
   readonly rateLimits: RateLimitsVM;
 }
@@ -112,9 +143,12 @@ export interface ViewModelOptions {
 
 /** How many recent completed IDs to surface (it is IDs-only, so keep it small). */
 export const RECENT_COMPLETED = 8;
+/** How many lifecycle events to surface in the feed (newest-first; the ring holds more). */
+export const RECENT_EVENTS = 12;
 const WORKSPACE_MAX = 44;
 const ERROR_MAX = 80;
 const RATE_LIMIT_MAX = 100;
+const EVENT_MESSAGE_MAX = 80;
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
@@ -172,6 +206,87 @@ const formatElapsed = (now: number, startedAt: string): string => {
   return Number.isFinite(started) ? formatDuration(now - started) : UNKNOWN_ELAPSED;
 };
 
+/** Relative wall-clock label ("3s ago"); `—` when the ISO instant is unparseable. */
+const formatRelative = (now: number, iso: string): string => {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? `${formatDuration(now - t)} ago` : UNKNOWN_ELAPSED;
+};
+
+/**
+ * Honest per-session activity line ("TurnCompleted · 3s ago"). `null` when no activity
+ * has been observed or `at` is unparseable — we never invent a plausible "0s ago".
+ */
+const formatLastActivity = (now: number, activity: SnapshotActivity | undefined): string | null => {
+  if (activity === undefined) {
+    return null;
+  }
+  const t = Date.parse(activity.at);
+  if (!Number.isFinite(t)) {
+    return null;
+  }
+  return `${activity.event_tag} · ${formatDuration(now - t)} ago`;
+};
+
+/**
+ * Honest wall-clock retry due time ("due 00:01:05Z") from `scheduled_at` + `delay_ms`,
+ * formatted in UTC. `null` when either field is absent (older daemon) or `scheduled_at`
+ * is unparseable. NEVER a live countdown and NEVER derived from the monotonic `due_at_ms`.
+ */
+const formatDueAt = (r: SnapshotRetrying): string | null => {
+  if (r.scheduled_at === undefined || r.delay_ms === undefined) {
+    return null;
+  }
+  const base = Date.parse(r.scheduled_at);
+  if (!Number.isFinite(base)) {
+    return null;
+  }
+  const due = new Date(base + r.delay_ms);
+  return `due ${pad2(due.getUTCHours())}:${pad2(due.getUTCMinutes())}:${pad2(due.getUTCSeconds())}Z`;
+};
+
+/** A precomputed feed glyph (both variants) so the Ink component stays dumb. */
+interface FeedGlyph {
+  readonly color: ColorToken;
+  readonly glyph: string;
+  readonly ascii: string;
+}
+
+/**
+ * Glyph + color for a lifecycle event, keyed by `kind` and reusing the `glyphs.ts`
+ * status design system (▶ dispatched, ⏳ retry, ✓ completed, ✗ failed). Unknown kinds
+ * fall back on `level`: `warn` → warn tone, anything else → muted info.
+ */
+const EVENT_KIND_STYLE: Record<string, FeedGlyph> = {
+  started: { color: "info", glyph: "▶", ascii: ">" },
+  dispatched: { color: "info", glyph: "▶", ascii: ">" },
+  retry_scheduled: { color: "warn", glyph: "⏳", ascii: "~" },
+  retry_fired: { color: "warn", glyph: "⏳", ascii: "~" },
+  completed: { color: "success", glyph: "✓", ascii: "+" },
+  workspace_cleaned: { color: "muted", glyph: "✓", ascii: "+" },
+  startup_cleanup: { color: "muted", glyph: "✓", ascii: "+" },
+  failed: { color: "danger", glyph: "✗", ascii: "x" },
+  killed: { color: "danger", glyph: "✗", ascii: "x" },
+  preflight_failed: { color: "danger", glyph: "✗", ascii: "x" },
+};
+
+const WARN_GLYPH: FeedGlyph = { color: "warn", glyph: "⚠", ascii: "!" };
+const INFO_GLYPH: FeedGlyph = { color: "muted", glyph: "·", ascii: "-" };
+
+const eventGlyph = (level: "info" | "warn", kind: string): FeedGlyph =>
+  EVENT_KIND_STYLE[kind] ?? (level === "warn" ? WARN_GLYPH : INFO_GLYPH);
+
+/** Outcome → color for the rich completed feed (completed→success, killed→danger). */
+const outcomeColor = (outcome: string): ColorToken => {
+  switch (outcome) {
+    case "completed":
+      return "success";
+    case "killed":
+      return "danger";
+    default:
+      return "muted";
+  }
+};
+
 const attemptLabel = (attempt: number | null): string => (attempt === null ? "—" : `#${attempt}`);
 
 const connectionStyle = (
@@ -213,6 +328,7 @@ const toRunningRow = (now: number, r: Snapshot["running"][number]): RunningRowVM
   attemptLabel: attemptLabel(r.attempt),
   workspace: truncate(r.workspace_path, WORKSPACE_MAX),
   error: r.error === undefined ? null : truncateOneLine(r.error, ERROR_MAX),
+  lastActivityLabel: formatLastActivity(now, r.last_activity),
 });
 
 const toRetryingRow = (r: Snapshot["retrying"][number]): RetryingRowVM => ({
@@ -220,6 +336,29 @@ const toRetryingRow = (r: Snapshot["retrying"][number]): RetryingRowVM => ({
   identifier: r.identifier,
   attemptLabel: `#${r.attempt}`,
   error: r.error === null ? "—" : truncateOneLine(r.error, ERROR_MAX),
+  dueAtLabel: formatDueAt(r),
+});
+
+const toEventRow = (now: number, e: Snapshot["recent_events"][number]): EventRowVM => {
+  const style = eventGlyph(e.level, e.kind);
+  return {
+    seq: e.seq,
+    glyph: style.glyph,
+    ascii: style.ascii,
+    color: style.color,
+    kind: e.kind,
+    message: truncateOneLine(e.message, EVENT_MESSAGE_MAX),
+    relativeLabel: formatRelative(now, e.emitted_at),
+    identifier: e.identifier ?? null,
+  };
+};
+
+const toCompletedRow = (now: number, c: Snapshot["recent_completed"][number]): CompletedRowVM => ({
+  issueId: c.issue_id,
+  identifier: c.identifier,
+  outcome: c.outcome,
+  outcomeColor: outcomeColor(c.outcome),
+  relativeLabel: formatRelative(now, c.finished_at),
 });
 
 /** Build the full render-ready view model. `snapshot` is null until the first poll. */
@@ -252,6 +391,8 @@ export const toViewModel = (
       running: [],
       retrying: [],
       completed: { count: 0, recentIds: [] },
+      recentCompleted: [],
+      events: [],
       totals: null,
       rateLimits: summarizeRateLimits(null),
     };
@@ -278,6 +419,16 @@ export const toViewModel = (
       // IDs-only: a few most-recent, newest first.
       recentIds: snapshot.completed.slice(-RECENT_COMPLETED).reverse(),
     },
+    // Rich completions ride a sibling ring (newest-last on the wire) — newest-first here.
+    recentCompleted: [...snapshot.recent_completed]
+      .reverse()
+      .slice(0, RECENT_COMPLETED)
+      .map((c) => toCompletedRow(now, c)),
+    // Lifecycle feed (newest-last on the wire) — newest-first, bounded for the panel.
+    events: [...snapshot.recent_events]
+      .reverse()
+      .slice(0, RECENT_EVENTS)
+      .map((e) => toEventRow(now, e)),
     totals: {
       inputTokens: snapshot.totals.input_tokens,
       outputTokens: snapshot.totals.output_tokens,

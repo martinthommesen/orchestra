@@ -4,6 +4,9 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, type Scope } from "effect";
 import type { OrchestratorState } from "../domain/orchestrator-state";
 import { OrchestratorStore } from "../orchestrator/state";
+import { type ActivityEntry, LiveActivity } from "./live-activity";
+import { type RecentCompletion, RecentCompletions } from "./recent-completions";
+import { type EventEnvelope, RecentEvents } from "./recent-events";
 
 /**
  * Optional JSON snapshot API (Task 12, SPEC §13.3/§13.7). When the CLI is given
@@ -13,11 +16,28 @@ import { OrchestratorStore } from "../orchestrator/state";
  * owner fiber writes (a serialized `Ref.get`), so it never mutates state and never races
  * the fiber. Served via `@effect/platform` so it stays inside Effect (no Promise escape)
  * and is torn down with the orchestrator scope.
+ *
+ * Sprint 3 / #37 enriches the projection with **strictly additive** observability fields
+ * sourced from the sibling rings ({@link RecentEvents}, {@link RecentCompletions}) and the
+ * {@link LiveActivity} map. Existing fields stay byte-compatible — `completed` remains the
+ * IDs-only authoritative list and `retrying[].due_at_ms` is unchanged — so the Sprint 2
+ * dashboard parser keeps working without changes.
  */
 
+/** Observability projections read alongside the authoritative state. */
+export interface SnapshotExtras {
+  readonly recentEvents?: ReadonlyArray<EventEnvelope>;
+  readonly recentCompleted?: ReadonlyArray<RecentCompletion>;
+  readonly activity?: ReadonlyMap<string, ActivityEntry>;
+}
+
 /** JSON-friendly projection of the authoritative state (Dates → ISO via JSON). */
-export const toSnapshot = (s: OrchestratorState) => {
-  const running = Object.values(s.running);
+export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => {
+  const running = Object.values(s.running).map((ra) => {
+    const act = extra.activity?.get(ra.issue_id);
+    // Additive: attach last_activity only when this running issue has any (else omit).
+    return act === undefined ? ra : { ...ra, last_activity: act };
+  });
   const retrying = Object.values(s.retry_attempts);
   return {
     poll_interval_ms: s.poll_interval_ms,
@@ -29,8 +49,14 @@ export const toSnapshot = (s: OrchestratorState) => {
       claimed: s.claimed.length,
     },
     running,
+    // retrying carries the new (optional) scheduled_at/delay_ms automatically; due_at_ms
+    // (monotonic) is retained unchanged.
     retrying,
     completed: s.completed,
+    // Rich completion history (additive; the IDs-only `completed` above is authoritative).
+    recent_completed: extra.recentCompleted ?? [],
+    // Bounded lifecycle event feed (additive), newest-last.
+    recent_events: extra.recentEvents ?? [],
     totals: s.agent_totals,
     rate_limits: s.agent_rate_limits,
   };
@@ -41,19 +67,32 @@ const router = HttpRouter.empty.pipe(
     "/api/v1/state",
     Effect.gen(function* () {
       const store = yield* OrchestratorStore;
+      const events = yield* RecentEvents;
+      const completions = yield* RecentCompletions;
+      const activity = yield* LiveActivity;
       const state = yield* store.get;
-      return yield* HttpServerResponse.json(toSnapshot(state)).pipe(Effect.orDie);
+      const recentEvents = yield* events.list;
+      const recentCompleted = yield* completions.list;
+      const activityMap = yield* activity.snapshot;
+      return yield* HttpServerResponse.json(
+        toSnapshot(state, { recentEvents, recentCompleted, activity: activityMap }),
+      ).pipe(Effect.orDie);
     }),
   ),
 );
 
 /**
  * Run the snapshot server on `127.0.0.1:<port>` until interrupted. Fork this into the
- * orchestrator scope alongside the loop; reads {@link OrchestratorStore} from context.
+ * orchestrator scope alongside the loop; reads the authoritative store plus the
+ * observability rings from context.
  */
 export const runSnapshotServer = (
   port: number,
-): Effect.Effect<void, never, Scope.Scope | OrchestratorStore> =>
+): Effect.Effect<
+  void,
+  never,
+  Scope.Scope | OrchestratorStore | RecentEvents | RecentCompletions | LiveActivity
+> =>
   HttpServer.serveEffect(router).pipe(
     // `serveEffect` installs the server and returns; the listener lives for as long as
     // the provided layer's scope stays open, so we idle (`Effect.never`) to keep it bound

@@ -1,9 +1,12 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { it } from "@effect/vitest";
-import { Effect, Schedule } from "effect";
+import { Effect, Layer, Schedule } from "effect";
 import { describe, expect } from "vitest";
 import { RunAttempt } from "../src/core/domain/run-attempt";
+import { LiveActivityLive } from "../src/core/observability/live-activity";
+import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
+import { RecentEventsLive } from "../src/core/observability/recent-events";
 import { runSnapshotServer, toSnapshot } from "../src/core/observability/snapshot-server";
 import {
   initialState,
@@ -12,6 +15,13 @@ import {
   setRunning,
 } from "../src/core/orchestrator/state";
 import { buildDef } from "./fakes/harness";
+
+/** Empty observability rings to satisfy the enriched snapshot server's dependencies. */
+const ObservabilityRings = Layer.mergeAll(
+  RecentEventsLive,
+  RecentCompletionsLive,
+  LiveActivityLive,
+);
 
 /**
  * Task 12 — JSON snapshot API. {@link toSnapshot} is the pure projection (deterministic,
@@ -74,7 +84,10 @@ describe("runSnapshotServer", () => {
       const store = yield* makeOrchestratorStore(seededState());
 
       yield* Effect.forkScoped(
-        runSnapshotServer(port).pipe(Effect.provideService(OrchestratorStore, store)),
+        runSnapshotServer(port).pipe(
+          Effect.provideService(OrchestratorStore, store),
+          Effect.provide(ObservabilityRings),
+        ),
       );
 
       // Poll until the listener is up (bind is async in the forked fiber), then assert.

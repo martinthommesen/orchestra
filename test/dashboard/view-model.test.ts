@@ -7,7 +7,14 @@ import {
 } from "../../src/cli/dashboard/view-model";
 import type { Status } from "../../src/core/observability/glyphs";
 import { statusStyle } from "../../src/core/observability/glyphs";
-import { makeRetrying, makeRunning, makeSnapshot } from "./fixtures";
+import {
+  makeCompletion,
+  makeEvent,
+  makeRetrying,
+  makeRunning,
+  makeSnapshot,
+  STARTED_AT,
+} from "./fixtures";
 
 /**
  * #33 — view-model state matrix. The view-model carries all the rendering logic, so this
@@ -125,14 +132,16 @@ describe("toViewModel — running rows (rich, with elapsed)", () => {
 });
 
 describe("toViewModel — retrying rows (NO countdown)", () => {
-  it("shows identifier / attempt / error and never exposes due_at", () => {
+  it("shows identifier / attempt / error and never exposes the monotonic due_at", () => {
     const vm = toViewModel(makeSnapshot(), NOW, opts());
     const row = vm.retrying[0];
     expect(row?.identifier).toBe("ORC-2");
     expect(row?.attemptLabel).toBe("#2");
     expect(row?.error).toBe("rate limited");
-    // Monotonic due_at_ms must not leak into a (false) countdown.
-    expect(JSON.stringify(row)).not.toContain("due");
+    // Older daemon (no scheduled_at/delay_ms) → no honest due time, and the monotonic
+    // due_at_ms (99999) must never leak into any field.
+    expect(row?.dueAtLabel).toBeNull();
+    expect(JSON.stringify(row)).not.toContain("99999");
   });
 
   it("renders a null retry error as an em dash", () => {
@@ -160,6 +169,182 @@ describe("toViewModel — completed (IDs only)", () => {
     expect(vm.completed.recentIds).toHaveLength(RECENT_COMPLETED);
     expect(vm.completed.recentIds[0]).toBe("c11");
     expect(vm.header.completedCount).toBe(12);
+  });
+});
+
+describe("toViewModel — last-activity line (#38)", () => {
+  it("formats event_tag + relative time from last_activity", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        running: [makeRunning({ last_activity: { event_tag: "TurnCompleted", at: STARTED_AT } })],
+      }),
+      NOW,
+      opts(),
+    );
+    // STARTED_AT is 60s before NOW.
+    expect(vm.running[0]?.lastActivityLabel).toBe("TurnCompleted · 1m 00s ago");
+  });
+
+  it("is null when no activity has been observed (older daemon)", () => {
+    const vm = toViewModel(makeSnapshot(), NOW, opts());
+    expect(vm.running[0]?.lastActivityLabel).toBeNull();
+  });
+
+  it("is null (never a fake 0s) when the activity timestamp is unparseable", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        running: [makeRunning({ last_activity: { event_tag: "TurnCompleted", at: "not-a-date" } })],
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.running[0]?.lastActivityLabel).toBeNull();
+  });
+});
+
+describe("toViewModel — retry due time (honest wall-clock, #38)", () => {
+  it("derives 'due HH:MM:SSZ' from scheduled_at + delay_ms", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        retrying: [makeRetrying({ scheduled_at: "2024-01-01T00:01:00.000Z", delay_ms: 65_000 })],
+      }),
+      NOW,
+      opts(),
+    );
+    // 00:01:00Z + 65s → 00:02:05Z (UTC, not a countdown, not from due_at_ms).
+    expect(vm.retrying[0]?.dueAtLabel).toBe("due 00:02:05Z");
+  });
+
+  it("is null when either scheduled_at or delay_ms is absent", () => {
+    const onlySched = toViewModel(
+      makeSnapshot({ retrying: [makeRetrying({ scheduled_at: "2024-01-01T00:01:00.000Z" })] }),
+      NOW,
+      opts(),
+    );
+    const onlyDelay = toViewModel(
+      makeSnapshot({ retrying: [makeRetrying({ delay_ms: 5000 })] }),
+      NOW,
+      opts(),
+    );
+    expect(onlySched.retrying[0]?.dueAtLabel).toBeNull();
+    expect(onlyDelay.retrying[0]?.dueAtLabel).toBeNull();
+  });
+
+  it("is null when scheduled_at is unparseable", () => {
+    const vm = toViewModel(
+      makeSnapshot({ retrying: [makeRetrying({ scheduled_at: "nope", delay_ms: 5000 })] }),
+      NOW,
+      opts(),
+    );
+    expect(vm.retrying[0]?.dueAtLabel).toBeNull();
+  });
+});
+
+describe("toViewModel — event feed (#38)", () => {
+  it("maps recent_events newest-first with a relative time and truncated message", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        recent_events: [
+          makeEvent({ seq: 1, kind: "started" }),
+          makeEvent({ seq: 2, kind: "dispatched" }),
+          makeEvent({ seq: 3, kind: "completed" }),
+        ],
+      }),
+      NOW,
+      opts(),
+    );
+    // Wire order is newest-last; the view is newest-first.
+    expect(vm.events.map((e) => e.seq)).toEqual([3, 2, 1]);
+    expect(vm.events[0]?.relativeLabel).toBe("1m 00s ago");
+  });
+
+  it("renders '—' for an unparseable emitted_at (never a fake 0s)", () => {
+    const vm = toViewModel(
+      makeSnapshot({ recent_events: [makeEvent({ emitted_at: "not-a-date" })] }),
+      NOW,
+      opts(),
+    );
+    expect(vm.events[0]?.relativeLabel).toBe("—");
+  });
+
+  it("picks glyph + color by kind, reusing the design system", () => {
+    const cases: ReadonlyArray<readonly [string, "info" | "warn", string, string, string]> = [
+      // kind, level, color, glyph, ascii
+      ["dispatched", "info", "info", "▶", ">"],
+      ["completed", "info", "success", "✓", "+"],
+      ["failed", "warn", "danger", "✗", "x"],
+      ["killed", "warn", "danger", "✗", "x"],
+      ["retry_scheduled", "info", "warn", "⏳", "~"],
+    ];
+    for (const [kind, level, color, glyph, ascii] of cases) {
+      const vm = toViewModel(
+        makeSnapshot({ recent_events: [makeEvent({ kind, level })] }),
+        NOW,
+        opts(),
+      );
+      expect(vm.events[0]?.color).toBe(color);
+      expect(vm.events[0]?.glyph).toBe(glyph);
+      expect(vm.events[0]?.ascii).toBe(ascii);
+    }
+  });
+
+  it("falls back on level for an unknown kind (warn → warn, info → muted)", () => {
+    const warn = toViewModel(
+      makeSnapshot({ recent_events: [makeEvent({ kind: "mystery", level: "warn" })] }),
+      NOW,
+      opts(),
+    );
+    const info = toViewModel(
+      makeSnapshot({ recent_events: [makeEvent({ kind: "mystery", level: "info" })] }),
+      NOW,
+      opts(),
+    );
+    expect(warn.events[0]?.color).toBe("warn");
+    expect(info.events[0]?.color).toBe("muted");
+  });
+});
+
+describe("toViewModel — rich recent-completed (#38)", () => {
+  it("maps recent_completed newest-first with relative time and outcome color", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        recent_completed: [
+          makeCompletion({ issue_id: "a", identifier: "ORC-A", outcome: "completed" }),
+          makeCompletion({ issue_id: "b", identifier: "ORC-B", outcome: "killed" }),
+        ],
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.recentCompleted.map((c) => c.identifier)).toEqual(["ORC-B", "ORC-A"]);
+    expect(vm.recentCompleted[0]?.outcomeColor).toBe("danger"); // killed
+    expect(vm.recentCompleted[1]?.outcomeColor).toBe("success"); // completed
+    expect(vm.recentCompleted[0]?.relativeLabel).toBe("1m 00s ago");
+  });
+
+  it("maps an unknown outcome to a muted tone", () => {
+    const vm = toViewModel(
+      makeSnapshot({ recent_completed: [makeCompletion({ outcome: "weird" })] }),
+      NOW,
+      opts(),
+    );
+    expect(vm.recentCompleted[0]?.outcomeColor).toBe("muted");
+  });
+});
+
+describe("toViewModel — backward-safe omission (#38)", () => {
+  it("an older-daemon snapshot yields empty feeds and null per-row labels", () => {
+    const vm = toViewModel(makeSnapshot(), NOW, opts());
+    expect(vm.events).toEqual([]);
+    expect(vm.recentCompleted).toEqual([]);
+    expect(vm.running[0]?.lastActivityLabel).toBeNull();
+    expect(vm.retrying[0]?.dueAtLabel).toBeNull();
+  });
+
+  it("the empty/connecting state also carries empty feeds", () => {
+    const vm = toViewModel(null, NOW, opts({ connection: "connecting", lastUpdatedAtMs: null }));
+    expect(vm.events).toEqual([]);
+    expect(vm.recentCompleted).toEqual([]);
   });
 });
 
