@@ -241,6 +241,9 @@ export const makeFetchSnapshot =
       headers: { accept: "application/json" },
     });
     if (!res.ok) {
+      // Drain the unconsumed body so undici can release the socket immediately
+      // instead of holding it until GC. Cleanup must never throw.
+      await res.body?.cancel().catch(() => undefined);
       throw new SnapshotHttpError(res.status);
     }
     const body: unknown = await res.json();

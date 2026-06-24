@@ -129,6 +129,34 @@ describe("makeFetchSnapshot", () => {
       makeFetchSnapshot(2000)("http://127.0.0.1:4317", new AbortController().signal),
     ).rejects.toBeInstanceOf(SnapshotHttpError);
   });
+
+  it("cancels the unconsumed body before throwing on non-2xx (Fix 3)", async () => {
+    const cancel = vi.fn(async () => undefined);
+    const fakeRes = { ok: false, status: 503, body: { cancel } } as unknown as Response;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeRes),
+    );
+    await expect(
+      makeFetchSnapshot(2000)("http://127.0.0.1:4317", new AbortController().signal),
+    ).rejects.toBeInstanceOf(SnapshotHttpError);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("still throws SnapshotHttpError if cancelling the body rejects (cleanup never throws)", async () => {
+    const cancel = vi.fn(async () => {
+      throw new Error("stream already locked");
+    });
+    const fakeRes = { ok: false, status: 500, body: { cancel } } as unknown as Response;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeRes),
+    );
+    await expect(
+      makeFetchSnapshot(2000)("http://127.0.0.1:4317", new AbortController().signal),
+    ).rejects.toBeInstanceOf(SnapshotHttpError);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });
 
 // Compile-time guard: the exported type is what we expect to render against.

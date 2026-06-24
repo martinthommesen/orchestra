@@ -2,7 +2,7 @@ import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 import { DashboardView } from "../../src/cli/dashboard/components";
 import { toViewModel, type ViewModelOptions } from "../../src/cli/dashboard/view-model";
-import { makeSnapshot } from "./fixtures";
+import { makeRunning, makeSnapshot } from "./fixtures";
 
 /**
  * #33 — light ink-testing-library render asserts. The view-model carries the logic and
@@ -71,5 +71,17 @@ describe("DashboardView", () => {
     );
     expect(frame).toContain("stale");
     expect(frame).toContain("connect ECONNREFUSED");
+  });
+
+  it("renders an unrecognized phase as 'unknown', not the running badge (Fix 1)", () => {
+    const frame = frameOf(
+      makeSnapshot({ running: [makeRunning({ status: "DriftedPhase" })] }),
+      opts(),
+    );
+    expect(frame).toContain("? unknown");
+    // The running status badge must not appear (header "running 1" is a count, not a badge).
+    expect(frame).not.toContain("▶ running");
+    // The raw drifted phase is still surfaced subtly so the operator can diagnose it.
+    expect(frame).toContain("phase=DriftedPhase");
   });
 });

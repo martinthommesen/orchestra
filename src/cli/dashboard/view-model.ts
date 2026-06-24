@@ -1,5 +1,10 @@
 import type { ColorToken, Status } from "../../core/observability/glyphs";
-import { PHASE_TO_STATUS, truncate, truncateOneLine } from "../../core/observability/glyphs";
+import {
+  PHASE_TO_STATUS,
+  statusStyle,
+  truncate,
+  truncateOneLine,
+} from "../../core/observability/glyphs";
 import type { ConnectionState } from "./poller";
 import type { Snapshot } from "./snapshot-client";
 
@@ -11,7 +16,10 @@ import type { Snapshot } from "./snapshot-client";
  * terminal.
  *
  * Honesty rules (Sprint 2 design review):
- *   - running rows are rich, with **client-calculated** elapsed from `started_at`;
+ *   - running rows are rich, with **client-calculated** elapsed from `started_at`; an
+ *     unparseable `started_at` renders as an explicit `—`, never a plausible "0s";
+ *   - an unrecognized/contract-drifted run phase renders as an explicit muted "unknown"
+ *     badge, never masquerading as active "running" work (the raw phase is still shown);
  *   - retrying rows carry NO countdown — `due_at_ms` is a monotonic value the client
  *     cannot turn into wall-clock "retry in Ns";
  *   - completed is **issue IDs only** (count + a few recent), not a rich table;
@@ -35,10 +43,25 @@ export interface HeaderVM {
   readonly error: string | null;
 }
 
+/**
+ * A render-ready status badge. Known phases mirror the `glyphs.ts` design system
+ * exactly; an unrecognized/contract-drifted phase becomes an explicit muted "unknown"
+ * badge (`known: false`) rather than masquerading as active "running" work. Both glyph
+ * variants are precomputed so the Ink component stays dumb and just picks one by `ascii`.
+ */
+export interface StatusBadgeVM {
+  readonly glyph: string;
+  readonly ascii: string;
+  readonly label: string;
+  readonly color: ColorToken;
+  /** False when the wire phase was not recognized (honest "indeterminate" state). */
+  readonly known: boolean;
+}
+
 export interface RunningRowVM {
   readonly issueId: string;
   readonly identifier: string;
-  readonly status: Status;
+  readonly badge: StatusBadgeVM;
   /** Granular run-attempt phase (e.g. "StreamingTurn"), shown subtly. */
   readonly phase: string;
   readonly elapsedLabel: string;
@@ -111,9 +134,43 @@ export const formatDuration = (ms: number): string => {
   return `${s}s`;
 };
 
-/** Map a (possibly unknown) wire phase string to an operator status, defensively. */
-const statusForPhase = (phase: string): Status =>
-  (PHASE_TO_STATUS as Record<string, Status>)[phase] ?? "running";
+/** The honest badge for a phase the orchestrator contract no longer recognizes. */
+const UNKNOWN_BADGE: StatusBadgeVM = {
+  glyph: "?",
+  ascii: "?",
+  label: "unknown",
+  color: "muted",
+  known: false,
+};
+
+/** The elapsed sentinel shown when `started_at` cannot be parsed (never a fake "0s"). */
+const UNKNOWN_ELAPSED = "—";
+
+/**
+ * Build the render-ready badge for a wire phase. A recognized phase reuses the
+ * `glyphs.ts` design system verbatim; anything else becomes {@link UNKNOWN_BADGE} so a
+ * drifted/unknown phase can never display as active "running" work.
+ */
+const statusBadgeForPhase = (phase: string): StatusBadgeVM => {
+  const status: Status | undefined = (PHASE_TO_STATUS as Record<string, Status>)[phase];
+  if (status === undefined) {
+    return UNKNOWN_BADGE;
+  }
+  const style = statusStyle(status);
+  return {
+    glyph: style.glyph,
+    ascii: style.ascii,
+    label: style.label,
+    color: style.color,
+    known: true,
+  };
+};
+
+/** Client-side elapsed from an ISO `started_at`; `—` when the timestamp is unparseable. */
+const formatElapsed = (now: number, startedAt: string): string => {
+  const started = Date.parse(startedAt);
+  return Number.isFinite(started) ? formatDuration(now - started) : UNKNOWN_ELAPSED;
+};
 
 const attemptLabel = (attempt: number | null): string => (attempt === null ? "—" : `#${attempt}`);
 
@@ -148,9 +205,11 @@ const summarizeRateLimits = (rateLimits: unknown): RateLimitsVM => {
 const toRunningRow = (now: number, r: Snapshot["running"][number]): RunningRowVM => ({
   issueId: r.issue_id,
   identifier: r.issue_identifier,
-  status: statusForPhase(r.status),
-  phase: r.status,
-  elapsedLabel: formatDuration(now - Date.parse(r.started_at)),
+  badge: statusBadgeForPhase(r.status),
+  // Raw wire phase, kept for the subtle "phase=…" annotation on unknown rows
+  // (truncated defensively in case a drifted value is large).
+  phase: truncateOneLine(r.status, 40),
+  elapsedLabel: formatElapsed(now, r.started_at),
   attemptLabel: attemptLabel(r.attempt),
   workspace: truncate(r.workspace_path, WORKSPACE_MAX),
   error: r.error === undefined ? null : truncateOneLine(r.error, ERROR_MAX),

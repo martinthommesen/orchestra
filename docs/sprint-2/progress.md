@@ -3,7 +3,7 @@
 Live tracker for cross-chat recovery. Update after each phase. See `plan.md` for
 full task detail and `done.md` (written at sprint end) for the handoff.
 
-## Status: COMPLETE — #29–#34 done; gates green (224 tests); ready to push
+## Status: COMPLETE — #29–#34 done + design-review follow-up; gates green (229 tests)
 
 Branch: `feature/sprint-2` (from `main` @ 5d84402).
 
@@ -79,6 +79,22 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
   §5 (file map: dispatcher/daemon split + dashboard module), §7 (Sprint 2 ✅), and §8
   (current state rewrite) updated; the License open-question resolved in
   `docs/ideas-backlog.md`.
+- **Design-review follow-up** (post-#34, one focused commit): three honesty/robustness
+  gaps closed in the dashboard module only (core + snapshot shape untouched).
+  - **Fix 1 — unknown phase rendered honestly.** `statusForPhase` previously fell back
+    to `"running"` for any unrecognized phase, so contract drift would *look like active
+    work*. Replaced with a precomputed `StatusBadgeVM`: known phases mirror `glyphs.ts`
+    verbatim; an unknown phase becomes an explicit muted `? unknown` badge (`known:false`)
+    and the raw phase is surfaced subtly as `phase=<value>` on that row for diagnosis.
+  - **Fix 2 — invalid `started_at` no longer shows "0s".** Elapsed now renders `—` when
+    `Date.parse(started_at)` is non-finite (guarded in the view-model so one bad row never
+    discards an otherwise-valid snapshot), instead of a plausible-looking `0s`.
+  - **Fix 3 — cancel the response body on non-2xx.** `makeFetchSnapshot` now
+    `await res.body?.cancel().catch(() => undefined)` before throwing `SnapshotHttpError`,
+    so undici releases the socket promptly; cleanup never throws.
+  - Tests: +5 (unknown-phase honest badge, invalid-timestamp `—`, body-cancel +
+    cancel-rejection-tolerant, unknown-phase render). **229 total** (was 224). Verified
+    live via PTY smoke: bad timestamp → `—`, drifted phase → `? unknown phase=<value>`.
 
 ## Decisions (from the Sprint 2 design review)
 - **Operational status, not history.** MVP = live fleet view; event feed / ring

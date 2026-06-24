@@ -1,8 +1,13 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
-import type { ColorToken, Status } from "../../core/observability/glyphs";
-import { glyph, statusStyle } from "../../core/observability/glyphs";
-import type { DashboardViewModel, RetryingRowVM, RunningRowVM, TotalsVM } from "./view-model";
+import type { ColorToken } from "../../core/observability/glyphs";
+import type {
+  DashboardViewModel,
+  RetryingRowVM,
+  RunningRowVM,
+  StatusBadgeVM,
+  TotalsVM,
+} from "./view-model";
 
 /**
  * Presentational Ink components for the dashboard (#32). They are deliberately dumb:
@@ -53,11 +58,10 @@ function Dim({ color, children }: { readonly color: boolean; readonly children: 
   );
 }
 
-function StatusBadge({ status, ascii, color }: { readonly status: Status } & Themed) {
-  const style = statusStyle(status);
+function StatusBadge({ badge, ascii, color }: { readonly badge: StatusBadgeVM } & Themed) {
   return (
-    <Tinted tone={style.color} color={color}>
-      {glyph(status, ascii)} {style.label}
+    <Tinted tone={badge.color} color={color}>
+      {ascii ? badge.ascii : badge.glyph} {badge.label}
     </Tinted>
   );
 }
@@ -99,7 +103,7 @@ function RunningRow({ row, ascii, color }: { readonly row: RunningRowVM } & Them
           <Text>{row.identifier}</Text>
         </Box>
         <Box width={12}>
-          <StatusBadge status={row.status} ascii={ascii} color={color} />
+          <StatusBadge badge={row.badge} ascii={ascii} color={color} />
         </Box>
         <Box width={9}>
           <Text>{row.elapsedLabel}</Text>
@@ -108,7 +112,9 @@ function RunningRow({ row, ascii, color }: { readonly row: RunningRowVM } & Them
           <Text>{row.attemptLabel}</Text>
         </Box>
         <Box flexGrow={1}>
-          <Dim color={color}>{row.workspace}</Dim>
+          <Dim color={color}>
+            {row.badge.known ? row.workspace : `${row.workspace}  phase=${row.phase}`}
+          </Dim>
         </Box>
       </Box>
       {row.error !== null ? (

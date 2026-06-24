@@ -6,6 +6,7 @@ import {
   type ViewModelOptions,
 } from "../../src/cli/dashboard/view-model";
 import type { Status } from "../../src/core/observability/glyphs";
+import { statusStyle } from "../../src/core/observability/glyphs";
 import { makeRetrying, makeRunning, makeSnapshot } from "./fixtures";
 
 /**
@@ -46,7 +47,8 @@ describe("toViewModel — running rows (rich, with elapsed)", () => {
     const vm = toViewModel(makeSnapshot(), NOW, opts());
     const row = vm.running[0];
     expect(row?.identifier).toBe("ORC-1");
-    expect(row?.status).toBe("running"); // StreamingTurn → running
+    expect(row?.badge.label).toBe("running"); // StreamingTurn → running
+    expect(row?.badge.known).toBe(true);
     expect(row?.phase).toBe("StreamingTurn");
     expect(row?.elapsedLabel).toBe("1m 00s");
     expect(row?.attemptLabel).toBe("—"); // null attempt = first run
@@ -68,11 +70,11 @@ describe("toViewModel — running rows (rich, with elapsed)", () => {
       NOW,
       opts(),
     );
-    expect(vm.running[0]?.status).toBe("failed");
+    expect(vm.running[0]?.badge.label).toBe("failed");
     expect(vm.running[0]?.error).toBe("line1 line2");
   });
 
-  it("maps every phase rollup defensively (unknown → running)", () => {
+  it("rolls every known phase up to its design-system badge", () => {
     const cases: ReadonlyArray<readonly [string, Status]> = [
       ["PreparingWorkspace", "running"],
       ["Succeeded", "done"],
@@ -80,7 +82,6 @@ describe("toViewModel — running rows (rich, with elapsed)", () => {
       ["TimedOut", "retrying"],
       ["Stalled", "retrying"],
       ["CanceledByReconciliation", "blocked"],
-      ["TotallyUnknownPhase", "running"],
     ];
     for (const [phase, status] of cases) {
       const vm = toViewModel(
@@ -88,7 +89,37 @@ describe("toViewModel — running rows (rich, with elapsed)", () => {
         NOW,
         opts(),
       );
-      expect(vm.running[0]?.status).toBe(status);
+      const style = statusStyle(status);
+      expect(vm.running[0]?.badge.label).toBe(style.label);
+      expect(vm.running[0]?.badge.color).toBe(style.color);
+      expect(vm.running[0]?.badge.known).toBe(true);
+    }
+  });
+
+  it("renders an unrecognized phase honestly — NOT as running (Fix 1)", () => {
+    const vm = toViewModel(
+      makeSnapshot({ running: [makeRunning({ status: "TotallyUnknownPhase" })] }),
+      NOW,
+      opts(),
+    );
+    const row = vm.running[0];
+    expect(row?.badge.known).toBe(false);
+    expect(row?.badge.label).toBe("unknown");
+    expect(row?.badge.label).not.toBe("running");
+    expect(row?.badge.color).toBe("muted");
+    // The raw, drifted phase is still surfaced subtly for the operator.
+    expect(row?.phase).toBe("TotallyUnknownPhase");
+  });
+
+  it("renders an unparseable started_at as an explicit em dash — NOT '0s' (Fix 2)", () => {
+    for (const bad of ["not-a-date", "", "2024-13-99T99:99:99Z"]) {
+      const vm = toViewModel(
+        makeSnapshot({ running: [makeRunning({ started_at: bad })] }),
+        NOW,
+        opts(),
+      );
+      expect(vm.running[0]?.elapsedLabel).toBe("—");
+      expect(vm.running[0]?.elapsedLabel).not.toBe("0s");
     }
   });
 });
