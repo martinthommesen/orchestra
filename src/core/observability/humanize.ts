@@ -45,9 +45,13 @@ const GENERIC_AGENT_EVENT = "agent event";
  *   - a blank/whitespace tag → a generic label, never an empty string.
  */
 export const humanizeAgentEvent = (eventTag: string): string => {
-  const mapped = AGENT_EVENT_SUMMARIES[eventTag as AgentEventTag];
-  if (mapped !== undefined) {
-    return mapped;
+  // Guard with own-property semantics so only genuinely-mapped tags resolve. A plain
+  // bracket lookup walks the prototype chain, so inputs that collide with
+  // `Object.prototype` member names ("toString", "valueOf", "__proto__", ...) would
+  // otherwise return an inherited function/object instead of a string, breaking the
+  // total/never-blank contract below.
+  if (Object.hasOwn(AGENT_EVENT_SUMMARIES, eventTag)) {
+    return AGENT_EVENT_SUMMARIES[eventTag as AgentEventTag];
   }
   const raw = eventTag.trim();
   return raw.length > 0 ? raw : GENERIC_AGENT_EVENT;
