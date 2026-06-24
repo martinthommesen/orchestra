@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { COCKPIT_POLL_MS, client } from "../api/instance";
 import { ConnectionBanner } from "../components/ConnectionBanner";
 import { type CardAction, type KanbanCard, toKanban } from "../model/kanban";
@@ -9,6 +9,10 @@ import { usePolling } from "../usePolling";
  * the polled snapshot (no drag). Running cards expose a Cancel button and Retrying cards a
  * Retry-now button; both call the authorized POSTs and reflect the returned `CommandResult`
  * (`AckWire`), reverting (re-enabling) the button on a rejected/failed call.
+ *
+ * Action state is keyed by each card's per-session `instanceKey` (not `issueId`): a previously
+ * actioned issue that re-appears as a NEW session gets a fresh, enabled button. Stale entries are
+ * pruned each poll so the map can't grow unbounded.
  */
 
 type ActionPhase = "pending" | "ok" | "error";
@@ -25,13 +29,34 @@ export const KanbanView = () => {
   const [actions, setActions] = useState<Record<string, ActionState>>({});
   const now = Date.now();
 
-  const dispatch = async (action: CardAction, issueId: string) => {
-    setActions((a) => ({ ...a, [issueId]: { phase: "pending", message: "" } }));
+  const columns = poll.data === null ? [] : toKanban(poll.data, now);
+
+  // Prune action state for sessions no longer in the snapshot so the map can't grow unbounded
+  // (and a recycled issueId can't inherit a prior session's state — keys are per-session).
+  const liveKeys = columns
+    .flatMap((col) => col.cards.map((card) => card.instanceKey))
+    .join("\u0000");
+  useEffect(() => {
+    if (poll.data === null) return;
+    const present = new Set(liveKeys === "" ? [] : liveKeys.split("\u0000"));
+    setActions((a) => {
+      const next: Record<string, ActionState> = {};
+      let changed = false;
+      for (const [key, state] of Object.entries(a)) {
+        if (present.has(key)) next[key] = state;
+        else changed = true;
+      }
+      return changed ? next : a;
+    });
+  }, [liveKeys, poll.data]);
+
+  const dispatch = async (action: CardAction, card: KanbanCard) => {
+    setActions((a) => ({ ...a, [card.instanceKey]: { phase: "pending", message: "" } }));
     try {
-      const ack = await runAction(action, issueId);
+      const ack = await runAction(action, card.issueId);
       setActions((a) => ({
         ...a,
-        [issueId]: ack.accepted
+        [card.instanceKey]: ack.accepted
           ? { phase: "ok", message: "requested" }
           : { phase: "error", message: ack.reason ?? "not accepted" },
       }));
@@ -39,12 +64,13 @@ export const KanbanView = () => {
       // Revert on error: surface the reason and re-enable the button for another attempt.
       setActions((a) => ({
         ...a,
-        [issueId]: { phase: "error", message: err instanceof Error ? err.message : String(err) },
+        [card.instanceKey]: {
+          phase: "error",
+          message: err instanceof Error ? err.message : String(err),
+        },
       }));
     }
   };
-
-  const columns = poll.data === null ? [] : toKanban(poll.data, now);
 
   return (
     <>
@@ -69,9 +95,9 @@ export const KanbanView = () => {
                 ) : (
                   col.cards.map((card) => (
                     <Card
-                      key={card.issueId}
+                      key={card.instanceKey}
                       card={card}
-                      action={actions[card.issueId]}
+                      action={actions[card.instanceKey]}
                       onAct={dispatch}
                     />
                   ))
@@ -94,7 +120,7 @@ const Card = ({
 }: {
   card: KanbanCard;
   action: ActionState | undefined;
-  onAct: (action: CardAction, issueId: string) => void;
+  onAct: (action: CardAction, card: KanbanCard) => void;
 }) => {
   const pending = action?.phase === "pending";
   const done = action?.phase === "ok";
@@ -119,7 +145,7 @@ const Card = ({
             type="button"
             className="btn btn--sm"
             disabled={pending || done}
-            onClick={() => card.action && onAct(card.action, card.issueId)}
+            onClick={() => card.action && onAct(card.action, card)}
           >
             {pending ? "…" : done ? "requested ✓" : ACTION_LABEL[card.action]}
           </button>

@@ -50,6 +50,8 @@ describe("toKanban", () => {
     expect(card?.action).toBe("cancel");
     expect(card?.badge.label).toBe("running");
     expect(card?.detail).toBe("#2 · 20s");
+    // The instance key binds action state to this SESSION (issueId:started_at).
+    expect(card?.instanceKey).toBe("i1:2026-01-01T00:00:40.000Z");
   });
 
   it("retrying cards carry a retry action with attempt, due time and reason", () => {
@@ -75,6 +77,8 @@ describe("toKanban", () => {
     expect(card?.action).toBe("retry");
     expect(card?.badge.label).toBe("retrying");
     expect(card?.detail).toBe("#3 · due 00:01:05Z · timed out");
+    // Retrying binds the instance key to the attempt number (issueId:attempt).
+    expect(card?.instanceKey).toBe("i2:3");
   });
 
   it("completed cards from recent_completed are newest-first with no action", () => {
@@ -148,5 +152,31 @@ describe("toKanban", () => {
       NOW,
     );
     expect(col(cols, "claimed")?.count).toBe(0);
+  });
+
+  it("gives the same issue a NEW instance key when it re-appears as a fresh session", () => {
+    const runningAt = (startedAt: string): SnapshotWire =>
+      snap({
+        counts: { running: 1, retrying: 0, completed: 0, claimed: 1 },
+        running: [
+          {
+            issue_id: "i1",
+            issue_identifier: "ORC-1",
+            attempt: 1,
+            workspace_path: "/ws",
+            started_at: startedAt,
+            status: "StreamingTurn",
+          },
+        ],
+      });
+
+    const first = col(toKanban(runningAt("2026-01-01T00:00:10.000Z"), NOW), "running")?.cards[0];
+    // Same issue cancelled then re-dispatched → a new session with a later started_at.
+    const second = col(toKanban(runningAt("2026-01-01T00:00:50.000Z"), NOW), "running")?.cards[0];
+
+    expect(first?.issueId).toBe(second?.issueId);
+    // The instance key differs, so the board treats the re-dispatched session as a fresh card
+    // (its action button is enabled again) rather than inheriting the prior session's state.
+    expect(first?.instanceKey).not.toBe(second?.instanceKey);
   });
 });

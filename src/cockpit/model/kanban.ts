@@ -23,6 +23,13 @@ export type ColumnId = "claimed" | "running" | "retrying" | "completed";
 
 export interface KanbanCard {
   readonly issueId: string;
+  /**
+   * A stable per-SESSION identity, distinct from `issueId`. Action state (pending/ok/error)
+   * is keyed by this so that when an issue re-appears as a NEW session (cancelled then
+   * re-dispatched, or a retry returns to running) its button is re-enabled rather than stuck
+   * disabled from the prior session's `ok`. Running uses `started_at`, retrying uses `attempt`.
+   */
+  readonly instanceKey: string;
   readonly identifier: string;
   readonly badge: StatusBadgeVM;
   /** A short secondary line (elapsed / due / outcome). */
@@ -56,6 +63,7 @@ const outcomeStatus = (outcome: string): Status => {
 export const toKanban = (s: SnapshotWire, now: number): ReadonlyArray<KanbanColumn> => {
   const running: ReadonlyArray<KanbanCard> = s.running.map((r) => ({
     issueId: r.issue_id,
+    instanceKey: `${r.issue_id}:${r.started_at}`,
     identifier: r.issue_identifier,
     badge: badgeForPhase(r.status),
     detail: `${attemptLabel(r.attempt)} · ${formatElapsed(now, r.started_at)}`,
@@ -70,6 +78,7 @@ export const toKanban = (s: SnapshotWire, now: number): ReadonlyArray<KanbanColu
       .join(" · ");
     return {
       issueId: r.issue_id,
+      instanceKey: `${r.issue_id}:${r.attempt}`,
       identifier: r.identifier,
       badge: badgeOf("retrying"),
       detail,
@@ -83,6 +92,7 @@ export const toKanban = (s: SnapshotWire, now: number): ReadonlyArray<KanbanColu
     s.recent_completed.length > 0
       ? [...s.recent_completed].reverse().map((c) => ({
           issueId: c.issue_id,
+          instanceKey: `${c.issue_id}:${c.finished_at}`,
           identifier: c.identifier,
           badge: badgeOf(outcomeStatus(c.outcome)),
           detail: `${c.outcome} · ${formatRelative(now, c.finished_at)}`,
@@ -90,6 +100,7 @@ export const toKanban = (s: SnapshotWire, now: number): ReadonlyArray<KanbanColu
         }))
       : [...s.completed].reverse().map((id) => ({
           issueId: id,
+          instanceKey: `${id}:completed`,
           identifier: id,
           badge: badgeOf("done"),
           detail: "completed",
