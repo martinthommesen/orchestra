@@ -5,7 +5,7 @@ import { layerGitHubTracker } from "../adapters/tracker-github";
 import { layerWorkspaceManager } from "../adapters/workspace";
 import { ClockLive } from "../core/clock/live";
 import type { ServiceConfig } from "../core/domain/workflow";
-import { ObserverLive } from "../core/observability/live-observer";
+import { ObservabilityLive } from "../core/observability/observer-tee";
 import { runSnapshotServer } from "../core/observability/snapshot-server";
 import { runOrchestrator } from "../core/orchestrator/loop";
 import { layerOrchestratorStore } from "../core/orchestrator/state";
@@ -44,7 +44,8 @@ export const appLayer = (config: ServiceConfig) =>
     layerCopilotRunner(config),
     layerWorkspaceManager(config),
     ClockLive,
-    ObserverLive,
+    // Tee observer: structured logs (as before) + recent-events ring for the dashboard.
+    ObservabilityLive,
   );
 
 /** logfmt logger → stable `key=value` lines per PROJECT_BRIEF §13.1. */

@@ -157,12 +157,19 @@ export const formatObservation = (obs: Observation): LogLine => {
   }
 };
 
+/**
+ * Log one observation as a structured logfmt line (the canonical {@link ObserverLive}
+ * behavior). Extracted so the {@link file://./observer-tee.ts tee observer} can preserve
+ * logging byte-for-byte while *also* appending to the recent-events ring.
+ */
+export const logObservation = (obs: Observation): Effect.Effect<void> => {
+  const line = formatObservation(obs);
+  const log =
+    line.level === "warn" ? Effect.logWarning(line.message) : Effect.logInfo(line.message);
+  return log.pipe(Effect.annotateLogs(line.annotations));
+};
+
 /** Live observer layer: format each observation and log it as a structured line. */
 export const ObserverLive: Layer.Layer<Observer> = Layer.succeed(Observer, {
-  emit: (obs) => {
-    const line = formatObservation(obs);
-    const log =
-      line.level === "warn" ? Effect.logWarning(line.message) : Effect.logInfo(line.message);
-    return log.pipe(Effect.annotateLogs(line.annotations));
-  },
+  emit: logObservation,
 });
