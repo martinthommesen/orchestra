@@ -1,6 +1,8 @@
 import { render } from "ink";
+import { shouldUseColor } from "../../core/observability/glyphs";
 import { App } from "./app";
 import { DASHBOARD_USAGE, parseDashboardArgs } from "./args";
+import { makeFetchSnapshot } from "./snapshot-client";
 
 /**
  * `orchestra dashboard` entry point — a plain React/Ink island (no Effect runtime).
@@ -9,6 +11,9 @@ import { DASHBOARD_USAGE, parseDashboardArgs } from "./args";
  * usage error, or mounts the Ink {@link App} and waits until it unmounts (`q` / Ctrl-C).
  * Invoked by the top-level dispatcher in {@link file://../main.ts} and by the standalone
  * {@link file://../dashboard.tsx} entry.
+ *
+ * The per-request fetch timeout is the larger of the poll interval and 2s, so a slow
+ * daemon never stalls a poll past the budget but a generous interval still gets room.
  */
 export const runDashboard = async (argv: ReadonlyArray<string>): Promise<void> => {
   const parsed = parseDashboardArgs(argv);
@@ -25,7 +30,11 @@ export const runDashboard = async (argv: ReadonlyArray<string>): Promise<void> =
 
   const { options } = parsed;
   const baseUrl = `http://${options.host}:${options.port}`;
+  const color = shouldUseColor({ env: process.env, isTTY: Boolean(process.stdout.isTTY) });
+  const fetchSnapshot = makeFetchSnapshot(Math.max(options.intervalMs, 2000));
 
-  const instance = render(<App baseUrl={baseUrl} options={options} />);
+  const instance = render(
+    <App baseUrl={baseUrl} options={options} fetchSnapshot={fetchSnapshot} color={color} />,
+  );
   await instance.waitUntilExit();
 };

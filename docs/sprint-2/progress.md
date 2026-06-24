@@ -3,7 +3,7 @@
 Live tracker for cross-chat recovery. Update after each phase. See `plan.md` for
 full task detail and `done.md` (written at sprint end) for the handoff.
 
-## Status: IN PROGRESS — #29 approved, #30–#31 done
+## Status: IN PROGRESS — #29 approved, #30–#33 done; #34 (docs) pending
 
 Branch: `feature/sprint-2` (from `main` @ 5d84402).
 
@@ -14,8 +14,8 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
 | #29 | Ink toolchain spike & gate (BLOCKING) | — | ✅ done (Producer-approved) |
 | #30 | CLI dispatcher + `dashboard` subcommand | #29 | ✅ done |
 | #31 | Snapshot client + polling hook | #29 | ✅ done |
-| #32 | Dashboard view-model + Ink rendering | #29, #31 | pending |
-| #33 | Test suite (view-model + hook + light render) | #29, #31, #32 | pending |
+| #32 | Dashboard view-model + Ink rendering | #29, #31 | ✅ done |
+| #33 | Test suite (view-model + hook + light render) | #29, #31, #32 | ✅ done |
 | #34 | Apache-2.0 license + dashboard docs + handoff | (docs ← #32) | pending |
 
 ## Progress log
@@ -42,6 +42,36 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
   clears timer. `use-snapshot.ts` — thin React hook over the poller (injected fetcher;
   effect cleanup `stop()`s on unmount). Shipped with `snapshot-client.test.ts`; the
   fake-timer poller/hook tests land in #33 per the plan. Not yet wired into the UI.
+- **#32**: live fleet view. `view-model.ts` — pure `toViewModel(snapshot, now, opts)`
+  folds a (possibly null) `Snapshot` + connection state into a render-ready model:
+  client-calculated `elapsed` from `started_at` (label only, no server trust),
+  phase→operator-status via the core `PHASE_TO_STATUS` map (unknown phase → `running`),
+  retrying rows carry identifier/attempt/error with **no countdown** (`due_at_ms` is
+  monotonic), completed = count + most-recent IDs only (newest first), totals, and a
+  **defensive** rate-limits summary (`null` → "unavailable"; unknown shape →
+  one-line `JSON.stringify`, never assumes a schema). `components.tsx` — Ink `<Box>`
+  layout (no hand-padded columns) reusing `glyphs.ts` (`glyph`/`statusStyle`,
+  `ColorToken`→Ink `<Text color>`); honors `--ascii` and `NO_COLOR`/non-TTY via
+  `shouldUseColor`. `app.tsx` wires `useSnapshot` + `toViewModel` + `DashboardView`;
+  `q`/Ctrl-C unmount (hook cleanup aborts the in-flight fetch + clears the timer).
+  `run.tsx` parses args, resolves color, injects `makeFetchSnapshot`, renders `<App>`.
+  - **Robustness fix found via live PTY smoke:** Ink's `useInput` calls `setRawMode`,
+    which throws on a non-TTY stdin (`stdin.isTTY` is `undefined`, not `false`). Gate
+    the handler with `isActive: isRawModeSupported === true` (from `useStdin()`) so a
+    piped/redirected invocation renders instead of crashing; the terminal still exits on
+    SIGINT/SIGTERM.
+- **#33**: tests (Ivy shape). `test/dashboard/fixtures.ts` shared builders;
+  `view-model.test.ts` (13) covers the full state matrix — empty/connecting, running
+  rich + elapsed + attempt label, phase→status incl. unknown→running, retrying-no-
+  countdown (asserts no `due` leaks), completed IDs-only + newest-first + cap, totals,
+  `rate_limits` null vs unknown-shape, stale+error banner, `formatDuration` units.
+  `poller.test.ts` (5) fake-timer: no-overlap, stale-after-good retains snapshot,
+  connecting-until-first-success, `stop()` aborts in-flight + no further polls,
+  idempotent `start()`. `render.test.tsx` (4) light ink-testing-library asserts
+  (populated / empty-connecting / ascii-glyph swap / stale banner). **224 tests total**
+  (188 at #29 → −1 spike +37 dashboard). Live end-to-end PTY smoke against a canned
+  snapshot server verified: honest render, non-overlapping polls, disconnect → `stale`
+  with data retained (never blanks), clean exit.
 
 ## Decisions (from the Sprint 2 design review)
 - **Operational status, not history.** MVP = live fleet view; event feed / ring
