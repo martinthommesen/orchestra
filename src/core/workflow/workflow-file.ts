@@ -89,10 +89,17 @@ export class WorkflowFile extends Context.Tag("orchestra/WorkflowFile")<
   {
     /** Read the whitelisted editable subset from the raw front matter (no secrets). */
     readonly read: Effect.Effect<EditableSettings, SettingsRejected | LoadWorkflowError>;
-    /** Validate + atomically persist a patch, then return the new view + resolved config. */
-    readonly applyPatch: (
+    /**
+     * Validate + stage a patch, run `gate` with the fully-resolved new config, and only
+     * **commit** the atomic write once the gate succeeds — so the persist is all-or-nothing
+     * with whatever the gate gates on (the cockpit gates on the owner fiber accepting the
+     * `ReloadConfig`, so a timed-out reload → 503 leaves the file AND the live config
+     * unchanged). On gate failure/interrupt nothing is persisted and the staged temp is removed.
+     */
+    readonly applyPatch: <E, R>(
       patch: SettingsPatch,
-    ) => Effect.Effect<SettingsApplied, SettingsRejected | LoadWorkflowError>;
+      gate: (config: ServiceConfig) => Effect.Effect<void, E, R>,
+    ) => Effect.Effect<SettingsApplied, SettingsRejected | LoadWorkflowError | E, R>;
   }
 >() {}
 
@@ -225,9 +232,10 @@ export const WorkflowFileLive = (
           return project(config);
         });
 
-      const applyPatch = (
+      const applyPatch = <E, R>(
         patch: SettingsPatch,
-      ): Effect.Effect<SettingsApplied, SettingsRejected | LoadWorkflowError> =>
+        gate: (config: ServiceConfig) => Effect.Effect<void, E, R>,
+      ): Effect.Effect<SettingsApplied, SettingsRejected | LoadWorkflowError | E, R> =>
         writeLock.withPermits(1)(
           Effect.gen(function* () {
             const content = yield* fs.readFileString(workflowPath).pipe(
@@ -312,6 +320,8 @@ export const WorkflowFileLive = (
 
             // Atomic temp + rename (mirrors the Sprint-4 checkpoint discipline). A unique
             // suffix means an unexpected overlapping writer can never clobber our temp file.
+            // The temp sits in the SAME directory as `workflowPath`, so its `dirname` — and
+            // thus every relative path the loader resolves — is identical to the live file.
             const tmp = `${workflowPath}.${randomBytes(6).toString("hex")}.orchestra.tmp`;
             yield* fs.writeFileString(tmp, newContent, { mode }).pipe(
               Effect.mapError(
@@ -321,20 +331,28 @@ export const WorkflowFileLive = (
                   }),
               ),
             );
-            yield* fs.rename(tmp, workflowPath).pipe(
-              Effect.mapError(
-                (e) =>
-                  new SettingsRejected({
-                    message: `could not commit WORKFLOW.md: ${errorMessage(e)}`,
-                  }),
-              ),
-            );
 
-            // Re-load the written file for the fully resolved config the loop hot-applies.
-            const def = yield* loadWorkflow(workflowPath).pipe(
-              Effect.provideService(FileSystem.FileSystem, fs),
-            );
-            return { settings: project(def.config), config: def.config };
+            // Stage → gate → commit. Resolve the STAGED file (incl. `$VAR`/path resolution)
+            // for the config the gate hot-applies; run the gate (the cockpit sends the owner
+            // a `ReloadConfig` and awaits its ack); only `rename(2)` the temp into place once
+            // the gate succeeds. On ANY failure/interrupt before the commit we remove the
+            // staged temp, so a 503 (or a resolution error) persists nothing and applies
+            // nothing — a clean all-or-nothing failure.
+            return yield* Effect.gen(function* () {
+              const def = yield* loadWorkflow(tmp).pipe(
+                Effect.provideService(FileSystem.FileSystem, fs),
+              );
+              yield* gate(def.config);
+              yield* fs.rename(tmp, workflowPath).pipe(
+                Effect.mapError(
+                  (e) =>
+                    new SettingsRejected({
+                      message: `could not commit WORKFLOW.md: ${errorMessage(e)}`,
+                    }),
+                ),
+              );
+              return { settings: project(def.config), config: def.config };
+            }).pipe(Effect.onError(() => fs.remove(tmp).pipe(Effect.ignore)));
           }),
         );
 

@@ -105,11 +105,14 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
 
         const applied = yield* Effect.gen(function* () {
           const wf = yield* WorkflowFile;
-          return yield* wf.applyPatch({
-            polling: { interval_ms: 5000 },
-            agent: { max_turns: 7 },
-            budget: { max_total_tokens: null }, // clear the ceiling
-          });
+          return yield* wf.applyPatch(
+            {
+              polling: { interval_ms: 5000 },
+              agent: { max_turns: 7 },
+              budget: { max_total_tokens: null }, // clear the ceiling
+            },
+            () => Effect.void,
+          );
         }).pipe(Effect.provide(WorkflowFileLive(path)));
 
         const after = yield* fs.readFileString(path);
@@ -152,7 +155,7 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
         // (20 → 33) so the surrounding alignment cannot shift for any reason but ours.
         yield* Effect.gen(function* () {
           const wf = yield* WorkflowFile;
-          return yield* wf.applyPatch({ agent: { max_turns: 33 } });
+          return yield* wf.applyPatch({ agent: { max_turns: 33 } }, () => Effect.void);
         }).pipe(Effect.provide(WorkflowFileLive(path)));
 
         const after = yield* fs.readFileString(path);
@@ -184,7 +187,7 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
         // untouched lines may normalize on this best-effort path — that is accepted, not a bug.
         yield* Effect.gen(function* () {
           const wf = yield* WorkflowFile;
-          return yield* wf.applyPatch({ budget: { max_total_tokens: null } });
+          return yield* wf.applyPatch({ budget: { max_total_tokens: null } }, () => Effect.void);
         }).pipe(Effect.provide(WorkflowFileLive(path)));
 
         const after = yield* fs.readFileString(path);
@@ -235,12 +238,14 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
       const result = yield* Effect.gen(function* () {
         const wf = yield* WorkflowFile;
         // biome-ignore lint/suspicious/noExplicitAny: deliberately bypass the type to feed a bad value.
-        return yield* wf.applyPatch({ agent: { max_concurrent_agents: -1 } } as any).pipe(
-          Effect.match({
-            onFailure: () => "rejected" as const,
-            onSuccess: () => "wrote" as const,
-          }),
-        );
+        return yield* wf
+          .applyPatch({ agent: { max_concurrent_agents: -1 } } as any, () => Effect.void)
+          .pipe(
+            Effect.match({
+              onFailure: () => "rejected" as const,
+              onSuccess: () => "wrote" as const,
+            }),
+          );
       }).pipe(Effect.provide(WorkflowFileLive(path)));
 
       expect(result).toBe("rejected");
@@ -264,8 +269,8 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
         const wf = yield* WorkflowFile;
         yield* Effect.all(
           [
-            wf.applyPatch({ polling: { interval_ms: 5000 } }),
-            wf.applyPatch({ agent: { max_turns: 7 } }),
+            wf.applyPatch({ polling: { interval_ms: 5000 } }, () => Effect.void),
+            wf.applyPatch({ agent: { max_turns: 7 } }, () => Effect.void),
           ],
           { concurrency: "unbounded" },
         );
@@ -281,6 +286,44 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
       const entries = yield* fs.readDirectory(dir);
       expect(entries.some((e) => e.includes(".orchestra.tmp"))).toBe(false);
     }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped(
+    "a rejected gate (wedged owner → 503) persists nothing — the file stays byte-identical",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+        const path = `${dir}/WORKFLOW.md`;
+        yield* fs.writeFileString(path, ORIGINAL);
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            process.env[CRED_ENV_VAR] = CRED_VALUE;
+          }),
+          () =>
+            Effect.sync(() => {
+              delete process.env[CRED_ENV_VAR];
+            }),
+        );
+
+        // The gate stands in for the owner-fiber reload ack. Here it REJECTS — exactly as a 5s
+        // reload timeout (→ 503) does after the drop-on-timeout fix (256e527). The durable
+        // commit is gated on the ack, so a rejected gate must persist NOTHING and apply nothing.
+        const outcome = yield* Effect.gen(function* () {
+          const wf = yield* WorkflowFile;
+          return yield* wf
+            .applyPatch({ agent: { max_turns: 99 } }, () => Effect.fail("owner-wedged" as const))
+            .pipe(Effect.match({ onFailure: (e) => e, onSuccess: () => "committed" as const }));
+        }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+        // The gate's own failure propagates (the handler maps it straight to 503).
+        expect(outcome).toBe("owner-wedged");
+        const after = yield* fs.readFileString(path);
+        expect(after).toBe(ORIGINAL); // byte-identical — the staged write never committed.
+        // The staged temp was removed when the gate failed — nothing leaked.
+        const leftovers = yield* fs.readDirectory(dir);
+        expect(leftovers.some((e) => e.includes(".orchestra.tmp"))).toBe(false);
+      }).pipe(Effect.provide(NodeContext.layer)),
   );
 });
 

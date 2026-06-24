@@ -108,14 +108,24 @@ export const controlGroupLive = HttpApiBuilder.group(CockpitApi, "control", (han
       sendCommand({ _tag: "CancelSession", issueId: path.id }).pipe(Effect.map(toAckWire)),
     )
     .handle("settings", ({ payload }) =>
-      // Validate + atomically persist the patch (DD-4), then hot-reload via the CommandBus.
-      // Persist/validation failures map to 400; a wedged owner fiber yields 503.
+      // Stage the patch, then gate the durable commit on the owner accepting the reload
+      // (DD-4): `applyPatch` writes a temp, resolves it, sends `ReloadConfig`, and only
+      // commits the atomic rename after the owner acks. A validation failure → 400; a wedged
+      // owner (reload not acked within the timeout) → 503, with NOTHING persisted or applied.
       Effect.gen(function* () {
         const workflowFile = yield* WorkflowFile;
         const applied = yield* workflowFile
-          .applyPatch(payload)
-          .pipe(Effect.catchAll(() => new HttpApiError.BadRequest()));
-        yield* sendCommand({ _tag: "ReloadConfig", config: applied.config });
+          .applyPatch(payload, (config) =>
+            sendCommand({ _tag: "ReloadConfig", config }).pipe(Effect.asVoid),
+          )
+          .pipe(
+            Effect.catchTags({
+              SettingsRejected: () => new HttpApiError.BadRequest(),
+              MissingWorkflowFile: () => new HttpApiError.BadRequest(),
+              WorkflowParseError: () => new HttpApiError.BadRequest(),
+              WorkflowFrontMatterNotAMap: () => new HttpApiError.BadRequest(),
+            }),
+          );
         return applied.settings;
       }),
     ),
