@@ -1,8 +1,15 @@
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
-import { type FileSystem, HttpApiBuilder, type HttpApp, HttpServerRequest } from "@effect/platform";
+import {
+  type FileSystem,
+  Headers,
+  HttpApiBuilder,
+  type HttpApp,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "@effect/platform";
 import { NodeFileSystem, NodeHttpServer } from "@effect/platform-node";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import type { ControlStatus } from "../observability/control-status";
 import type { LiveActivity } from "../observability/live-activity";
 import type { LiveBudget } from "../observability/live-budget";
@@ -14,6 +21,7 @@ import type { OrchestratorStore } from "../orchestrator/state";
 import { WorkflowFileLive } from "../workflow/workflow-file";
 import { CockpitAuthLive } from "./auth";
 import { cockpitApiLive } from "./handlers";
+import { hostIsLoopbackHeader } from "./security";
 import { makeStaticHandler } from "./static";
 import { type CockpitToken, cockpitTokenLayer, logToken, resolveToken } from "./token";
 
@@ -74,6 +82,16 @@ export const runCockpit = (
     ): HttpApp.Default<never, FileSystem.FileSystem | CockpitToken> =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        // DNS-rebinding guard (DD-5): every request — API read, control, and static — flows
+        // through here before routing. A malicious page that re-resolves its name to 127.0.0.1
+        // still carries its own `Host`, so a non-loopback Host is rejected at this single
+        // chokepoint. This protects the token-free reads and static SPA too (the `CockpitAuth`
+        // middleware only covers the control group). Host-only on purpose: top-level browser
+        // navigation to 127.0.0.1/localhost sends no `Origin`, so we must not require one here.
+        const host = Option.getOrUndefined(Headers.get(request.headers, "host"));
+        if (!hostIsLoopbackHeader(host)) {
+          return yield* HttpServerResponse.text("forbidden", { status: 403 });
+        }
         return request.url.startsWith("/api/") ? yield* apiApp : yield* serveStatic(request.url);
       });
 

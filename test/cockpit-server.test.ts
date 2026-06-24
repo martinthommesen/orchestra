@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Schedule } from "effect";
@@ -93,6 +93,24 @@ const bootCockpit = (port: number) =>
 const fetchWhenUp = <A>(make: () => Promise<A>) =>
   Effect.tryPromise(make).pipe(Effect.retry({ schedule: Schedule.spaced("50 millis"), times: 60 }));
 
+/**
+ * A raw loopback GET that sets an arbitrary `Host` header — `undici`'s `fetch` forbids
+ * overriding `Host`, so the DNS-rebinding guard (which keys off exactly that header) needs the
+ * low-level client to forge it.
+ */
+const rawGet = (port: number, path: string, host: string): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: "127.0.0.1", port, path, method: "GET", headers: { host } },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+
 describe("cockpit GET /api/v1/state", () => {
   it.scopedLive("is byte-identical to JSON.stringify(toSnapshot(...))", () =>
     Effect.gen(function* () {
@@ -183,6 +201,41 @@ describe("cockpit control command flow", () => {
         }).then((r) => r.json()),
       );
       expect(body).toEqual({ dispatch_paused: true, paused_by: "operator" });
+    }),
+  );
+});
+
+describe("cockpit DNS-rebinding guard (DD-5)", () => {
+  it.scopedLive("rejects a non-loopback Host on a token-free read → 403", () =>
+    Effect.gen(function* () {
+      const port = yield* freePort;
+      yield* bootCockpit(port).pipe(Effect.provide(cockpitContext()));
+
+      // A DNS-rebinding page re-resolves its name to 127.0.0.1 but still carries its own Host.
+      // The single chokepoint guard rejects it before the read ever runs — even though the read
+      // is token-free.
+      const status = yield* fetchWhenUp(() => rawGet(port, "/api/v1/state", "attacker.example"));
+      expect(status).toBe(403);
+    }),
+  );
+
+  it.scopedLive("rejects a non-loopback Host on a static path → 403", () =>
+    Effect.gen(function* () {
+      const port = yield* freePort;
+      yield* bootCockpit(port).pipe(Effect.provide(cockpitContext()));
+
+      const status = yield* fetchWhenUp(() => rawGet(port, "/", "attacker.example"));
+      expect(status).toBe(403);
+    }),
+  );
+
+  it.scopedLive("still serves a loopback Host (127.0.0.1:<port>) → 200", () =>
+    Effect.gen(function* () {
+      const port = yield* freePort;
+      yield* bootCockpit(port).pipe(Effect.provide(cockpitContext()));
+
+      const status = yield* fetchWhenUp(() => rawGet(port, "/api/v1/state", `127.0.0.1:${port}`));
+      expect(status).toBe(200);
     }),
   );
 });
