@@ -108,6 +108,23 @@ describe("DashboardView", () => {
     expect(frame).not.toContain("↳");
   });
 
+  it("keeps an aged event's relative time and message on one row (no wrap, #45)", () => {
+    // 2m 05s before NOW → "2m 05s ago" (10 chars): the case the old width=9 box wrapped.
+    const emittedAt = new Date(NOW - (2 * 60 + 5) * 1_000).toISOString();
+    const frame = frameOf(
+      makeSnapshot({
+        recent_events: [
+          makeEvent({ kind: "completed", emitted_at: emittedAt, message: "aged ORC-1" }),
+        ],
+      }),
+      opts(),
+    );
+    const lines = frame.split("\n").map((l) => l.trimEnd());
+    // The label and its message must share one line; "ago" must never be stranded alone.
+    expect(lines.some((l) => l.includes("2m 05s ago") && l.includes("aged ORC-1"))).toBe(true);
+    expect(lines.some((l) => l.trimStart() === "ago")).toBe(false);
+  });
+
   it("swaps event-feed glyphs for ASCII with --ascii (#38)", () => {
     const snap = makeSnapshot({
       recent_events: [makeEvent({ kind: "completed", message: "completed ORC-1" })],

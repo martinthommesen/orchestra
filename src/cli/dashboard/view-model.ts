@@ -145,6 +145,17 @@ export interface ViewModelOptions {
 export const RECENT_COMPLETED = 8;
 /** How many lifecycle events to surface in the feed (newest-first; the ring holds more). */
 export const RECENT_EVENTS = 12;
+/**
+ * Widest relative-time label {@link formatRelative} can emit, `"99h 59m ago"` /
+ * `"59m 59s ago"` = 11 chars, given {@link formatDuration} is clamped (see
+ * `DURATION_MAX_SEC`). The `"—"` sentinel is shorter, so this is the true max.
+ */
+export const RELATIVE_LABEL_MAX_WIDTH = 11;
+/**
+ * Fixed width of the EVENTS feed relative-time column: the widest label plus a 1-char
+ * gutter so it never wraps (#45 — `width=9` clipped `"Xm YYs ago"` onto a second line).
+ */
+export const EVENTS_RELATIVE_TIME_COLUMN_WIDTH = RELATIVE_LABEL_MAX_WIDTH + 1;
 const WORKSPACE_MAX = 44;
 const ERROR_MAX = 80;
 const RATE_LIMIT_MAX = 100;
@@ -152,10 +163,19 @@ const EVENT_MESSAGE_MAX = 80;
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
-/** Compact, human duration: `8s`, `1m 04s`, `2h 09m`. */
+/**
+ * Upper bound on the seconds {@link formatDuration} will render, `99h 59m 59s`. The hour
+ * tier is otherwise unbounded (`1000h 00m` …), which would silently overflow every
+ * fixed-width column it feeds (EVENTS relative-time, running `elapsed`). Clamping here
+ * keeps the widest token at 7 chars (`99h 59m`) so the UI's column contract stays honest
+ * for the absurd-but-possible long-lived case (#45). Realistic feeds never approach it.
+ */
+const DURATION_MAX_SEC = 99 * 3600 + 59 * 60 + 59;
+
+/** Compact, human duration: `8s`, `1m 04s`, `2h 09m` (clamped to `99h 59m`). */
 export const formatDuration = (ms: number): string => {
   const clamped = Number.isFinite(ms) && ms > 0 ? ms : 0;
-  const totalSec = Math.floor(clamped / 1000);
+  const totalSec = Math.min(Math.floor(clamped / 1000), DURATION_MAX_SEC);
   const s = totalSec % 60;
   const m = Math.floor(totalSec / 60) % 60;
   const h = Math.floor(totalSec / 3600);

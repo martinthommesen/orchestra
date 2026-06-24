@@ -109,6 +109,16 @@ Branch: `feature/sprint-3` (from `main` @ 5f31f76). Identity: martin-lammetun.th
 - **Decision:** rich completed panel titled `RECENTLY FINISHED` to stay visually distinct
   from the authoritative IDs-only `COMPLETED (n)` summary, which is unchanged.
 - Gates: typecheck/lint/build 0; tests **263 (+17)**. Full suite green.
+- **Follow-up #45 (QA layout fix, done):** EVENTS relative-time column rendered in a fixed
+  `<Box width={9}>`, but `formatRelative` emits up to `"59m 59s ago"` / `"99h 59m ago"` (11
+  chars), so events ≥60s old wrapped `ago` onto a second line. Root-caused two things: the
+  worst-case label is 11, *and* `formatDuration`'s hour tier was unbounded (`"1000h 00m"` …)
+  so the column contract was a fiction. Fix: clamped `formatDuration` to a `99h 59m 59s`
+  ceiling (bounds every width-constrained label, incl. running `elapsed`), and replaced the
+  magic `9` with an exported `EVENTS_RELATIVE_TIME_COLUMN_WIDTH = RELATIVE_LABEL_MAX_WIDTH(11)
+  + 1` = 12 (matches QA's Expected block exactly; 1-char gutter, never wraps). Layout-only,
+  additive, honours `--ascii`/`NO_COLOR`. Tests +3 (formatDuration clamp ceiling; view-model
+  width-invariant sweep across all tiers; render no-wrap regression) → **266**.
 
 ### #39 — durability design spike (done) — DESIGN ONLY, no src/test touched
 - Deliverable: `docs/sprint-3/durability-spike.md` (current-state analysis w/ file:line cites,
