@@ -134,4 +134,40 @@ describe("DashboardView", () => {
     expect(ascii).toContain("+ ");
     expect(ascii).not.toContain("✓");
   });
+
+  it("renders the RESTORED indicator only when the daemon sent a restore block (#54)", () => {
+    // Cold start (no restore block) → no panel.
+    expect(frameOf(makeSnapshot(), opts())).not.toContain("RESTORED");
+
+    const at = new Date(NOW - 30_000).toISOString();
+    const frame = frameOf(
+      makeSnapshot({
+        restore: {
+          at,
+          orphaned_running_converted: 1,
+          rearmed_retries: 0,
+          restored_completed: 3,
+        },
+      }),
+      opts(),
+    );
+    expect(frame).toContain("RESTORED");
+    expect(frame).toContain("⟳ restored after restart");
+    expect(frame).toContain("1 running · 0 retrying · 3 completed · restored 30s ago");
+  });
+
+  it("swaps the RESTORED glyph for its ASCII fallback with --ascii (#54)", () => {
+    const snap = makeSnapshot({
+      restore: {
+        at: new Date(NOW - 30_000).toISOString(),
+        orphaned_running_converted: 1,
+        rearmed_retries: 0,
+        restored_completed: 3,
+      },
+    });
+    expect(frameOf(snap, opts())).toContain("⟳ restored after restart");
+    const ascii = frameOf(snap, opts(), true);
+    expect(ascii).toContain("* restored after restart");
+    expect(ascii).not.toContain("⟳");
+  });
 });

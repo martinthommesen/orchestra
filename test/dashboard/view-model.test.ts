@@ -481,3 +481,48 @@ describe("toViewModel — budget panel (#53)", () => {
     expect(vm.budget?.summary).toBe("1200 / 1000 tokens · 0 left");
   });
 });
+
+describe("toViewModel — restore indicator (#54)", () => {
+  it("absent restore block → no panel", () => {
+    const vm = toViewModel(makeSnapshot(), NOW, opts());
+    expect(vm.restore).toBeNull();
+  });
+
+  it("present restore → ⟳ glyph (info), counts + relative 'restored Xs ago'", () => {
+    // 30s before NOW → "restored 30s ago".
+    const at = new Date(NOW - 30_000).toISOString();
+    const vm = toViewModel(
+      makeSnapshot({
+        restore: {
+          at,
+          orphaned_running_converted: 1,
+          rearmed_retries: 0,
+          restored_completed: 3,
+        },
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.restore?.glyph).toBe("⟳");
+    expect(vm.restore?.ascii).toBe("*");
+    expect(vm.restore?.color).toBe("info");
+    expect(vm.restore?.stateLabel).toBe("restored after restart");
+    expect(vm.restore?.summary).toBe("1 running · 0 retrying · 3 completed · restored 30s ago");
+  });
+
+  it("degrades an unparseable `at` to '—', never a plausible '0s'", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        restore: {
+          at: "not-a-date",
+          orphaned_running_converted: 0,
+          rearmed_retries: 2,
+          restored_completed: 0,
+        },
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.restore?.summary).toBe("0 running · 2 retrying · 0 completed · restored —");
+  });
+});

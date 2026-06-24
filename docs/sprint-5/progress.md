@@ -8,7 +8,7 @@ humanized event summaries). Branch: `feature/sprint-5` (off `main` @ `ec31b4c`).
 | # | Task | Effort · Risk | Status |
 |---|------|---------------|--------|
 | #53 | Budget guardrails (pause dispatch at a spend ceiling) | M · Med | ✅ done |
-| #54 | Surface durability/restore state in snapshot + dashboard | S–M · Low | ⏳ pending |
+| #54 | Surface durability/restore state in snapshot + dashboard | S–M · Low | ✅ done |
 | #55 | Humanized agent-event summaries | M · Low | ⏳ pending |
 | #56 | Tests + docs + handoff close-out | M · Low | ⏳ pending |
 
@@ -107,3 +107,80 @@ like the existing panels.
 unreachable in production (spend only grows, config is loaded once) — the latch still
 handles resume correctly and cheaply, and it's covered by the exhaustive observation render
 tests, so the code stays honest if a future config-reload feature raises the ceiling.
+
+### #54 — Durability/restore visibility ✅
+
+Display-only vertical slice (boot capture → durable hold → strictly-additive snapshot →
+dashboard indicator), mirroring #53's budget block exactly. **No scheduling change**:
+`restoreFromCheckpoint`, the re-arm/reconcile/dispatch logic, and every reducer are
+untouched — the #41 restore stays byte-identical. The slice only READS the already-computed
+restore facts and projects them onto the wire.
+
+**Where the boot-time summary is captured (constraint #3).** A new tiny observability
+context service — `RestoreStatus` (`src/core/observability/restore-status.ts`), in the same
+family as `LiveActivity`/`RecentCompletions`/`RecentEvents` — holds an immutable
+`RestoreSummary` (`{ at, orphanedRunningConverted, reArmedRetries, restoredCompleted }`) in
+a `Ref<RestoreSummary | null>`. It is **set-once** (`Ref.update(prev => prev ?? summary)`),
+so the first boot capture wins and the fact stays immutable. The loop writes it **once**, in
+`restoreFromCheckpoint`, on the SAME path that emits the one-shot `RestoredAfterRestart`
+observation (reached only when something was actually restored — the cold-start guard
+returns above it), stamping `at` from the injected clock (`new Date(wallNow).toISOString()`,
+deterministic under `TestClock`). Cold start → the loop never records → the holder stays
+`null`. This is the cleanest home because the snapshot server already resolves these
+observability rings from context; the loop already threads `Observer`/`RecentCompletions`
+the same way. (The budget config went through `runSnapshotServer(port, budgetConfig)` because
+it's *static config*; the restore fact is *runtime data computed at boot AFTER the snapshot
+fiber starts*, so it must be a shared Ref-backed context service, not a closed-over value.)
+
+**The additive `restore` block (strictly additive, no /api/v2).** `toSnapshot` emits it
+ONLY when a summary was captured — absent on a cold start / older daemons, exactly like
+`budget` is absent when unconfigured. Wire shape (snake_case, Dates already ISO):
+
+```
+restore:
+  at: "2026-06-24T10:00:00.000Z"   # wall-clock instant the restore happened
+  orphaned_running_converted: <int>
+  rearmed_retries: <int>
+  restored_completed: <int>
+```
+
+The read handler reads `RestoreStatus.get` and spreads the block in only when non-null;
+`SnapshotExtras` gained an optional `restore?: RestoreSummary` and a `restoreProjection`
+helper, mirroring `budget`/`budgetProjection`.
+
+**Dashboard.** Snapshot client gained `SnapshotRestore` + tolerant `parseRestore` (absent →
+`undefined`, malformed → `SnapshotParseError`). View-model gained `RestoreVM` + `toRestoreVM`
+(null → panel omitted); it reuses the design system's `info` color token and `formatRelative`
+for the "restored Xs ago" line (unparseable `at` → honest `—`, never a fake "0s"). The glyph
+is `⟳` with ASCII fallback `*` — `⟳` isn't in the five-status `glyphs.ts` table (those are
+worker states), so I precompute both glyph variants on the VM exactly as budget does and
+honor `--ascii` at render. `components.tsx` renders a `RESTORED` `<Section>` right under the
+header **only when `vm.restore !== null`**; it honors `--ascii`/`NO_COLOR`/non-TTY like the
+existing panels. Example line: `⟳ restored after restart · 1 running · 0 retrying · 3 completed · restored 30s ago`.
+
+**Files changed.**
+- `src/core/observability/restore-status.ts` — **new** set-once `RestoreStatus` service + `RestoreSummary`.
+- `src/core/orchestrator/loop.ts` — capture the summary into `RestoreStatus` at boot (next to the existing `RestoredAfterRestart` emit); added `RestoreStatus` to `OrchestratorDeps`.
+- `src/core/observability/snapshot-server.ts` — additive `restore` extra + `restoreProjection`; the router reads `RestoreStatus` (added to `runSnapshotServer` requirements).
+- `src/cli/daemon.ts` — provide `RestoreStatusLive` in `appLayer`.
+- `src/cli/dashboard/snapshot-client.ts` — `SnapshotRestore` + `parseRestore` + wiring.
+- `src/cli/dashboard/view-model.ts` — `RestoreVM` + `toRestoreVM` + both branches null-safe.
+- `src/cli/dashboard/components.tsx` — `RESTORED` section.
+- Tests: **new** `test/restore-pure.test.ts` (6: set-once holder, additive projection, JSON
+  round-trip); additions to `test/dashboard/snapshot-client.test.ts` (3), `view-model.test.ts`
+  (3), `render.test.tsx` (2); the real-loop `restore-reconcile.test.ts` "carries the correct
+  counts" / "missing checkpoint" tests now also assert the durable capture (present after a
+  seeded restart, `null` on a cold start). `test/fakes/harness.ts` + the per-test envs gained
+  `RestoreStatusLive`; snapshot-server test's `ObservabilityRings` gained it.
+
+**Determinism.** No sleeps, no wall-clock reads in assertions: `at` comes from the injected
+clock (epoch under `TestClock`), and the dashboard relative-time tests fix `NOW` and derive
+`at` from it.
+
+**Gate results.** `pnpm typecheck` ✅ · `pnpm lint` ✅ · `pnpm build` ✅ ·
+`pnpm test` ✅ **325 passed** (312 baseline + 13 new, 0 regressions).
+
+**Decision noted.** Glyph `⟳`/ascii `*`, color token `info` — chosen because the restore
+indicator isn't one of the five canonical worker statuses, so it can't reuse a `STATUS_STYLES`
+row wholesale; it follows the budget panel's precompute-both-glyphs structure and the
+design-system color palette so `--ascii`/`NO_COLOR`/non-TTY all stay correct.

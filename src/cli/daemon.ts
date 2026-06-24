@@ -7,6 +7,7 @@ import { ClockLive } from "../core/clock/live";
 import type { ServiceConfig } from "../core/domain/workflow";
 import { ObservabilityLive } from "../core/observability/observer-tee";
 import { RecentCompletionsLive } from "../core/observability/recent-completions";
+import { RestoreStatusLive } from "../core/observability/restore-status";
 import { runSnapshotServer } from "../core/observability/snapshot-server";
 import { runOrchestrator } from "../core/orchestrator/loop";
 import { layerDurableOrchestratorStore } from "../core/persistence";
@@ -54,6 +55,8 @@ export const appLayer = (config: ServiceConfig) =>
     ObservabilityLive,
     // Rich completion history (loop-fed; read by the snapshot server). #37.
     RecentCompletionsLive,
+    // Boot-time restore fact (loop-written once; read by the snapshot server). #54.
+    RestoreStatusLive,
   );
 
 /** logfmt logger → stable `key=value` lines per PROJECT_BRIEF §13.1. */

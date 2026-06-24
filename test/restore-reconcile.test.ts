@@ -8,6 +8,8 @@ import type { OrchestratorState } from "../src/core/domain/orchestrator-state";
 import { ServiceConfig, type WorkflowDefinition } from "../src/core/domain/workflow";
 import { TurnFailed } from "../src/core/errors";
 import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
+import { RestoreStatus, RestoreStatusLive } from "../src/core/observability/restore-status";
+import { toSnapshot } from "../src/core/observability/snapshot-server";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";
 import {
@@ -131,6 +133,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {
@@ -213,6 +216,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {
@@ -277,6 +281,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {
@@ -344,6 +349,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {
@@ -404,6 +410,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
           ClockLive,
           layerDurableOrchestratorStore(def.config),
           RecentCompletionsLive,
+          RestoreStatusLive,
         );
 
         yield* Effect.gen(function* () {
@@ -472,6 +479,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {
@@ -486,6 +494,25 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         const store = yield* OrchestratorStore;
         const state = yield* store.get;
         expect(state.completed).toEqual(["c1", "c2", "c3"]);
+
+        // #54: the same one-shot summary is captured DURABLY into RestoreStatus (the loop
+        // and this gen resolve the same context instance), so the snapshot can surface it
+        // on every later poll. `at` is the injected clock's wall instant (deterministic).
+        const rs = yield* RestoreStatus;
+        const captured = yield* rs.get;
+        expect(captured).not.toBeNull();
+        expect(captured?.orphanedRunningConverted).toBe(1);
+        expect(captured?.reArmedRetries).toBe(1);
+        expect(captured?.restoredCompleted).toBe(3);
+        // Strictly-additive wire projection: present after a real restore.
+        const snap = toSnapshot(state, captured === null ? {} : { restore: captured });
+        expect(snap.restore).toEqual({
+          at: captured?.at,
+          orphaned_running_converted: 1,
+          rearmed_retries: 1,
+          restored_completed: 3,
+        });
+
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));
     }).pipe(Effect.provide(NodeContext.layer)),
@@ -515,6 +542,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {
@@ -524,6 +552,15 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         if (dispatched._tag === "Dispatched") {
           expect(dispatched.turn).toBe(1);
         }
+
+        // #54: a cold start records nothing → RestoreStatus stays null → the snapshot omits
+        // the `restore` block entirely (older dashboards unaffected, strictly additive).
+        const rs = yield* RestoreStatus;
+        expect(yield* rs.get).toBeNull();
+        const store = yield* OrchestratorStore;
+        const snap = toSnapshot(yield* store.get);
+        expect("restore" in snap).toBe(false);
+
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));
     }).pipe(Effect.provide(NodeContext.layer)),
@@ -554,6 +591,7 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {
@@ -624,6 +662,7 @@ describe("opt-in session resume on continuation (#42)", () => {
           ClockLive,
           layerDurableOrchestratorStore(def.config),
           RecentCompletionsLive,
+          RestoreStatusLive,
         );
 
         yield* Effect.gen(function* () {
@@ -689,6 +728,7 @@ describe("opt-in session resume on continuation (#42)", () => {
           ClockLive,
           layerDurableOrchestratorStore(def.config),
           RecentCompletionsLive,
+          RestoreStatusLive,
         );
 
         yield* Effect.gen(function* () {
@@ -759,6 +799,7 @@ describe("opt-in session resume on continuation (#42)", () => {
         ClockLive,
         layerDurableOrchestratorStore(def.config),
         RecentCompletionsLive,
+        RestoreStatusLive,
       );
 
       yield* Effect.gen(function* () {

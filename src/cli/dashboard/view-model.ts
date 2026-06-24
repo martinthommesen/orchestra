@@ -10,6 +10,7 @@ import type {
   Snapshot,
   SnapshotActivity,
   SnapshotBudget,
+  SnapshotRestore,
   SnapshotRetrying,
 } from "./snapshot-client";
 
@@ -142,6 +143,22 @@ export interface RateLimitsVM {
   readonly summary: string;
 }
 
+/**
+ * Restore/durability indicator (#54). `null` when the daemon sends no restore block (cold
+ * start or older daemon) — the panel is then omitted entirely. Display-only: it reflects
+ * a fact captured ONCE at boot. Glyph honors `--ascii` (Unicode `⟳` / ASCII `*`); color
+ * reuses the design-system `info` token, gated by `NO_COLOR`/non-TTY downstream.
+ */
+export interface RestoreVM {
+  readonly glyph: string;
+  readonly ascii: string;
+  readonly color: ColorToken;
+  /** "restored after restart". */
+  readonly stateLabel: string;
+  /** "1 running · 0 retrying · 3 completed · restored 12s ago" — already display-ready. */
+  readonly summary: string;
+}
+
 export interface DashboardViewModel {
   readonly header: HeaderVM;
   readonly running: ReadonlyArray<RunningRowVM>;
@@ -155,6 +172,8 @@ export interface DashboardViewModel {
   readonly rateLimits: RateLimitsVM;
   /** Budget guardrail panel (#53); null when the daemon sends no budget block. */
   readonly budget: BudgetVM | null;
+  /** Restore/durability indicator (#54); null when the daemon sends no restore block. */
+  readonly restore: RestoreVM | null;
 }
 
 export interface ViewModelOptions {
@@ -349,6 +368,23 @@ const toBudgetVM = (b: SnapshotBudget): BudgetVM => {
   };
 };
 
+/**
+ * Build the restore indicator VM from the additive wire block (#54). Display-only: it
+ * surfaces the boot-time recovery fact long after the one-shot event scrolled away. The
+ * `⟳` glyph (ASCII `*`) reads as "cycled/restarted"; `info` tone matches the header's
+ * informational chrome. The relative "restored Xs ago" reuses {@link formatRelative}, so
+ * an unparseable `at` degrades to `—` rather than inventing a plausible "0s".
+ */
+const toRestoreVM = (now: number, r: SnapshotRestore): RestoreVM => ({
+  glyph: "⟳",
+  ascii: "*",
+  color: "info",
+  stateLabel: "restored after restart",
+  summary:
+    `${r.orphaned_running_converted} running · ${r.rearmed_retries} retrying · ` +
+    `${r.restored_completed} completed · restored ${formatRelative(now, r.at)}`,
+});
+
 const connectionStyle = (
   connection: ConnectionState,
 ): { readonly label: string; readonly color: ColorToken } => {
@@ -456,6 +492,7 @@ export const toViewModel = (
       totals: null,
       rateLimits: summarizeRateLimits(null),
       budget: null,
+      restore: null,
     };
   }
 
@@ -498,5 +535,6 @@ export const toViewModel = (
     },
     rateLimits: summarizeRateLimits(snapshot.rate_limits),
     budget: snapshot.budget === undefined ? null : toBudgetVM(snapshot.budget),
+    restore: snapshot.restore === undefined ? null : toRestoreVM(now, snapshot.restore),
   };
 };

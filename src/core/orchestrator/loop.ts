@@ -6,6 +6,7 @@ import { RunAttempt } from "../domain/run-attempt";
 import type { WorkflowDefinition } from "../domain/workflow";
 import type { Workspace } from "../domain/workspace";
 import { RecentCompletions } from "../observability/recent-completions";
+import { RestoreStatus } from "../observability/restore-status";
 import type { AgentRunParams } from "../ports/agent-runner";
 import { AgentRunner } from "../ports/agent-runner";
 import { Clock } from "../ports/clock";
@@ -112,7 +113,8 @@ export type OrchestratorDeps =
   | WorkspaceManager
   | Clock
   | Observer
-  | RecentCompletions;
+  | RecentCompletions
+  | RestoreStatus;
 
 /**
  * Build and run the orchestrator loop for a loaded workflow. The returned effect never
@@ -131,6 +133,7 @@ export const runOrchestrator = (
       const clock = yield* Clock;
       const observer = yield* Observer;
       const completions = yield* RecentCompletions;
+      const restoreStatus = yield* RestoreStatus;
 
       const config = def.config;
       const template = def.prompt_template;
@@ -888,6 +891,17 @@ export const runOrchestrator = (
             reArmedRetries += 1;
           }
 
+          // #54: capture the one-shot restore summary as a durable, display-only fact so
+          // the snapshot can surface a persistent `restore` block long after this boot
+          // observation has scrolled out of the events feed. `wallNow` is the injected
+          // clock's instant (deterministic under TestClock); reached only on a real
+          // restore (the cold-start path returns above), so a cold start records nothing.
+          yield* restoreStatus.record({
+            at: new Date(wallNow).toISOString(),
+            orphanedRunningConverted,
+            reArmedRetries,
+            restoredCompleted,
+          });
           yield* observer.emit({
             _tag: "RestoredAfterRestart",
             orphanedRunningConverted,
