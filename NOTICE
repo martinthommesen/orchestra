@@ -1,0 +1,12 @@
+Orchestra
+Copyright 2024 The Orchestra Authors
+
+This product is licensed under the Apache License, Version 2.0 (see the LICENSE
+file in the root of this repository).
+
+Orchestra is an independent, type-safe TypeScript reimplementation of the
+architecture described by OpenAI's Symphony (https://github.com/openai/symphony),
+which is itself licensed under the Apache License, Version 2.0. Orchestra contains
+no Symphony source code; it follows the public SPEC as a behavioral reference. The
+Symphony name and any associated marks remain the property of their respective
+owners and are referenced only to describe the origin of this work.
