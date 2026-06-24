@@ -1,3 +1,5 @@
+import * as nodeFs from "node:fs";
+import * as nodeOs from "node:os";
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
@@ -335,6 +337,52 @@ describe("persistence — durable store decorator", () => {
         const decoded = yield* decodePersisted(yield* fs.readFileString(file));
         expect(decoded.state.completed).toEqual(["flushed"]);
       }).pipe(Effect.provide(platform)),
+  );
+});
+
+describe("persistence — #51 restrictive checkpoint permissions (POSIX)", () => {
+  const posix = process.platform !== "win32";
+
+  it.scoped("save creates the state dir 0700 and state.json 0600 (rename preserves mode)", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const base = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-perms-" });
+      // A fresh, not-yet-existing state dir so makeDirectory actually creates it (and so the
+      // 0700 assertion proves OUR mode, not the inherited mkdtemp default).
+      const dir = `${base}/nested/.orchestra`;
+      const persistence = yield* makePersistence(makeConfig(dir));
+
+      yield* persistence.save(toPersisted(sampleState(), new Date("2026-06-24T10:00:01.000Z")));
+
+      const file = `${dir}/${STATE_FILE}`;
+      expect(yield* fs.exists(file)).toBe(true);
+      // No leftover temp sibling, and certainly not with looser perms.
+      expect(yield* fs.exists(`${dir}/${STATE_FILE}.tmp`)).toBe(false);
+
+      if (posix) {
+        // POSIX-only: assert the actual permission bits via stat. Guarded for Windows, where
+        // these modes are not meaningfully enforced by the OS.
+        expect(nodeFs.statSync(dir).mode & 0o777).toBe(0o700);
+        expect(nodeFs.statSync(file).mode & 0o777).toBe(0o600);
+      }
+    }).pipe(Effect.provide(platform)),
+  );
+
+  it.scoped("session_ids are not world-readable: checkpoint mode excludes group/other", () =>
+    Effect.gen(function* () {
+      if (!posix) return; // POSIX-only guarantee.
+      const fs = yield* FileSystem.FileSystem;
+      const base = yield* fs.makeTempDirectoryScoped({
+        prefix: "orchestra-perms-",
+        directory: nodeOs.tmpdir(),
+      });
+      const dir = `${base}/.orchestra`;
+      const persistence = yield* makePersistence(makeConfig(dir));
+      yield* persistence.save(toPersisted(sampleState(), new Date("2026-06-24T10:00:01.000Z")));
+
+      const fileMode = nodeFs.statSync(`${dir}/${STATE_FILE}`).mode & 0o077; // group+other bits
+      expect(fileMode).toBe(0); // no read for group/other → session_ids protected at rest.
+    }).pipe(Effect.provide(platform)),
   );
 });
 

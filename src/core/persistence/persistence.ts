@@ -28,6 +28,19 @@ import { decodePersisted, encodePersisted, type PersistedState } from "./persist
 export const STATE_FILE = "state.json";
 const TMP_FILE = `${STATE_FILE}.tmp`;
 
+/**
+ * #51 — restrictive at-rest permissions for the checkpoint. The default `workspace.root`
+ * resolves under the system temp dir, world-traversable on multi-tenant hosts, and the
+ * checkpoint carries agent `session_id`s (capability handles to Copilot threads). We create
+ * the state dir owner-only and the checkpoint owner read/write only.
+ *
+ * POSIX guarantee only: these are Unix permission bits. `rename(2)` preserves the temp
+ * file's mode, so writing the temp sibling `0600` is what makes the renamed `state.json` end
+ * up `0600`. On Windows the mode is largely ignored by the OS (no effect, no harm).
+ */
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
+
 /** Resolved persistence paths/knobs derived from the service config. */
 export interface PersistencePaths {
   /** Absolute state directory. */
@@ -146,9 +159,10 @@ export const makePersistence = (
     const save = (value: PersistedState): Effect.Effect<void> =>
       writeLock.withPermits(1)(
         Effect.gen(function* () {
-          yield* fs.makeDirectory(paths.dir, { recursive: true });
+          yield* fs.makeDirectory(paths.dir, { recursive: true, mode: DIR_MODE });
           const json = yield* encodePersisted(value);
-          yield* fs.writeFileString(paths.tmp, json);
+          // #51: write the temp file `0600`; rename(2) preserves the mode onto state.json.
+          yield* fs.writeFileString(paths.tmp, json, { mode: FILE_MODE });
           // rename(2) is atomic on a single filesystem: a reader/crash sees either the
           // complete old file or the complete new file, never a half-written one.
           yield* fs.rename(paths.tmp, paths.file);
