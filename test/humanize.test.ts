@@ -64,6 +64,25 @@ describe("humanizeAgentEvent (#55)", () => {
   });
 
   it("is total and never blank over an arbitrary string (property)", () => {
-    fc.assert(fc.property(fc.string(), (tag) => humanizeAgentEvent(tag).length > 0));
+    // Bias the input domain to include the `Object.prototype` member names that
+    // previously slipped through a prototype-chain lookup (#60). Including them
+    // explicitly makes that class of regression fail every run, not ~1-in-8.
+    const PROTOTYPE_KEYS = [
+      "toString",
+      "valueOf",
+      "constructor",
+      "__proto__",
+      "hasOwnProperty",
+      "isPrototypeOf",
+      "propertyIsEnumerable",
+      "toLocaleString",
+    ];
+    const tag = fc.oneof(fc.string(), fc.constantFrom(...PROTOTYPE_KEYS));
+    fc.assert(
+      fc.property(tag, (t) => {
+        const summary = humanizeAgentEvent(t);
+        return typeof summary === "string" && summary.length > 0;
+      }),
+    );
   });
 });

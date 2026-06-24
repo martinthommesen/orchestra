@@ -95,6 +95,14 @@ const sampleState = (): OrchestratorState => {
 const settle = Effect.promise(() => new Promise<void>((res) => setImmediate(res)));
 
 /**
+ * A small REAL (TestClock-independent) delay between filesystem polls. `TestClock` is
+ * installed, so `Effect.sleep` would block on the virtual clock and never elapse — this uses a
+ * real `setTimeout` instead.
+ */
+const realDelay = (ms: number): Effect.Effect<void> =>
+  Effect.promise(() => new Promise<void>((res) => setTimeout(res, ms)));
+
+/**
  * Deterministically block until the forked debounced writer has parked in its
  * `Effect.sleep(debounce_ms)` — i.e. registered a wake-up with the `TestClock`. The writer
  * fiber races the test fiber: under parallel suite load it can still be working through its
@@ -112,24 +120,28 @@ const awaitWriterParked = Effect.iterate(false, {
 });
 
 /**
- * Poll the real filesystem (independent of the frozen `TestClock`) until `path` exists. The
- * debounced flush performs a multi-step atomic write (`mkdir → writeFile → rename`) on the
- * real event loop, which a fixed number of `setImmediate` settles cannot reliably await under
- * parallel suite load (the other half of the #40 flake). Bounded so a genuine regression
- * (the write never happens) returns `false` and fails the assertion instead of hanging.
+ * Poll the real filesystem (independent of the frozen `TestClock`) until `path` exists,
+ * bounded by a generous REAL wall-clock deadline rather than a fixed setImmediate-iteration
+ * count. The debounced flush performs a multi-step atomic write (`mkdir → writeFile → rename`)
+ * on the real event loop; under parallel suite IO load a fixed iteration budget can spin out in
+ * only a few ms of wall-clock — less than a contended write takes — and return a false negative
+ * (the #40/#61 flake). A real ~5s deadline with a tiny real delay between polls tolerates IO
+ * contention while still failing fast for a genuine regression (the write never happens)
+ * instead of hanging. `TestClock` is installed, so the inter-poll wait uses a REAL timer
+ * (`realDelay`/`setTimeout`) and a REAL `Date.now()` deadline, never `Effect.sleep`.
  */
 const awaitFileExists = (fs: FileSystem.FileSystem, path: string): Effect.Effect<boolean> =>
-  Effect.iterate(
-    { tries: 0, found: false },
-    {
-      while: ({ tries, found }) => !found && tries < 500,
-      body: ({ tries }) =>
-        settle.pipe(
-          Effect.zipRight(fs.exists(path).pipe(Effect.orElseSucceed(() => false))),
-          Effect.map((found) => ({ tries: tries + 1, found })),
+  Effect.suspend(() => {
+    const deadline = Date.now() + 5_000;
+    return Effect.iterate(false, {
+      while: (found) => !found && Date.now() < deadline,
+      body: () =>
+        fs.exists(path).pipe(
+          Effect.orElseSucceed(() => false),
+          Effect.tap((found) => (found ? Effect.void : realDelay(5))),
         ),
-    },
-  ).pipe(Effect.map(({ found }) => found));
+    });
+  });
 
 describe("persistence — codec round-trip (§2.8)", () => {
   it.effect("encode → decode is a fixed point (Dates equal as Dates)", () =>
