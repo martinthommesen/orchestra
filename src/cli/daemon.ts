@@ -9,7 +9,7 @@ import { ObservabilityLive } from "../core/observability/observer-tee";
 import { RecentCompletionsLive } from "../core/observability/recent-completions";
 import { runSnapshotServer } from "../core/observability/snapshot-server";
 import { runOrchestrator } from "../core/orchestrator/loop";
-import { layerOrchestratorStore } from "../core/orchestrator/state";
+import { layerDurableOrchestratorStore } from "../core/persistence";
 import { loadWorkflow } from "../core/workflow/loader";
 import { parseArgs } from "./args";
 
@@ -40,7 +40,11 @@ const VERSION = process.env.npm_package_version ?? "0.0.0";
  */
 export const appLayer = (config: ServiceConfig) =>
   Layer.mergeAll(
-    layerOrchestratorStore(config),
+    // Durable store (#40): loads the checkpoint, seeds bookkeeping, and persists every
+    // mutation via an atomic, debounced, scope-flushed writer. Drop-in for the in-memory
+    // `layerOrchestratorStore` — `loop.ts`/`snapshot-server.ts` are unchanged. Its
+    // `FileSystem` comes from the ambient `NodeContext.layer` provided at the program root.
+    layerDurableOrchestratorStore(config),
     layerGitHubTracker(config),
     layerCopilotRunner(config),
     layerWorkspaceManager(config),

@@ -108,6 +108,20 @@ export const CopilotConfig = Schema.Struct({
 export type CopilotConfig = typeof CopilotConfig.Type;
 
 /**
+ * `persistence` block (Sprint 4 / #40) — durable orchestrator state. Additive and
+ * all-defaults so an unchanged `WORKFLOW.md` still decodes. `dir` is left optional/raw
+ * (no default baked in): the persistence layer falls back to `<workspace.root>/.orchestra`
+ * when it is absent, and resolves a relative `dir` against the resolved workspace root.
+ */
+export const PersistenceConfig = Schema.Struct({
+  /** State directory. Default `<workspace.root>/.orchestra` (resolved by the layer). */
+  dir: Schema.optional(Schema.String),
+  /** Debounce window (ms) coalescing bursts of mutations into one atomic write. */
+  debounce_ms: Schema.optionalWith(PositiveInt, { default: () => 500 }),
+}).annotations({ identifier: "PersistenceConfig" });
+export type PersistenceConfig = typeof PersistenceConfig.Type;
+
+/**
  * The fully-typed, defaulted service configuration (SPEC §4.1.3). Each block is
  * optional at the top level and falls back to its own all-defaults form, so a
  * `WORKFLOW.md` with no front matter still decodes to a complete config.
@@ -130,6 +144,9 @@ export const ServiceConfig = Schema.Struct({
   }),
   copilot: Schema.optionalWith(CopilotConfig, {
     default: () => CopilotConfig.make({}),
+  }),
+  persistence: Schema.optionalWith(PersistenceConfig, {
+    default: () => PersistenceConfig.make({}),
   }),
 }).annotations({ identifier: "ServiceConfig" });
 export type ServiceConfig = typeof ServiceConfig.Type;
