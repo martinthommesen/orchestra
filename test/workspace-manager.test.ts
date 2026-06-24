@@ -1,11 +1,12 @@
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
-import { Effect, Schema } from "effect";
+import { Effect, Logger, LogLevel, Schema } from "effect";
 import { describe, expect } from "vitest";
 import { layerWorkspaceManager } from "../src/adapters/workspace/workspace-manager";
 import { ServiceConfig } from "../src/core/domain/workflow";
 import { Workspace } from "../src/core/domain/workspace";
+import { DEFAULT_MAX_LEN, ELLIPSIS } from "../src/core/observability/glyphs";
 import { WorkspaceManager } from "../src/core/ports/workspace-manager";
 import { makeIssue } from "./fakes/harness";
 
@@ -133,6 +134,43 @@ describe("WorkspaceManager (filesystem adapter)", () => {
           expect(String(exit.cause)).toContain("WorkspaceHookTimeout");
         }
       }),
+    ),
+  );
+
+  it.scopedLive("captures and truncates hook output instead of inheriting fds (#20)", () =>
+    // A chatty, multi-line hook must NOT stream raw onto the orchestrator's fds (§9.2/§9.4).
+    // Its output is captured and surfaced as a single bounded, one-line debug record.
+    withManager(
+      { before_run: 'for i in $(seq 1 60); do echo "noisy-output-line-$i-xxxxxxxxxx"; done' },
+      (mgr) =>
+        Effect.gen(function* () {
+          const issue = makeIssue({ id: "20", identifier: "HOOK-OUT", state: "Todo" });
+          const ws = yield* mgr.ensureWorkspace(issue);
+
+          const captured: string[] = [];
+          const testLogger = Logger.make((opts) => {
+            const m = opts.message;
+            captured.push(Array.isArray(m) ? m.map((x) => String(x)).join(" ") : String(m));
+          });
+
+          yield* mgr
+            .runHook("before_run", ws)
+            .pipe(
+              Effect.provide(Logger.replace(Logger.defaultLogger, testLogger)),
+              Logger.withMinimumLogLevel(LogLevel.Debug),
+            );
+
+          const hookLine = captured.find((l) => l.includes("hook 'before_run' output:"));
+          // Reverting to inherited fds removes this captured record → this assertion fails.
+          expect(hookLine).toBeDefined();
+          const line = hookLine as string;
+          // Single line: the many echoed lines are collapsed, never spanning the record.
+          expect(line).not.toContain("\n");
+          // Bounded: the captured output portion is truncated to the design-system budget.
+          const summary = line.slice("hook 'before_run' output: ".length);
+          expect(summary.length).toBeLessThanOrEqual(DEFAULT_MAX_LEN);
+          expect(summary.endsWith(ELLIPSIS)).toBe(true);
+        }),
     ),
   );
 

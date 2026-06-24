@@ -19,10 +19,16 @@ import type { ServiceConfig } from "../../core/domain/workflow";
  * - `title`/`body` → `title`/`description`; `html_url` → `url`.
  * - `labels[].name` → `labels` (lowercased by the {@link Issue} schema).
  * - **state** (§11.3): GitHub issues are only open/closed, so the workflow state is read
- *   from a *status label* — the first label whose name matches a configured active/terminal
- *   state wins. With no such label: open → `active_states[0]`; closed → a terminal state
- *   chosen from `state_reason` (`not_planned` → a "cancel*" terminal, else a "closed/done"
- *   terminal).
+ *   from a *status label* — but with a strict **precedence** (#18):
+ *     1. A `closed` GitHub issue is an explicit terminal signal and ALWAYS maps to a
+ *        terminal state, even if it still carries a lingering *active* status label (a
+ *        closed issue whose worker would otherwise keep running). A *terminal* status
+ *        label still selects *which* terminal state (Done vs Cancelled); otherwise the
+ *        terminal state is derived from `state_reason` (`not_planned` → a "cancel*"
+ *        terminal, else a "closed/done" terminal).
+ *     2. For an `open` issue, the first label whose name matches a configured
+ *        active/terminal state wins.
+ *     3. An `open` issue with no such label → `active_states[0]`.
  * - **priority**: a `priority:<n>` or `p<n>` label → that integer (lower = higher priority);
  *   else `null`.
  * - **blocked_by**: parsed best-effort from the body (`blocked by #N` / `depends on #N`);
@@ -101,6 +107,25 @@ export const deriveClosedState = (
 
 /** Derive the workflow state per the §11.3 rules documented above. */
 export const deriveState = (p: GitHubIssuePayload, config: ServiceConfig): string => {
+  // Precedence 1 (#18): a `closed` GitHub issue is terminal regardless of any lingering
+  // *active* status label — `closed` is an explicit terminal signal and must win, or the
+  // worker for a closed issue would never be stopped/cleaned. A *terminal* status label is
+  // still honored to choose which terminal state (Done vs Cancelled); otherwise we derive
+  // it from `state_reason`.
+  if (p.state === "closed") {
+    const terminalByLabel = new Map<string, string>();
+    for (const s of config.tracker.terminal_states) {
+      terminalByLabel.set(normalizeState(s), s);
+    }
+    for (const label of labelNames(p)) {
+      const hit = terminalByLabel.get(normalizeState(label));
+      if (hit !== undefined) {
+        return hit;
+      }
+    }
+    return deriveClosedState(config, p.state_reason ?? null);
+  }
+  // Precedence 2: an open issue reads its state from the first matching status label.
   const stateByLabel = new Map<string, string>();
   for (const s of [...config.tracker.active_states, ...config.tracker.terminal_states]) {
     stateByLabel.set(normalizeState(s), s);
@@ -111,9 +136,7 @@ export const deriveState = (p: GitHubIssuePayload, config: ServiceConfig): strin
       return hit;
     }
   }
-  if (p.state === "closed") {
-    return deriveClosedState(config, p.state_reason ?? null);
-  }
+  // Precedence 3: open with no status label → first active state.
   return config.tracker.active_states[0] ?? "Todo";
 };
 

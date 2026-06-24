@@ -21,6 +21,11 @@ export interface RunningView {
   readonly lastEventAt: number;
 }
 
+/** A retrying/continuing issue as reconciliation sees it (no worker, no stall clock). */
+export interface RetryingView {
+  readonly issueId: string;
+}
+
 export type ReconcileAction =
   /** Stall: kill the worker and schedule a failure-backoff retry (SPEC §8.5 A). */
   | { readonly _tag: "StallKill"; readonly issueId: string }
@@ -33,6 +38,14 @@ export type ReconcileAction =
 
 export interface ReconcileInput {
   readonly running: ReadonlyArray<RunningView>;
+  /**
+   * Issues currently in a retry/continuation backoff window (claimed, not running). They
+   * occupy a slot but have no worker and no stall clock — so they are reconciled by
+   * tracker state only: terminal → kill + clean, neither/vanished → release, active →
+   * leave the pending retry alone. Without this, a `retry_attempts` issue that goes
+   * terminal mid-backoff would still fire one more (wasted) dispatch (bug #17).
+   */
+  readonly retrying?: ReadonlyArray<RetryingView>;
   /** Refreshed tracker states keyed by issue id; `null` means the refresh failed. */
   readonly refreshed: ReadonlyMap<string, IssueStateRef> | null;
   /** Current monotonic-clock ms. */
@@ -67,6 +80,25 @@ export const planReconciliation = (input: ReconcileInput): ReadonlyArray<Reconci
       actions.push({ _tag: "UpdateActive", issueId: worker.issueId, ref });
     } else {
       actions.push({ _tag: "NeitherKill", issueId: worker.issueId });
+    }
+  }
+  // (C) Retrying issues: tracker-state only (no stall, no UpdateActive — the pending
+  // retry is left untouched while the issue stays active). A refresh failure leaves them
+  // alone so the backoff can still fire.
+  if (input.refreshed !== null) {
+    for (const retrying of input.retrying ?? []) {
+      const ref = input.refreshed.get(retrying.issueId);
+      if (ref === undefined) {
+        actions.push({ _tag: "NeitherKill", issueId: retrying.issueId });
+        continue;
+      }
+      const state = normalizeState(ref.state);
+      if (input.terminalStates.has(state)) {
+        actions.push({ _tag: "TerminalKill", issueId: retrying.issueId });
+      } else if (!input.activeStates.has(state)) {
+        actions.push({ _tag: "NeitherKill", issueId: retrying.issueId });
+      }
+      // active → no action: let the scheduled retry/continuation fire as planned.
     }
   }
   return actions;

@@ -1,7 +1,7 @@
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Chunk, Deferred, Duration, Effect, Fiber, Schema, Stream } from "effect";
 import { describe, expect } from "vitest";
 import { layerCopilotRunner } from "../src/adapters/agent-copilot/copilot-runner";
 import { mapCopilotLine, mapUsage } from "../src/adapters/agent-copilot/map";
@@ -209,6 +209,40 @@ echo '{"type":"result","exitCode":0}'
 exit 0
 `;
 
+// Emits the terminal `result` with NO trailing newline (printf, not echo) — the splitter
+// must still flush the final partial segment or the turn would look like a crash (#22).
+const NO_TRAILING_NEWLINE = `#!/bin/sh
+printf '{"type":"result","exitCode":0,"usage":{"outputTokens":4}}'
+exit 0
+`;
+
+// Replaces the shell image with sleep so the spawned PID is exactly the one the run scope
+// must SIGTERM on interrupt — no lingering grandchild to leak (#22).
+const HANG = `#!/bin/sh
+exec sleep 30
+`;
+
+/** Is `pid` still a live OS process? `kill(pid, 0)` throws ESRCH once it is gone. */
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Poll (live clock) until `pid` is no longer alive, up to ~5s. */
+const waitUntilDead = (pid: number): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    for (let i = 0; i < 250; i++) {
+      if (!isAlive(pid)) {
+        return;
+      }
+      yield* Effect.sleep(Duration.millis(20));
+    }
+  });
+
 describe("CopilotRunner (subprocess)", () => {
   it.scopedLive("streams SessionStarted → events → TurnCompleted on a clean turn", () =>
     Effect.gen(function* () {
@@ -239,5 +273,57 @@ describe("CopilotRunner (subprocess)", () => {
       expect(exit._tag).toBe("Failure");
       expect(String(exit.cause)).toContain("TurnFailed");
     }),
+  );
+
+  it.scopedLive("recognizes a final result line with no trailing newline (#22)", () =>
+    runFakeCopilot(NO_TRAILING_NEWLINE, (events, exit) => {
+      // The splitter must flush the unterminated final segment; otherwise the terminal
+      // `result` is lost and the clean turn is misread as an AgentProcessExit crash.
+      expect(exit._tag).toBe("Success");
+      const tags = events.map((e) => e._tag);
+      expect(tags).toContain("TurnCompleted");
+      expect(tags.at(-1)).toBe("TurnCompleted");
+    }),
+  );
+
+  it.scopedLive("interrupting a worker SIGTERMs the subprocess (no orphan) (#22)", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-copilot-kill-" });
+      const ws = `${root}/work`;
+      yield* fs.makeDirectory(ws, { recursive: true });
+      const bin = `${root}/fake-copilot`;
+      yield* fs.writeFileString(bin, HANG);
+      yield* fs.chmod(bin, 0o755);
+
+      const runner = yield* Effect.provide(AgentRunner, layerCopilotRunner(config(bin)));
+      const params = {
+        issue: makeIssue({ id: "1", identifier: "ABC-1", state: "Todo" }),
+        workspacePath: ws,
+        prompt: "hang",
+        attempt: null,
+      } as const;
+
+      // Drive the worker in a forked fiber and capture the child PID from SessionStarted.
+      const pidLatch = yield* Deferred.make<number>();
+      const fiber = yield* Effect.forkScoped(
+        runner.run(params).pipe(
+          Stream.tap((e) =>
+            e._tag === "SessionStarted" && e.agent_pid != null
+              ? Deferred.succeed(pidLatch, Number(e.agent_pid))
+              : Effect.void,
+          ),
+          Stream.runDrain,
+        ),
+      );
+
+      const pid = yield* Deferred.await(pidLatch);
+      expect(isAlive(pid)).toBe(true);
+
+      // Interrupting the worker must close the run scope, whose finalizer SIGTERMs the child.
+      yield* Fiber.interrupt(fiber);
+      yield* waitUntilDead(pid);
+      expect(isAlive(pid)).toBe(false);
+    }).pipe(Effect.provide(platform)),
   );
 });

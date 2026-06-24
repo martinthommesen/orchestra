@@ -16,7 +16,12 @@ import { concurrencyContext, planDispatch } from "./concurrency";
 import type { Msg, WorkerOutcome } from "./messages";
 import { Observer, type RetryKind } from "./observer";
 import { preflight } from "./preflight";
-import { planReconciliation, type ReconcileAction, type RunningView } from "./reconcile";
+import {
+  planReconciliation,
+  type ReconcileAction,
+  type RetryingView,
+  type RunningView,
+} from "./reconcile";
 import { selectCandidates, selectionContext } from "./selection";
 import {
   addUsage,
@@ -323,10 +328,20 @@ export const runOrchestrator = (
 
       // ───────────────────────────── Reconciliation ─────────────────────────────
 
+      /**
+       * An issue occupies a concurrency slot while it is either running (has a worker
+       * fiber) OR waiting out a retry/continuation backoff (has a pending timer fiber).
+       * Counting the retry/continuation window is what keeps the cap honest across the
+       * re-dispatch: a tick must not fill the slot a backing-off issue will reclaim,
+       * otherwise the timer's re-dispatch over-admits past the cap (bug #17).
+       */
+      const occupiesSlot = (rec: IssueRuntime): boolean =>
+        rec.workerFiber !== null || rec.timerFiber !== null;
+
       const runningByState = (): ReadonlyMap<string, number> => {
         const byState = new Map<string, number>();
         for (const rec of registry.values()) {
-          if (rec.workerFiber === null) {
+          if (!occupiesSlot(rec)) {
             continue;
           }
           const st = normalizeState(rec.issue.state);
@@ -337,7 +352,7 @@ export const runOrchestrator = (
       const runningTotal = (): number => {
         let n = 0;
         for (const rec of registry.values()) {
-          if (rec.workerFiber !== null) {
+          if (occupiesSlot(rec)) {
             n += 1;
           }
         }
@@ -432,11 +447,18 @@ export const runOrchestrator = (
       const reconcile: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
         const state = yield* store.get;
         const runningIds = Object.keys(state.running);
-        if (runningIds.length === 0) {
+        // Retrying/continuing issues hold a slot but have no worker; reconcile must still
+        // see them so an issue that goes terminal mid-backoff is cleaned up instead of
+        // firing one more wasted dispatch (bug #17).
+        const retryingIds = Object.keys(state.retry_attempts).filter(
+          (id) => state.running[id] === undefined,
+        );
+        const refreshIds = Array.from(new Set([...runningIds, ...retryingIds]));
+        if (refreshIds.length === 0) {
           yield* observer.emit({ _tag: "Reconciled", actions: [] });
           return;
         }
-        const refreshedResult = yield* Effect.either(tracker.fetchIssueStatesByIds(runningIds));
+        const refreshedResult = yield* Effect.either(tracker.fetchIssueStatesByIds(refreshIds));
         let refreshed: ReadonlyMap<string, IssueStateRef> | null;
         if (Either.isLeft(refreshedResult)) {
           refreshed = null;
@@ -453,8 +475,10 @@ export const runOrchestrator = (
           issueId: id,
           lastEventAt: registry.get(id)?.lastEventAt ?? now,
         }));
+        const retrying: ReadonlyArray<RetryingView> = retryingIds.map((id) => ({ issueId: id }));
         const actions = planReconciliation({
           running,
+          retrying,
           refreshed,
           now,
           stallTimeoutMs: config.copilot.stall_timeout_ms,

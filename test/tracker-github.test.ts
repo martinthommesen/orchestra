@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { makeOctokit, silentOctokitLog } from "../src/adapters/tracker-github/github-tracker";
 import {
   deriveBlockedBy,
   derivePriority,
@@ -92,6 +93,19 @@ describe("deriveState (§11.3)", () => {
       "Closed",
     );
   });
+  it("maps a closed issue with a lingering active label to terminal (closed precedence, #18)", () => {
+    // A closed issue still carrying an active status label must NOT normalize to active —
+    // `closed` is an explicit terminal signal and takes precedence over the label.
+    expect(
+      deriveState(
+        payload({ state: "closed", state_reason: "completed", labels: ["In Progress"] }),
+        config(),
+      ),
+    ).toBe("Closed");
+  });
+  it("honors a terminal status label to pick which terminal state on a closed issue", () => {
+    expect(deriveState(payload({ state: "closed", labels: ["Done"] }), config())).toBe("Done");
+  });
 });
 
 describe("toIssue", () => {
@@ -135,5 +149,30 @@ describe("toStateRef", () => {
     expect(ref.identifier).toBe("9");
     expect(ref.state).toBe("In Progress");
     expect(ref.labels).toEqual(["in progress", "bug"]);
+  });
+  it("derives a terminal ref for a closed issue even with an active label (#18)", () => {
+    // This is the reconciliation path: a closed issue must refresh to terminal so its
+    // worker is stopped and its workspace cleaned, not kept alive by the active label.
+    const ref = toStateRef(
+      payload({ number: 9, state: "closed", state_reason: "completed", labels: ["In Progress"] }),
+      config(),
+    );
+    expect(ref.state).toBe("Closed");
+  });
+});
+
+describe("makeOctokit (#19)", () => {
+  it("installs the silent logger so Octokit cannot leak unstructured lines to the console", () => {
+    const octokit = makeOctokit(config());
+    // Octokit merges `options.log` over its console-bound defaults; asserting identity
+    // proves OUR no-op logger is the one actually installed (the default warn/error are
+    // native console bindings that would corrupt the logfmt stream).
+    expect(octokit.log.debug).toBe(silentOctokitLog.debug);
+    expect(octokit.log.info).toBe(silentOctokitLog.info);
+    expect(octokit.log.warn).toBe(silentOctokitLog.warn);
+    expect(octokit.log.error).toBe(silentOctokitLog.error);
+    // And they are genuine no-ops (return undefined, never throw).
+    expect(octokit.log.warn("noise")).toBeUndefined();
+    expect(octokit.log.error("noise")).toBeUndefined();
   });
 });
