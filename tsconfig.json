@@ -29,5 +29,5 @@
     "declaration": false
   },
   "include": ["src", "test", "*.config.ts"],
-  "exclude": ["node_modules", "dist", ".spike-copilot"]
+  "exclude": ["node_modules", "dist", ".spike-copilot", "src/cockpit"]
 }

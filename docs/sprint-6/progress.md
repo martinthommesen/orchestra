@@ -11,7 +11,7 @@ Branch: `feature/sprint-6` (off `main`, all Sprint 5 work merged).
 | #64 | Command channel (`CommandBus` + mailbox `Msg.Command`) + operator pause/resume/retry-now/cancel | Sage | M · Med | ✅ done |
 | #65 | Cockpit `HttpApi` server (read + mutating endpoints, auth/Origin, static SPA; replaces snapshot router) | Sage | M · Med | ✅ done |
 | #66 | Settings: read editable subset + persist whitelisted patch to `WORKFLOW.md` + hot-reload | Sage | M · Med | ✅ done |
-| #67 | Vite+React cockpit scaffold, daemon static serving, dev proxy, token bootstrap, build wiring, API client | Nova | M · Low | ☐ todo |
+| #67 | Vite+React cockpit scaffold, daemon static serving, dev proxy, token bootstrap, build wiring, API client | Nova | M · Low | ✅ done |
 | #68 | Cockpit design system + app shell (web parity of `glyphs.ts`/`design-system.md`) | Milo | S–M · Low | ☐ todo |
 | #69 | Fleet / Session overview + Events feed views | Nova | M · Low | ☐ todo |
 | #70 | Kanban board view with actionable cards (Cancel / Retry-now) | Nova | M · Med | ☐ todo |
@@ -44,9 +44,9 @@ typecheck + lint + 336 tests).
 - [x] #66 — secret-safety test: `api_key` + Liquid body byte-identical across a write
 
 ### Phase 2 — Frontend SPA (Nova + Milo)
-- [ ] #67 — `src/cockpit/` Vite+React+TS scaffold + `vite.config.ts` (build/proxy)
-- [ ] #67 — typed plain-`fetch` API client (token from injected bootstrap)
-- [ ] #67 — `pnpm build` runs `tsup` + `vite build`; biome covers `src/cockpit/`
+- [x] #67 — `src/cockpit/` Vite+React+TS scaffold + `vite.config.ts` (build/proxy)
+- [x] #67 — typed plain-`fetch` API client (token from injected bootstrap)
+- [x] #67 — `pnpm build` runs `tsup` + `vite build`; biome covers `src/cockpit/`
 - [ ] #68 — web design tokens (status colors/glyph parity) + nav shell + shared primitives
 - [ ] #69 — Fleet/Session overview view (non-overlapping poll, last-good-on-error)
 - [ ] #69 — Events feed view (newest-first, filterable)
@@ -177,4 +177,41 @@ Decisions:
   point-of-use read swapped atomically by the owner fiber); strictly cleaner here.
 Gates: typecheck + lint clean, **359 tests** (355 + 4 settings), `pnpm build` green.
 
-_(per-task notes land here as work completes — files changed, decisions, gate results.)_
+### Review fixes (post-Phase-1 security/concurrency pass)
+Three fixes, one commit each, each with a regression test proven to fail without the fix:
+- **[HIGH] `handleRetryDue` idempotency** (`loop.ts`): a `RetryNow` racing a fired backoff
+  timer could double-dispatch (orphan a worker). Guard: early-return when a worker is already
+  running for the issue. Regression in `command-control.test.ts` (gated-observer stall makes
+  the interleaving deterministic under `TestClock`).
+- **[MEDIUM] concurrent settings writes** (`workflow-file.ts`): `applyPatch` now serialized
+  with a `Semaphore(1)` + unique temp suffix → no lost update. Regression in `settings.test.ts`.
+- **[LOW] token bootstrap** (`token.ts`): escape `<` → `\u003c` so a `</script>`-bearing
+  operator token can't break out of the inline script. Regression in `cockpit-security.test.ts`.
+Gates: typecheck + lint clean, **362 tests**, `pnpm build` green.
+
+### #67 — Vite + React cockpit scaffold + serving + dev proxy + API client (Nova, dep #65)
+Files (new): `src/cockpit/{index.html,main.tsx,App.tsx,vite-env.d.ts}`,
+`src/cockpit/api/{types.ts,client.ts}`, `vite.config.ts`, `tsconfig.cockpit.json`,
+`test/cockpit-client.test.ts`. Modified: `package.json` (deps `react-dom`; devDeps `vite`,
+`@vitejs/plugin-react`, `@types/react-dom`; scripts `build = tsup && vite build`,
+`dev:cockpit = vite`, `typecheck` runs both tsconfigs), `tsconfig.json` (exclude `src/cockpit`).
+
+Decisions:
+- **Two TS programs, one `typecheck`.** The Node daemon stays on the root `tsconfig` (node
+  types, no DOM); the browser SPA gets `tsconfig.cockpit.json` (DOM lib + JSX, `vite/client`).
+  `pnpm typecheck` runs `tsc --noEmit` on both. The root config *excludes* `src/cockpit`, but
+  the pure client/model modules are deliberately **DOM-free** so the Node test program can
+  import and check them; only the `.tsx` components (reachable solely via `main.tsx`) need DOM.
+- **Plain-fetch, DOM-free client.** `createClient({ baseUrl?, token?, fetch? })` uses a
+  structural `FetchLike` (not the DOM `fetch` type) so it unit-tests under Node with an
+  injected fake. Reads are token-free (DD-5); mutating verbs attach `Authorization: Bearer`
+  from the injected `window.__ORCHESTRA_COCKPIT_TOKEN__`. Non-2xx → a typed `ApiError`
+  (status + stable `code` + server message); network failure → `ApiError(0, "network")`.
+- **Build/serve wiring (DD-8).** `vite build` emits to `dist/cockpit/` (verified: `index.html`
+  + `assets/`), exactly where the daemon static handler serves from. `base: "/"` so emitted
+  asset URLs resolve against the static root. `dev:cockpit` proxies `/api` to
+  `127.0.0.1:${ORCHESTRA_PORT|4317}`; a dev-only Vite plugin re-injects the token from
+  `ORCHESTRA_COCKPIT_TOKEN` (parity with the daemon's injection) so mutations work in dev.
+- The `App.tsx` is a minimal boot scaffold; the design-system shell + views land in #68–#71.
+Gates: typecheck (both configs) + lint clean, **373 tests** (+11 client), `pnpm build` emits
+the daemon bundle **and** `dist/cockpit/index.html` + assets.

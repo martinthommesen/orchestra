@@ -15,8 +15,9 @@
   "scripts": {
     "dev": "tsx src/cli/main.ts",
     "dev:dashboard": "tsx src/cli/dashboard.tsx",
-    "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "dev:cockpit": "vite",
+    "build": "tsup && vite build",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.cockpit.json",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -33,6 +34,7 @@
     "liquidjs": "^10.27.0",
     "react": "^19.2.7",
     "react-devtools-core": "^7.0.1",
+    "react-dom": "^19.2.7",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
@@ -40,11 +42,14 @@
     "@effect/vitest": "^0.29.0",
     "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
     "fast-check": "^4.8.0",
     "ink-testing-library": "^4.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
+    "vite": "^8.1.0",
     "vitest": "^3.2.6"
   }
 }
