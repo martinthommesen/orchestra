@@ -47,15 +47,34 @@ const mapError = (e: unknown): TrackerError => {
 const request = <A>(thunk: () => Promise<A>): Effect.Effect<A, TrackerError> =>
   Effect.tryPromise({ try: thunk, catch: mapError });
 
+/**
+ * A no-op logger for Octokit. Octokit's default logger writes unstructured lines straight
+ * to the console (e.g. request warnings), which would corrupt the one-event-per-line
+ * logfmt stream on stdout (#19). Every transport fault is already surfaced as a structured
+ * {@link TrackerError} observation via {@link mapError}, so Octokit's own logging is
+ * redundant — silence all levels. No token is ever passed to these callbacks.
+ */
+export const silentOctokitLog = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+};
+
+/** Construct the configured Octokit client (silent logger, optional auth/baseUrl). */
+export const makeOctokit = (config: ServiceConfig): Octokit =>
+  new Octokit({
+    log: silentOctokitLog,
+    ...(config.tracker.api_key ? { auth: config.tracker.api_key } : {}),
+    ...(config.tracker.endpoint ? { baseUrl: config.tracker.endpoint } : {}),
+  });
+
 /** Build the {@link IssueTracker} service backed by Octokit for the given config. */
 export const makeGitHubTracker = (
   config: ServiceConfig,
 ): Effect.Effect<typeof IssueTracker.Service, never> =>
   Effect.sync(() => {
-    const octokit = new Octokit({
-      ...(config.tracker.api_key ? { auth: config.tracker.api_key } : {}),
-      ...(config.tracker.endpoint ? { baseUrl: config.tracker.endpoint } : {}),
-    });
+    const octokit = makeOctokit(config);
 
     const list = (
       state: "open" | "closed",
