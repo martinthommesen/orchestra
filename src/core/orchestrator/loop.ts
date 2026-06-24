@@ -755,6 +755,15 @@ export const runOrchestrator = (
         reply: Deferred.Deferred<CommandResult>,
       ): Effect.Effect<void, never, Scope.Scope> =>
         Effect.gen(function* () {
+          // If the caller already gave up (its `send` await was interrupted on timeout →
+          // the reply Deferred is interrupted/done), DROP the command without applying it:
+          // a caller that got a 503 must not have its command silently take effect. There
+          // is a tiny residual window — the owner can observe not-done here and the caller
+          // can time out a microsecond later, applying anyway — which is acceptable (the
+          // caller's 503 then merely raced an applied command; exactly-once is preserved).
+          if (yield* Deferred.isDone(reply)) {
+            return;
+          }
           switch (command._tag) {
             case "PauseDispatch": {
               if (!operatorPaused) {

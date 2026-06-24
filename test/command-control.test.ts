@@ -2,6 +2,7 @@ import { it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Fiber, Layer, Queue, TestClock } from "effect";
 import { describe, expect } from "vitest";
 import { TurnFailed } from "../src/core/errors";
+import { ControlStatus } from "../src/core/observability/control-status";
 import { CommandBus } from "../src/core/orchestrator/command";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import { type Observation, Observer } from "../src/core/orchestrator/observer";
@@ -337,5 +338,53 @@ describe("operator control commands (#64)", () => {
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));
     }),
+  );
+
+  it.scoped(
+    "a timed-out (interrupted) command is dropped, not applied; a normal one still applies once",
+    () =>
+      Effect.gen(function* () {
+        const tracker = yield* makeFakeTracker({ candidates: [], states: [] });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+        const obs = yield* makeRecordingObserver();
+        const def = buildDef({ maxConcurrent: 1, intervalMs: 10_000 });
+        const env = loopLayer(def, {
+          tracker: tracker.layer,
+          runner: runner.layer,
+          workspace: wsm.layer,
+          observer: obs.layer,
+        });
+
+        yield* Effect.gen(function* () {
+          const bus = yield* CommandBus;
+          const control = yield* ControlStatus;
+
+          // The caller offers a PauseDispatch, then "times out": its `send` await is
+          // interrupted while the envelope is already queued. `send`'s onInterrupt
+          // interrupts the reply Deferred so the owner can detect the abandonment.
+          const abandoned = yield* Effect.forkScoped(bus.send({ _tag: "PauseDispatch" }));
+          yield* Effect.yieldNow().pipe(Effect.repeatN(10)); // let it offer + park on await
+          yield* Fiber.interrupt(abandoned);
+
+          // Now start the owner loop; it dequeues the abandoned command and must SKIP it.
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+
+          // FIFO: this normal command is offered AFTER the abandoned one, so once its ack
+          // returns the owner has already processed (and skipped) the abandoned PauseDispatch.
+          const ack = yield* bus.send({ _tag: "RetryNow", issueId: "nope" });
+          expect(ack).toEqual({ _tag: "Ack", accepted: false, reason: "no such tracked issue" });
+
+          // The abandoned PauseDispatch never mutated the operator-pause latch.
+          expect(yield* control.get).toBe(false);
+
+          // A normal (un-interrupted) PauseDispatch DOES apply — exactly once.
+          const paused = yield* bus.send({ _tag: "PauseDispatch" });
+          expect(paused._tag).toBe("Control");
+          expect(yield* control.get).toBe(true);
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }),
   );
 });

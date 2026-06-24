@@ -82,7 +82,14 @@ export const makeCommandBus = (): Effect.Effect<Context.Tag.Service<CommandBus>>
         Effect.gen(function* () {
           const reply = yield* Deferred.make<CommandResult>();
           yield* Queue.offer(queue, { command, reply });
-          return yield* Deferred.await(reply);
+          // If the caller gives up (e.g. the HTTP handler's `timeoutFail` interrupts this
+          // await → 503), interrupt the reply Deferred. The owner fiber checks `isDone`
+          // before applying a dequeued command and skips an abandoned one, so a timed-out
+          // command does not silently take effect later. A normal command's await is never
+          // interrupted, so its reply is completed by the owner exactly once.
+          return yield* Deferred.await(reply).pipe(
+            Effect.onInterrupt(() => Deferred.interrupt(reply)),
+          );
         }),
       take: Queue.take(queue),
     };
