@@ -187,6 +187,25 @@ describe("toViewModel — last-activity line (#38)", () => {
     expect(vm.running[0]?.lastActivityLabel).toBe("TurnCompleted · 1m 00s ago");
   });
 
+  it("prefers the humanized message over the raw event_tag when present (#55)", () => {
+    const vm = toViewModel(
+      makeSnapshot({
+        running: [
+          makeRunning({
+            last_activity: {
+              event_tag: "TurnCompleted",
+              at: STARTED_AT,
+              message: "finished turn",
+            },
+          }),
+        ],
+      }),
+      NOW,
+      opts(),
+    );
+    expect(vm.running[0]?.lastActivityLabel).toBe("finished turn · 1m 00s ago");
+  });
+
   it("is null when no activity has been observed (older daemon)", () => {
     const vm = toViewModel(makeSnapshot(), NOW, opts());
     expect(vm.running[0]?.lastActivityLabel).toBeNull();

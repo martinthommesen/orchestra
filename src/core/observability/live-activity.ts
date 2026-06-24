@@ -23,7 +23,7 @@ export interface ActivityEntry {
   readonly event_tag: string;
   /** Wall-clock ISO instant the activity was observed. */
   readonly at: string;
-  /** Optional one-line summary (absent today — the AgentEvent observation carries none). */
+  /** Optional humanized one-line summary (#55); falls back to the raw tag when absent. */
   readonly message?: string;
 }
 

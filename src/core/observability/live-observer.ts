@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect";
 import type { Observation } from "../orchestrator/observer";
 import { Observer } from "../orchestrator/observer";
 import { glyph, truncate } from "./glyphs";
+import { humanizeAgentEvent } from "./humanize";
 
 /**
  * Live {@link Observer} (Task 12, SPEC §13.1) — renders each orchestrator
@@ -89,9 +90,10 @@ export const formatObservation = (obs: Observation): LogLine => {
         }),
       };
     case "AgentEvent":
+      // Humanize the message; keep the raw `event_tag` annotation for fidelity/debugging.
       return {
         level: "info",
-        message: `${glyph("running")} ${obs.identifier} ${obs.eventTag}`,
+        message: `${glyph("running")} ${obs.identifier} ${humanizeAgentEvent(obs.eventTag)}`,
         annotations: ev("agent_event", {
           issue_id: obs.issueId,
           issue_identifier: obs.identifier,

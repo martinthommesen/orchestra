@@ -275,8 +275,10 @@ const formatRelative = (now: number, iso: string): string => {
 };
 
 /**
- * Honest per-session activity line ("TurnCompleted · 3s ago"). `null` when no activity
- * has been observed or `at` is unparseable — we never invent a plausible "0s ago".
+ * Honest per-session activity line ("started session · 3s ago"). Prefers the humanized
+ * `message` (#55) and falls back to the raw `event_tag` when absent (older daemon). `null`
+ * when no activity has been observed or `at` is unparseable — we never invent a plausible
+ * "0s ago".
  */
 const formatLastActivity = (now: number, activity: SnapshotActivity | undefined): string | null => {
   if (activity === undefined) {
@@ -286,7 +288,8 @@ const formatLastActivity = (now: number, activity: SnapshotActivity | undefined)
   if (!Number.isFinite(t)) {
     return null;
   }
-  return `${activity.event_tag} · ${formatDuration(now - t)} ago`;
+  const label = activity.message ?? activity.event_tag;
+  return `${label} · ${formatDuration(now - t)} ago`;
 };
 
 /**

@@ -9,7 +9,7 @@ humanized event summaries). Branch: `feature/sprint-5` (off `main` @ `ec31b4c`).
 |---|------|---------------|--------|
 | #53 | Budget guardrails (pause dispatch at a spend ceiling) | M · Med | ✅ done |
 | #54 | Surface durability/restore state in snapshot + dashboard | S–M · Low | ✅ done |
-| #55 | Humanized agent-event summaries | M · Low | ⏳ pending |
+| #55 | Humanized agent-event summaries | M · Low | ✅ done |
 | #56 | Tests + docs + handoff close-out | M · Low | ⏳ pending |
 
 Dependencies: #53/#54/#55 independent · #56 → all.
@@ -184,3 +184,78 @@ clock (epoch under `TestClock`), and the dashboard relative-time tests fix `NOW`
 indicator isn't one of the five canonical worker statuses, so it can't reuse a `STATUS_STYLES`
 row wholesale; it follows the budget panel's precompute-both-glyphs structure and the
 design-system color palette so `--ascii`/`NO_COLOR`/non-TTY all stay correct.
+### #55 — Humanized agent-event summaries ✅
+
+Display-only slice: a **pure humanizer** turns the raw `AgentEvent.eventTag` into a friendly
+operator one-liner, wired at the two surfaces where agent events actually appear — the
+logfmt/live line and per-session `LiveActivity` — and the dashboard prefers the humanized
+message, falling back to the raw tag. **No** dispatch/retry/restore/reducer change.
+
+**Did NOT push AgentEvents into `recent_events`.** Per the deliberate drop in
+`recent-events.ts` `toEventDraft` (AgentEvent → `null`, "high-volume per-turn chatter"), I left
+that drop untouched — flooding the lifecycle feed with per-turn chatter would be a regression.
+The humanizer lives at the existing AgentEvent surfaces instead.
+
+**Pure core (the testable bit).** New `src/core/observability/humanize.ts`:
+`humanizeAgentEvent(eventTag: string): string`, total and **never blank** —
+- known tag → mapped summary (table typed `Record<AgentEventTag, string>`, so a new union
+  variant trips a compile error here — no silent miss);
+- unknown tag → the raw label verbatim (fidelity over invention);
+- blank/whitespace tag → generic `"agent event"` (defensive; tags are normally non-empty).
+No Effect, no IO. **Maps by tag only — never echoes agent payload text** (messages, prompts,
+tool args), so a summary can't leak issue content into logs/snapshot (BRIEF §9.2).
+
+**Tags humanized (exactly the 12 the `AgentEvent` union emits — no speculative taxonomy).**
+The illustrative issue examples ("editing files", "running tests") are NOT real tags, so I did
+not invent them; I mapped what the runner actually streams (`event._tag` in `loop.ts`
+`handleAgentEvent`):
+
+| `eventTag` | summary |
+|---|---|
+| `SessionStarted` | started session |
+| `StartupFailed` | failed to start session |
+| `TurnCompleted` | finished turn |
+| `TurnFailed` | turn failed |
+| `TurnCancelled` | turn cancelled |
+| `TurnEndedWithError` | turn ended with error |
+| `TurnInputRequired` | waiting for input |
+| `ApprovalAutoApproved` | auto-approved an action |
+| `UnsupportedToolCall` | requested an unsupported tool |
+| `Notification` | sent a notification |
+| `AgentMessage` | working |
+| `Malformed` | emitted an unrecognized event |
+
+**Wiring (raw tag kept on the wire everywhere for fidelity/debugging).**
+1. `live-observer.ts` `case "AgentEvent"`: message is now
+   `${glyph("running")} ${identifier} ${humanizeAgentEvent(eventTag)}`; the `event_tag`
+   annotation still carries the raw tag.
+2. `observer-tee.ts`: records `LiveActivity` as `{ event_tag, message: humanizeAgentEvent(...) }`
+   — populating the long-documented-but-absent `ActivityEntry.message`. It flows untouched
+   through `toSnapshot` (`{ ...ra, last_activity: act }`) → snapshot `running[].last_activity`
+   (snapshot-client already parses the optional `message`).
+3. `view-model.ts` `formatLastActivity`: label is `activity.message ?? activity.event_tag`,
+   so the dashboard prefers the humanized summary and falls back to the raw tag for older
+   daemons. Honest `null` (never a fake "0s ago") on absent/unparseable `at` is unchanged.
+
+**Backward-safe.** Purely additive: the `message` field already existed on the wire shape;
+older dashboards ignore it; absent `message` falls back to the raw tag. Accessibility
+unchanged — the line still uses the existing `glyph("running")` helper, so
+`--ascii`/`NO_COLOR`/non-TTY keep working (no new glyphs introduced).
+
+**Files changed.**
+- `src/core/observability/humanize.ts` — **new** pure humanizer + summary table.
+- `src/core/observability/live-observer.ts` — humanize the AgentEvent logfmt message.
+- `src/core/observability/observer-tee.ts` — populate `LiveActivity.message` via the humanizer.
+- `src/core/observability/live-activity.ts` — refreshed the now-accurate `message` doc comment.
+- `src/cli/dashboard/view-model.ts` — `formatLastActivity` prefers `message`, falls back to tag.
+- Tests: **new** `test/humanize.test.ts` (6: known→expected, unknown→raw, never-blank,
+  exact-tag coverage vs. the union, total property); `test/live-observer.test.ts` (+1: logfmt
+  line humanized + raw tag retained + unknown fallback); `test/dashboard/view-model.test.ts`
+  (+1: last-activity prefers humanized message); `test/recent-events.test.ts` tee test gained a
+  `message === "working"` assertion (no new test, existing one strengthened).
+
+**Gate results.** `pnpm typecheck` ✅ · `pnpm lint` ✅ · `pnpm build` ✅ ·
+`pnpm test` ✅ **333 passed** (325 baseline + 8 new, 0 regressions).
+
+**Determinism.** No sleeps; the humanizer is pure; the property test is fast-check over
+strings; existing `TestClock`-based timing assertions untouched.
