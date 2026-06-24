@@ -99,7 +99,8 @@ necessarily `Done`.
 
 | Area | Path | Status | Contents |
 |------|------|--------|----------|
-| CLI / daemon entry | `src/cli/main.ts`, `src/cli/args.ts` | ✅ created | Arg parsing (`args.ts`, incl. `--port`), `AppLive` Layer wiring → `runOrchestrator` fiber (+ forked snapshot server), logfmt logger, `runMain`. |
+| CLI / daemon entry | `src/cli/main.ts`, `src/cli/daemon.ts`, `src/cli/args.ts` | ✅ created | Thin top-level dispatcher (`main.ts`: `argv[0]==="dashboard"` → dashboard, else daemon). `daemon.ts` = `runDaemon(argv)` + `appLayer` (logfmt logger, `AppLive` Layer → `runOrchestrator` fiber + forked snapshot server, `runMain`); `args.ts` parses the daemon's `--port`. |
+| Dashboard (Ink TUI) | `src/cli/dashboard.tsx`, `src/cli/dashboard/` | ✅ created | Standalone read-only terminal UI (Ink/React 19). `args.ts` (separate `--port/--host/--interval-ms/--ascii/--help` parser), `snapshot-client.ts` (defensive `parseSnapshot` + injectable `makeFetchSnapshot`), `poller.ts` (non-overlapping `SnapshotPoller`, `connecting/live/stale`), `use-snapshot.ts` (React hook), `view-model.ts` (pure `toViewModel`), `components.tsx`/`app.tsx`/`run.tsx` (Ink render). Reuses `glyphs.ts`; core untouched. |
 | Domain model | `src/core/domain/` | ✅ created | `Schema` types: Issue, AgentEvent (union), ServiceConfig + **front-matter schema** (`workflow.ts`), Workspace, RunAttempt, LiveSession, RetryEntry, OrchestratorState |
 | Ports | `src/core/ports/` | ✅ created | `IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock` as `Context.Tag` (signatures only) |
 | Errors | `src/core/errors.ts` | ✅ created | Tagged error for every SPEC error class + workspace-safety errors; unioned |
@@ -117,10 +118,12 @@ necessarily `Done`.
 | Brainstorm | `docs/brainstorm/` | ✅ | Architecture debate that set these decisions |
 | Reference spec | (external) | — | https://github.com/openai/symphony/blob/main/SPEC.md |
 
-> Layout reflects the **actual** Sprint 1 state. Deviations from the original plan:
+> Layout reflects the **actual** Sprint 2 state. Deviations from the original plan:
 > the front-matter `Schema` lives in `core/domain/workflow.ts` (not `core/workflow/`),
 > a small `core/util/` was added, and the real `WorkspaceManager` lives under
 > `adapters/workspace/` (the `core/workspace/` dir holds only the pure safety helpers).
+> Sprint 2 split the CLI entry into a thin `main.ts` dispatcher + `daemon.ts`, and added
+> the standalone `src/cli/dashboard/` Ink island (the daemon core is unchanged).
 
 ## 6. Team Roles
 
@@ -139,11 +142,12 @@ necessarily `Done`.
 | Sprint | Name | Status | Scope |
 |--------|------|--------|-------|
 | 0 | Architecture & Foundations | ✅ Done | pnpm monorepo scaffold, Effect setup, domain `Schema` types, ports, WORKFLOW.md loader, tagged errors, CI, **Copilot integration spike** |
-| 1 | Core Orchestrator Loop | ✅ Done | Poll/dispatch/concurrency/retry/reconcile state machine, GitHub Issues adapter, Copilot subprocess runner, workspace manager, fakes + property/e2e tests, observability (logs + `--port` snapshot) |
+| 1 | Core Orchestrator Loop | ✅ Done | Poll/dispatch/concurrency/retry/reconcile state machine, GitHub Issues adapter, Copilot subprocess runner, workspace manager, fakes + property/e2e tests, observability (logs + `--port` snapshot). Hardened in a post-merge QA pass (`fix/sprint-1-qa`, issues #17–#22). |
+| 2 | Live Ink Dashboard | ✅ Done | Standalone `orchestra dashboard` (Ink/React 19) polling the loopback snapshot API: thin CLI dispatcher, defensive snapshot client + non-overlapping poller, pure view-model + honest Ink rendering (reuses the glyph design system), `connecting/live/stale` resilience, `--ascii`/`NO_COLOR`. Apache-2.0 license added. Core orchestrator untouched. |
 
 ## 8. Current State (rewrite every sprint)
 
-**What works (Sprint 1 complete — core orchestrator loop):**
+**What works (Sprint 2 complete — live dashboard on top of the Sprint 1 loop):**
 - Everything from Sprint 0 (monorepo, Effect, strict `tsconfig` + **Biome**, domain `Schema`,
   ports, tagged errors, WORKFLOW.md loader, glyph design system, CI on Node 22+24).
 - **Single state-owning orchestrator fiber** (`src/core/orchestrator/`): startup terminal
@@ -151,41 +155,62 @@ necessarily `Done`.
   refresh) → preflight validate → fetch candidates → eligibility filter + stable sort →
   dispatch within global/per-state slots → notify observers. Workers report back over an
   Effect `Queue`; no mutable state is shared across fibers. Pure cores (selection §8.2,
-  concurrency §8.3, backoff §8.4, reconciliation §8.5) are property-tested.
+  concurrency §8.3, backoff §8.4, reconciliation §8.5) are property-tested. Hardened by the
+  QA pass (`fix/sprint-1-qa`): retry/continuation backoff counts toward the concurrency cap,
+  reconcile sees retrying issues, and `closed` issues map terminal over a lingering label.
 - **Real adapters behind the Sprint 0 ports:**
   - **GitHub Issues** (`src/adapters/tracker-github/`) via Octokit — pure `normalize.ts`
-    maps GitHub issues → domain (status-label / open / closed → state per §11.3), drops PRs,
-    paginates, 404-on-refresh ⇒ omit. `layerGitHubTracker(config)`.
+    maps GitHub issues → domain (status-label / open / closed → state per §11.3; `closed`
+    takes precedence over any active label), drops PRs, paginates, 404-on-refresh ⇒ omit.
+    `layerGitHubTracker(config)`; Octokit's default request logger is silenced.
   - **Workspace manager** (`src/adapters/workspace/`) over `@effect/platform`
     `FileSystem`+`Command` — per-issue dirs under the sanitized workspace root, lifecycle
     hooks (`after_create`/`before_run`/`after_run`/`before_remove`) as `sh -lc` with
-    `timeout_ms`, enforcing the §9.5 safety invariants. `layerWorkspaceManager(config)`.
+    `timeout_ms`; hook stdout/stderr are captured + truncated (not inherited), enforcing the
+    §9.5 safety invariants. `layerWorkspaceManager(config)`.
   - **Copilot subprocess runner** (`src/adapters/agent-copilot/`) — spawns the headless
     `copilot` CLI with `cwd === workspacePath`, maps stdout JSONL → `AgentEvent` stream (pure
     `map.ts`), token via env (never logged); the Command `Scope` finalizer SIGTERMs the PID
     on interrupt/stall. `layerCopilotRunner(config)`. Per `docs/sprint-0/spike-copilot.md`.
-- **CLI wired** (`src/cli/main.ts`): `pnpm dev ./WORKFLOW.md [--port N]` loads the workflow,
+- **CLI** = a thin dispatcher (`src/cli/main.ts`): `argv[0]==="dashboard"` → dashboard, else
+  the daemon (`src/cli/daemon.ts`). `pnpm dev ./WORKFLOW.md [--port N]` loads the workflow,
   builds the Layer graph over `NodeContext`, announces startup, and runs the loop until
-  interrupted (clean teardown of workers, timers, server).
+  interrupted (clean teardown of workers, timers, server). Workflow-load failures surface an
+  actionable top-line message with the real cause (no secrets).
+- **Dashboard** (`src/cli/dashboard/`): standalone `orchestra dashboard` (Ink/React 19),
+  authorized separately from the daemon arg parser. A plain React hook polls the loopback
+  `GET /api/v1/state` via an injectable `fetchSnapshot` (`AbortSignal.timeout`); polls never
+  overlap, a failed poll keeps the last good snapshot and flips `live → stale` (never blanks),
+  and `connecting` holds until the first success. A pure `toViewModel` then Ink `<Box>`
+  components render honestly — running with client-calculated elapsed/status/workspace/attempt,
+  retrying with **no countdown** (`due_at_ms` is monotonic), completed as recent **IDs only**,
+  totals, and **defensive** rate-limits. Reuses the `glyphs.ts` design system; honors `--ascii`,
+  `NO_COLOR`, and non-TTY. `q`/Ctrl-C unmount Ink, abort the in-flight fetch, and clear timers.
+  No Effect runtime is bridged into Ink; the orchestrator core is untouched.
 - **Observability** (`src/core/observability/`): one structured logfmt line per event with
   `issue_id`/`issue_identifier`/`session_id` context + status glyphs; optional loopback-only
   `GET /api/v1/state` JSON snapshot (running/retrying/completed/totals/rate_limits) behind
   `--port`.
-- **Tests:** **178 passing** across 15 files (vitest + @effect/vitest + fast-check) — pure
-  unit + property (no-double-dispatch, concurrency caps, backoff monotonic/capped), full-loop
-  fake scenarios under `TestClock`, adapter integration tests, and a combined fake e2e.
-  `pnpm typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green.
+- **License:** Apache-2.0 (`LICENSE` + `NOTICE`; `package.json` `"license": "Apache-2.0"`).
+- **Tests:** **224 passing** across 20 files (vitest + @effect/vitest + fast-check + Ink) — pure
+  unit + property (no-double-dispatch, concurrency caps incl. retry-backoff, backoff
+  monotonic/capped), full-loop fake scenarios under `TestClock`, adapter integration tests,
+  a combined fake e2e, plus the dashboard view-model/poller (fake-timer)/light-render suites.
+  `pnpm typecheck/lint/test/build` and `pnpm install --frozen-lockfile` all green; a live PTY
+  smoke confirms the dashboard renders, polls without overlap, goes stale-with-data on
+  disconnect, and exits cleanly.
 
-**What doesn't work yet (Sprint 2+):**
+**What doesn't work yet (Sprint 3+):**
 - No live PR creation / branch push flow, no GitHub status write-back beyond reading issues.
 - WORKFLOW.md hot-reload (watcher) still deferred.
-- Snapshot API is read-only and single endpoint; no control plane, auth, or metrics export.
+- Snapshot API + dashboard are read-only; no control plane, auth, metrics export, or event
+  history/feed (the dashboard renders operational *state*, not a log stream).
 - Not yet exercised against a real GitHub repo + live Copilot in CI (adapters are unit-tested;
   the loop is proven against fakes). Manual real-repo validation is the operator's step.
 
 **What's next:**
-- Producer to open the PR for `feature/sprint-1`, verify CI green on Node 22+24, and merge.
-- Plan Sprint 2 on these foundations (real-repo hardening, PR/branch flow, richer observability).
+- Producer to open the PR for `feature/sprint-2`, verify CI green on Node 22+24, and merge.
+- Plan Sprint 3 on these foundations (real-repo hardening, PR/branch flow, richer observability).
 
 ## 9. Security Rules
 

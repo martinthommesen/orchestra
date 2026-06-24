@@ -4,7 +4,7 @@
   "private": true,
   "description": "End-to-end type-safe TypeScript reimplementation of OpenAI's Symphony, on Effect.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@11.8.0",
   "engines": {
     "node": ">=22"
@@ -14,6 +14,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli/main.ts",
+    "dev:dashboard": "tsx src/cli/dashboard.tsx",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",

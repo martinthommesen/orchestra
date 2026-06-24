@@ -19,11 +19,15 @@ sprint plan (or a GitHub Issue) when ready.
 
 ## Open questions
 
-- **License.** Symphony is Apache-2.0. Decide Orchestra's license before first
-  public push.
 - **Bun vs Node.** v1 targets Node 24 + pnpm; revisit Bun for faster cold starts.
-- **Copilot SDK vs headless CLI subprocess.** Pinned by the Sprint 0 spike
-  (`docs/sprint-0/plan.md`).
+
+## Resolved
+
+- **License → Apache-2.0** (Sprint 2). Matches Symphony's license; `LICENSE` +
+  `NOTICE` added at the repo root, `package.json` set to `Apache-2.0`. Orchestra
+  ships no Symphony source — the SPEC is a behavioral reference only.
+- **Copilot SDK vs headless CLI subprocess → subprocess.** Pinned by the Sprint 0
+  spike (`docs/sprint-0/spike-copilot.md`); implemented in Sprint 1.
 
 ## Wild ideas (parked)
 

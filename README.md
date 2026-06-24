@@ -20,6 +20,8 @@ config and protocol boundaries.
 > candidate selection, bounded-concurrency dispatch, per-issue workspaces, Copilot
 > sessions, tracker reconciliation, exponential-backoff retries, and structured
 > observability — all on Effect, proven end-to-end against fakes under `TestClock`.
+> A standalone live **dashboard** (Sprint 2) renders the daemon's snapshot in your
+> terminal.
 
 ## Quickstart
 
@@ -44,6 +46,39 @@ curl -s http://127.0.0.1:4317/api/v1/state | jq
 # { "poll_interval_ms": ..., "counts": { "running": N, "retrying": N, "completed": N, ... },
 #   "running": [...], "retrying": [...], "completed": [...], "totals": {...}, "rate_limits": ... }
 ```
+
+## Dashboard
+
+`orchestra dashboard` is a standalone, read-only terminal UI (Ink) that polls the
+daemon's loopback snapshot API and renders a live fleet view — running agents (with
+client-side elapsed time, status, workspace, attempt), scheduled retries, recent
+completions, token/runtime totals, and rate limits. It owns no orchestrator state; it
+only reads the snapshot, so you can start and stop it freely without touching the run.
+
+Start the daemon with a snapshot port, then run the dashboard in a second terminal:
+
+```bash
+pnpm dev ./WORKFLOW.md --port 4317   # terminal 1: daemon + snapshot API on 127.0.0.1:4317
+orchestra dashboard                  # terminal 2: live view (defaults to 127.0.0.1:4317)
+# from source instead of the built bin:
+pnpm dev:dashboard                   # tsx src/cli/dashboard.tsx
+```
+
+Flags (parsed independently of the daemon):
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--port <n>` | `4317` | Snapshot API port to poll |
+| `--host <host>` | `127.0.0.1` | Snapshot API host |
+| `--interval-ms <n>` | `1000` | Poll interval in milliseconds |
+| `--ascii` | off | ASCII status glyphs instead of Unicode |
+| `--help` | — | Show usage and exit |
+
+Color is automatic: it honors `NO_COLOR` and disables on a non-TTY. Polls never
+overlap (the next request is scheduled only after the previous resolves), and a
+failed poll keeps the last good snapshot on screen while the header flips to
+`stale` — the view never blanks on a transient blip. Press `q` or Ctrl-C to quit;
+the in-flight fetch is aborted and timers are cleared on exit.
 
 ## Configuration
 
@@ -85,5 +120,7 @@ can *manage the work* instead of babysitting the agents.
 
 ## License
 
-TBD (Symphony itself is Apache-2.0; a derived reimplementation should pick a
-compatible license — see `docs/ideas-backlog.md`).
+Orchestra is licensed under the [Apache License 2.0](./LICENSE) — the same license
+as Symphony, the reference architecture it reimplements. Orchestra contains no
+Symphony source code; it follows the public SPEC as a behavioral reference. See
+[`NOTICE`](./NOTICE) for attribution.

@@ -3,7 +3,7 @@
 Live tracker for cross-chat recovery. Update after each phase. See `plan.md` for
 full task detail and `done.md` (written at sprint end) for the handoff.
 
-## Status: IN PROGRESS — #29 approved, #30–#33 done; #34 (docs) pending
+## Status: COMPLETE — #29–#34 done; gates green (224 tests); ready to push
 
 Branch: `feature/sprint-2` (from `main` @ 5d84402).
 
@@ -16,7 +16,7 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
 | #31 | Snapshot client + polling hook | #29 | ✅ done |
 | #32 | Dashboard view-model + Ink rendering | #29, #31 | ✅ done |
 | #33 | Test suite (view-model + hook + light render) | #29, #31, #32 | ✅ done |
-| #34 | Apache-2.0 license + dashboard docs + handoff | (docs ← #32) | pending |
+| #34 | Apache-2.0 license + dashboard docs + handoff | (docs ← #32) | ✅ done |
 
 ## Progress log
 
@@ -72,6 +72,13 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
   (188 at #29 → −1 spike +37 dashboard). Live end-to-end PTY smoke against a canned
   snapshot server verified: honest render, non-overlapping polls, disconnect → `stale`
   with data retained (never blanks), clean exit.
+- **#34**: licensing + handoff. Apache-2.0 `LICENSE` (full text) + `NOTICE`;
+  `package.json` `"license": "Apache-2.0"` and a `dev:dashboard` script. README gains a
+  **Dashboard** section (daemon `--port`, then `orchestra dashboard`, flags table) and a
+  real **License** section. `docs/sprint-2/done.md` handoff written; `PROJECT_BRIEF.md`
+  §5 (file map: dispatcher/daemon split + dashboard module), §7 (Sprint 2 ✅), and §8
+  (current state rewrite) updated; the License open-question resolved in
+  `docs/ideas-backlog.md`.
 
 ## Decisions (from the Sprint 2 design review)
 - **Operational status, not history.** MVP = live fleet view; event feed / ring
