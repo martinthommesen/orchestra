@@ -32,7 +32,9 @@ const devPort = resolveDevPort(process.env.ORCHESTRA_PORT);
 const tokenDevInject = () => ({
   name: "orchestra-token-dev-inject",
   transformIndexHtml(html: string) {
-    const injected = process.env.ORCHESTRA_COCKPIT_TOKEN;
+    // Trim for parity with the daemon's `resolveToken`, so a whitespace-padded (or
+    // whitespace-only) env value matches the daemon's trimmed token instead of 401ing in dev.
+    const injected = process.env.ORCHESTRA_COCKPIT_TOKEN?.trim();
     if (injected === undefined || injected === "") {
       return html;
     }
