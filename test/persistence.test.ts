@@ -1,7 +1,7 @@
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
-import { Duration, Effect, Option, Schema, TestClock } from "effect";
+import { Chunk, Duration, Effect, Option, Schema, TestClock } from "effect";
 import { describe, expect } from "vitest";
 import { AgentTotals, OrchestratorState } from "../src/core/domain/orchestrator-state";
 import { RetryEntry } from "../src/core/domain/retry-entry";
@@ -63,6 +63,10 @@ const sampleState = (): OrchestratorState => {
       workspace_path: "/ws/ORC-1",
       started_at: new Date("2026-06-24T10:00:00.000Z"),
       status: "StreamingTurn",
+      // #41/#42 additive continuity fields: must survive the persisted codec end-to-end.
+      turn: 3,
+      failure_attempts: 1,
+      session_id: "sess-i1",
     }),
   );
   return {
@@ -75,6 +79,9 @@ const sampleState = (): OrchestratorState => {
         due_at_ms: 123_456,
         scheduled_at: new Date("2026-06-24T09:59:30.000Z"),
         delay_ms: 30_000,
+        // #41/#42 additive continuity fields on the retry slice.
+        kind: "continuation",
+        session_id: "sess-i2",
         error: "boom",
       }),
     },
@@ -84,6 +91,43 @@ const sampleState = (): OrchestratorState => {
 
 /** Let real filesystem IO settle (independent of the virtual `TestClock`). */
 const settle = Effect.promise(() => new Promise<void>((res) => setImmediate(res)));
+
+/**
+ * Deterministically block until the forked debounced writer has parked in its
+ * `Effect.sleep(debounce_ms)` — i.e. registered a wake-up with the `TestClock`. The writer
+ * fiber races the test fiber: under parallel suite load it can still be working through its
+ * `Queue.take` when the test advances the virtual clock, so its sleep deadline is then
+ * computed from an already-advanced clock and the window-crossing `adjust` never reaches it
+ * (the pre-existing #40 flake). Waiting for the registered sleep removes that race without
+ * weakening what the debounce assertions prove (this store forks only the writer fiber, so a
+ * pending `TestClock` sleep is unambiguously its debounce window). `yieldNow` hands the
+ * scheduler to the writer between polls so it can drain the dirty signal and park.
+ */
+const awaitWriterParked = Effect.iterate(false, {
+  while: (parked) => !parked,
+  body: () =>
+    Effect.yieldNow().pipe(Effect.zipRight(TestClock.sleeps()), Effect.map(Chunk.isNonEmpty)),
+});
+
+/**
+ * Poll the real filesystem (independent of the frozen `TestClock`) until `path` exists. The
+ * debounced flush performs a multi-step atomic write (`mkdir → writeFile → rename`) on the
+ * real event loop, which a fixed number of `setImmediate` settles cannot reliably await under
+ * parallel suite load (the other half of the #40 flake). Bounded so a genuine regression
+ * (the write never happens) returns `false` and fails the assertion instead of hanging.
+ */
+const awaitFileExists = (fs: FileSystem.FileSystem, path: string): Effect.Effect<boolean> =>
+  Effect.iterate(
+    { tries: 0, found: false },
+    {
+      while: ({ tries, found }) => !found && tries < 500,
+      body: ({ tries }) =>
+        settle.pipe(
+          Effect.zipRight(fs.exists(path).pipe(Effect.orElseSucceed(() => false))),
+          Effect.map((found) => ({ tries: tries + 1, found })),
+        ),
+    },
+  ).pipe(Effect.map(({ found }) => found));
 
 describe("persistence — codec round-trip (§2.8)", () => {
   it.effect("encode → decode is a fixed point (Dates equal as Dates)", () =>
@@ -98,6 +142,12 @@ describe("persistence — codec round-trip (§2.8)", () => {
       expect(p1.state.retry_attempts.i2?.scheduled_at?.getTime()).toBe(
         new Date("2026-06-24T09:59:30.000Z").getTime(),
       );
+      // The #41/#42 additive continuity fields survive the encode→decode fixed point.
+      expect(p1.state.running.i1?.turn).toBe(3);
+      expect(p1.state.running.i1?.failure_attempts).toBe(1);
+      expect(p1.state.running.i1?.session_id).toBe("sess-i1");
+      expect(p1.state.retry_attempts.i2?.kind).toBe("continuation");
+      expect(p1.state.retry_attempts.i2?.session_id).toBe("sess-i2");
     }),
   );
 
@@ -125,6 +175,13 @@ describe("persistence — service load/save (real filesystem)", () => {
       expect(Option.isSome(loaded)).toBe(true);
       if (Option.isSome(loaded)) {
         expect(loaded.value).toEqual(p0);
+        // Dates and the #41/#42 additive continuity fields survive the real
+        // encode→write→read→decode path, not just the in-memory codec.
+        expect(loaded.value.state.running.i1?.started_at).toBeInstanceOf(Date);
+        expect(loaded.value.state.running.i1?.turn).toBe(3);
+        expect(loaded.value.state.running.i1?.session_id).toBe("sess-i1");
+        expect(loaded.value.state.retry_attempts.i2?.kind).toBe("continuation");
+        expect(loaded.value.state.retry_attempts.i2?.session_id).toBe("sess-i2");
       }
     }).pipe(Effect.provide(platform)),
   );
@@ -201,6 +258,11 @@ describe("persistence — durable store decorator", () => {
         );
         yield* store.update((s) => ({ ...s, completed: [...s.completed, "x1"] }));
 
+        // Wait until the writer has parked in its debounce sleep so the window is measured
+        // from t=0, not from an already-advanced clock (the pre-existing flake). See
+        // `awaitWriterParked`.
+        yield* awaitWriterParked;
+
         // Before the debounce window elapses, the writer is parked in its sleep: no file.
         yield* TestClock.adjust(Duration.millis(499));
         yield* settle;
@@ -208,11 +270,45 @@ describe("persistence — durable store decorator", () => {
 
         // Crossing the window fires exactly one debounced write with the latest state.
         yield* TestClock.adjust(Duration.millis(1));
-        yield* settle;
-        yield* settle;
-        expect(yield* fs.exists(file)).toBe(true);
+        expect(yield* awaitFileExists(fs, file)).toBe(true);
         const decoded = yield* decodePersisted(yield* fs.readFileString(file));
         expect(decoded.state.completed).toEqual(["x1"]);
+      }).pipe(Effect.provide(platform)),
+  );
+
+  it.scoped(
+    "debounce coalesces a burst of mutations into exactly one scheduled write (TestClock)",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-persist-" });
+        const config = makeConfig(dir, 500);
+        const file = `${dir}/${STATE_FILE}`;
+
+        const store = yield* makeDurableStore(config).pipe(
+          Effect.provide(layerPersistence(config)),
+        );
+
+        // Five mutations land synchronously within one window, before the writer parks.
+        for (const tag of ["a", "b", "c", "d", "e"]) {
+          yield* store.update((s) => ({ ...s, completed: [...s.completed, tag] }));
+        }
+
+        // The coalescing `Queue.sliding(1)` dirty signal + single debounced writer collapse
+        // the burst into exactly ONE scheduled flush — not five (this store forks only the
+        // writer, so a single pending `TestClock` sleep is its one debounce window).
+        yield* awaitWriterParked;
+        expect(Chunk.size(yield* TestClock.sleeps())).toBe(1);
+
+        // One window later: a single write carrying the LATEST coalesced state...
+        yield* TestClock.adjust(Duration.millis(500));
+        expect(yield* awaitFileExists(fs, file)).toBe(true);
+        const decoded = yield* decodePersisted(yield* fs.readFileString(file));
+        expect(decoded.state.completed).toEqual(["a", "b", "c", "d", "e"]);
+
+        // ...and no trailing debounce window was scheduled by the coalesced burst (the
+        // writer is back parked on `Queue.take`, not in a second sleep).
+        expect(Chunk.isEmpty(yield* TestClock.sleeps())).toBe(true);
       }).pipe(Effect.provide(platform)),
   );
 
@@ -234,10 +330,8 @@ describe("persistence — durable store decorator", () => {
             // that can run is the teardown final flush.
           }).pipe(Effect.provide(layerPersistence(config))),
         );
-        yield* settle;
-        yield* settle;
 
-        expect(yield* fs.exists(file)).toBe(true);
+        expect(yield* awaitFileExists(fs, file)).toBe(true);
         const decoded = yield* decodePersisted(yield* fs.readFileString(file));
         expect(decoded.state.completed).toEqual(["flushed"]);
       }).pipe(Effect.provide(platform)),
