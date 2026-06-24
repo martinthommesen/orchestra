@@ -70,3 +70,39 @@ export const decodePersisted = (
 /** Wrap an {@link OrchestratorState} into the current persisted envelope. */
 export const toPersisted = (state: OrchestratorState, savedAt: Date): PersistedState =>
   PersistedStateV1.make({ version: CURRENT_VERSION, saved_at: savedAt, state });
+
+/** True when `value` survives `JSON.stringify` (no BigInt / circular ref / throwing toJSON). */
+const isJsonEncodable = (value: unknown): boolean => {
+  try {
+    JSON.stringify(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * #50 / durability spike §2.2 — the field-level guard for `agent_rate_limits`, the **only**
+ * `Schema.Unknown` field (vendor JSON passthrough decoded from agent events). It is normally
+ * JSON-origin and encodes cleanly, but a pathological non-JSON value (BigInt, circular ref)
+ * would otherwise fail `encodePersisted` and — via `save`'s `catchAll` — drop the *whole*
+ * atomic checkpoint, losing the durable progress of every other field for that window.
+ *
+ * This degrades **just that one field** to `null` (valid per `Schema.NullOr(Schema.Unknown)`)
+ * so the rest of the state still persists. Every other field is strongly typed and cannot
+ * fault the JSON encode, so the guard is deliberately scoped to this single known-fragile
+ * field — not a blanket defensive wrap. Returns `degraded: false` (value untouched) on the
+ * normal path so the caller can decide whether to emit the structured degradation log.
+ */
+export const guardRateLimits = (
+  value: PersistedState,
+): { readonly value: PersistedState; readonly degraded: boolean } => {
+  const rateLimits = value.state.agent_rate_limits;
+  if (rateLimits === null || isJsonEncodable(rateLimits)) {
+    return { value, degraded: false };
+  }
+  return {
+    value: { ...value, state: { ...value.state, agent_rate_limits: null } },
+    degraded: true,
+  };
+};

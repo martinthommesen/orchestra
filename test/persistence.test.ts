@@ -1,3 +1,5 @@
+import * as nodeFs from "node:fs";
+import * as nodeOs from "node:os";
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
@@ -335,6 +337,112 @@ describe("persistence — durable store decorator", () => {
         const decoded = yield* decodePersisted(yield* fs.readFileString(file));
         expect(decoded.state.completed).toEqual(["flushed"]);
       }).pipe(Effect.provide(platform)),
+  );
+});
+
+describe("persistence — #51 restrictive checkpoint permissions (POSIX)", () => {
+  const posix = process.platform !== "win32";
+
+  it.scoped("save creates the state dir 0700 and state.json 0600 (rename preserves mode)", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const base = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-perms-" });
+      // A fresh, not-yet-existing state dir so makeDirectory actually creates it (and so the
+      // 0700 assertion proves OUR mode, not the inherited mkdtemp default).
+      const dir = `${base}/nested/.orchestra`;
+      const persistence = yield* makePersistence(makeConfig(dir));
+
+      yield* persistence.save(toPersisted(sampleState(), new Date("2026-06-24T10:00:01.000Z")));
+
+      const file = `${dir}/${STATE_FILE}`;
+      expect(yield* fs.exists(file)).toBe(true);
+      // No leftover temp sibling, and certainly not with looser perms.
+      expect(yield* fs.exists(`${dir}/${STATE_FILE}.tmp`)).toBe(false);
+
+      if (posix) {
+        // POSIX-only: assert the actual permission bits via stat. Guarded for Windows, where
+        // these modes are not meaningfully enforced by the OS.
+        expect(nodeFs.statSync(dir).mode & 0o777).toBe(0o700);
+        expect(nodeFs.statSync(file).mode & 0o777).toBe(0o600);
+      }
+    }).pipe(Effect.provide(platform)),
+  );
+
+  it.scoped("session_ids are not world-readable: checkpoint mode excludes group/other", () =>
+    Effect.gen(function* () {
+      if (!posix) return; // POSIX-only guarantee.
+      const fs = yield* FileSystem.FileSystem;
+      const base = yield* fs.makeTempDirectoryScoped({
+        prefix: "orchestra-perms-",
+        directory: nodeOs.tmpdir(),
+      });
+      const dir = `${base}/.orchestra`;
+      const persistence = yield* makePersistence(makeConfig(dir));
+      yield* persistence.save(toPersisted(sampleState(), new Date("2026-06-24T10:00:01.000Z")));
+
+      const fileMode = nodeFs.statSync(`${dir}/${STATE_FILE}`).mode & 0o077; // group+other bits
+      expect(fileMode).toBe(0); // no read for group/other → session_ids protected at rest.
+    }).pipe(Effect.provide(platform)),
+  );
+});
+
+describe("persistence — #50 degrade agent_rate_limits on encode fault (spike §2.2)", () => {
+  /** A `Schema.Unknown` value the codec accepts but `JSON.stringify` rejects (BigInt). */
+  const unencodableRateLimits = {
+    primary: { remaining: 10n, reset_at: "2026-01-01T00:00:00.000Z" },
+  };
+
+  it.scoped(
+    "an unencodable agent_rate_limits degrades to null; the rest of the checkpoint is still written",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-persist-" });
+        const persistence = yield* makePersistence(makeConfig(dir));
+
+        const bad: OrchestratorState = {
+          ...sampleState(),
+          // BigInt reaches Schema.Unknown fine, but faults the whole-object JSON encode.
+          agent_rate_limits: unencodableRateLimits,
+        };
+        const p0 = toPersisted(bad, new Date("2026-06-24T10:00:01.000Z"));
+
+        // save is total: it must NOT skip the write (pre-#50 behavior) — it writes the rest.
+        yield* persistence.save(p0);
+
+        const loaded = yield* persistence.load;
+        expect(Option.isSome(loaded)).toBe(true);
+        if (Option.isSome(loaded)) {
+          // Just the fragile field degraded...
+          expect(loaded.value.state.agent_rate_limits).toBeNull();
+          // ...everything else (running/retry/completed/totals + #41/#42 continuity) intact.
+          expect(loaded.value.state.completed).toEqual(["done-1", "done-2"]);
+          expect(loaded.value.state.agent_totals.total_tokens).toBe(33);
+          expect(loaded.value.state.running.i1?.session_id).toBe("sess-i1");
+          expect(loaded.value.state.retry_attempts.i2?.kind).toBe("continuation");
+          expect(loaded.value.state.claimed).toEqual(["i1", "i2"]);
+        }
+      }).pipe(Effect.provide(platform)),
+  );
+
+  it.scoped("a normal (JSON-origin) agent_rate_limits is unaffected — no degradation", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-persist-" });
+      const persistence = yield* makePersistence(makeConfig(dir));
+
+      // sampleState carries a vendor-shaped, JSON-encodable agent_rate_limits.
+      const p0 = toPersisted(sampleState(), new Date("2026-06-24T10:00:01.000Z"));
+      yield* persistence.save(p0);
+
+      const loaded = yield* persistence.load;
+      expect(Option.isSome(loaded)).toBe(true);
+      if (Option.isSome(loaded)) {
+        expect(loaded.value.state.agent_rate_limits).toEqual({
+          primary: { remaining: 7, reset_at: "2026-01-01T00:00:00.000Z" },
+        });
+      }
+    }).pipe(Effect.provide(platform)),
   );
 });
 

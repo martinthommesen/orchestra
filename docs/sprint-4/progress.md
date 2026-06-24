@@ -257,3 +257,32 @@ Durable orchestrator shipped: versioned atomic debounced checkpoint, restore + o
 reconcile + wall-clock retry re-arm, opt-in self-healing session resume; corrupt/missing → clean
 start; snapshot stayed strictly additive. Gates green, 291 tests, flake eliminated. Handoff in
 `docs/sprint-4/done.md`. Ready for the Producer's sprint-close PR (do **not** self-merge).
+
+## QA follow-ups (#50, #51) — post-sign-off
+
+Two **minor, non-blocking** robustness/security gaps filed by QA (Ivy) during the Sprint 4
+sign-off, fixed before the close PR. Both live in `src/core/persistence/`.
+
+- **#51 — restrictive checkpoint permissions (security hardening).** The `.orchestra` state
+  dir and `state.json` (+ its `.tmp` sibling) were created with default perms, so under the
+  default `workspace.root` (system temp dir) the persisted agent `session_id`s were
+  world-readable at rest on multi-tenant hosts. Now: state dir created `0700`
+  (`makeDirectory({ recursive: true, mode })`) and the temp file written `0600`
+  (`writeFileString(..., { mode })`); `rename(2)` preserves the temp mode onto `state.json`.
+  Stays inside the `@effect/platform` `FileSystem` API. **POSIX-only guarantee** (Unix mode
+  bits; no-op on Windows). New stat-mode test: after a `save`, dir is `0700` / file `0600`,
+  guarded for non-POSIX. Commit `9be39ef`.
+- **#50 — degrade the rate-limit field instead of dropping the whole checkpoint.** Per spike
+  §2.2, `agent_rate_limits` is the one `Schema.Unknown` field; a pathological non-JSON value
+  (BigInt / circular ref) made `encodePersisted` fail and `save`'s `catchAll` skipped the
+  **entire** atomic write, losing every other field's progress for that window. New
+  `guardRateLimits` degrades **only** that field to `null` (valid per
+  `Schema.NullOr(Schema.Unknown)`) when it is not JSON-encodable, emitting a structured
+  `persistence_rate_limits_degraded` warning (no secrets), and the rest of the checkpoint
+  still writes. Narrowly scoped to this single known-fragile field — atomic temp+rename and
+  the codec are unchanged. New tests: unencodable `agent_rate_limits` still checkpoints (field
+  degraded, rest intact, round-trips); a normal state is unaffected. Commit `ed3e4d2`.
+
+**Gates:** typecheck 0 · lint 0 (101 files) · build 0 · **295 tests** (291 baseline + 4 new),
+deterministically green — write path touched, so re-verified: durability suites 5/5, full suite
+2/2 additional loops, zero flake. Not pushed; left for the Producer's sprint-close PR.

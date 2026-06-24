@@ -105,9 +105,9 @@ the FS-settle race).
 
 ## Gates (final, on `feature/sprint-4`)
 
-`pnpm typecheck` ✅ 0 · `pnpm lint` ✅ 101 files · `pnpm test` ✅ **291 passed** (was 266 at
-Sprint 3 end: +9 #40, +9 #41, +6 #42, +1 #43) · `pnpm build` ✅. Determinism verified by a 20×
-full-suite parallel-load loop (20/20 green).
+`pnpm typecheck` ✅ 0 · `pnpm lint` ✅ 101 files · `pnpm test` ✅ **295 passed** (was 266 at
+Sprint 3 end: +9 #40, +9 #41, +6 #42, +1 #43, +4 QA follow-ups #50/#51) · `pnpm build` ✅.
+Determinism verified by a 20× full-suite parallel-load loop (20/20 green).
 
 ## Files changed / created (Sprint 4)
 
@@ -125,7 +125,7 @@ continuity persist chokepoints), `src/core/orchestrator/observer.ts` (`RestoredA
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm typecheck && pnpm lint && pnpm test && pnpm build   # all exit 0; 291 tests
+pnpm typecheck && pnpm lint && pnpm test && pnpm build   # all exit 0; 295 tests
 
 # Durability in practice:
 pnpm dev ./WORKFLOW.md --port 4317   # daemon writes <workspace.root>/.orchestra/state.json
