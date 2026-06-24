@@ -1,7 +1,7 @@
 import { it } from "@effect/vitest";
 import { Effect, Fiber } from "effect";
 import { describe, expect } from "vitest";
-import { toSnapshot } from "../src/core/observability/snapshot-server";
+import { toSnapshot } from "../src/core/observability/snapshot";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import { OrchestratorStore } from "../src/core/orchestrator/state";
 import * as Ev from "./fakes/events";

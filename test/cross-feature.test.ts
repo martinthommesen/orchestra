@@ -8,7 +8,7 @@ import { ServiceConfig } from "../src/core/domain/workflow";
 import { humanizeAgentEvent } from "../src/core/observability/humanize";
 import type { ActivityEntry } from "../src/core/observability/live-activity";
 import type { RestoreSummary } from "../src/core/observability/restore-status";
-import { toSnapshot } from "../src/core/observability/snapshot-server";
+import { toSnapshot } from "../src/core/observability/snapshot";
 import { evaluateBudget } from "../src/core/orchestrator/budget";
 import { initialState, setRunning } from "../src/core/orchestrator/state";
 

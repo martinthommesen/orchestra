@@ -10,7 +10,7 @@ import { TurnFailed } from "../src/core/errors";
 import { ControlStatusLive } from "../src/core/observability/control-status";
 import { RecentCompletionsLive } from "../src/core/observability/recent-completions";
 import { RestoreStatus, RestoreStatusLive } from "../src/core/observability/restore-status";
-import { toSnapshot } from "../src/core/observability/snapshot-server";
+import { toSnapshot } from "../src/core/observability/snapshot";
 import { CommandBusLive } from "../src/core/orchestrator/command";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";

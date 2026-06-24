@@ -4,12 +4,12 @@ import { layerCopilotRunner } from "../adapters/agent-copilot";
 import { layerGitHubTracker } from "../adapters/tracker-github";
 import { layerWorkspaceManager } from "../adapters/workspace";
 import { ClockLive } from "../core/clock/live";
+import { runCockpit } from "../core/cockpit/server";
 import type { ServiceConfig } from "../core/domain/workflow";
 import { ControlStatusLive } from "../core/observability/control-status";
 import { ObservabilityLive } from "../core/observability/observer-tee";
 import { RecentCompletionsLive } from "../core/observability/recent-completions";
 import { RestoreStatusLive } from "../core/observability/restore-status";
-import { runSnapshotServer } from "../core/observability/snapshot-server";
 import { CommandBusLive } from "../core/orchestrator/command";
 import { runOrchestrator } from "../core/orchestrator/loop";
 import { layerDurableOrchestratorStore } from "../core/persistence";
@@ -91,7 +91,7 @@ export const runDaemon = (argv: ReadonlyArray<string>): void => {
     const run = Effect.scoped(
       Effect.gen(function* () {
         if (port !== null) {
-          yield* Effect.forkScoped(runSnapshotServer(port, def.config.budget));
+          yield* Effect.forkScoped(runCockpit({ port, budgetConfig: def.config.budget }));
         }
         yield* runOrchestrator(def);
       }),

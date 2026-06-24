@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { ServiceConfig } from "../src/core/domain/workflow";
 import { makeRestoreStatus, type RestoreSummary } from "../src/core/observability/restore-status";
-import { toSnapshot } from "../src/core/observability/snapshot-server";
+import { toSnapshot } from "../src/core/observability/snapshot";
 import { initialState } from "../src/core/orchestrator/state";
 
 /**
