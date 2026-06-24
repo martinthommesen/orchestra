@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { FileSystem } from "@effect/platform";
 import { Context, Effect, Layer, Schema } from "effect";
-import { parseDocument } from "yaml";
+import { CST, isMap, isScalar, parseDocument } from "yaml";
 import { PositiveInt, ServiceConfig } from "../domain/workflow";
 import { type LoadWorkflowError, SettingsRejected } from "../errors";
 import { errorMessage } from "../util/error";
@@ -13,6 +13,19 @@ import { loadWorkflow } from "./loader";
  * touches anything else — so `tracker.api_key` (a literal or a `$VAR`) and the Liquid body
  * pass through **byte-for-byte**. The resolved secret (which lives only in the in-memory
  * `ServiceConfig`) is never read for, sent to, or written by this path.
+ *
+ * **Surgical-edit guarantee (#73).** The dominant case — changing a scalar value on a key that
+ * already exists (`interval_ms`, `max_concurrent_agents`, `max_turns`, `max_retry_backoff_ms`,
+ * `budget.max_total_tokens`) — is **fully byte-verbatim**: only the bytes of the edited value
+ * move. We rewrite just that scalar's CST source token (`CST.setScalarValue`) and re-emit the
+ * concrete syntax tree (`CST.stringify`), so trailing-comment alignment, flow-vs-block style,
+ * key order, blank lines, and every untouched line are preserved exactly. The rarer
+ * **structural** edits — clearing a ceiling (delete a key), setting the
+ * `max_concurrent_agents_by_state` map, or introducing a whitelisted key that is **absent**
+ * from the raw file — fall back to a Document re-serialize with `flowCollectionPadding:false`
+ * (so flow arrays don't gain `[ x ]` padding). That path is **best-effort**: comment alignment
+ * on untouched lines may normalize, and a now-empty parent map (e.g. a cleared `budget:`) is
+ * pruned rather than left dangling.
  *
  * Persist discipline mirrors the Sprint-4 checkpoint: validate the merged document, then
  * write a temp file and `rename(2)` it into place (atomic on a single filesystem). An invalid
@@ -162,6 +175,10 @@ const collectEdits = (patch: SettingsPatch): { sets: Edit[]; deletes: ReadonlyAr
   return { sets, deletes };
 };
 
+/** A scalar JS value — the only kind we can rewrite in place via a CST source token. */
+const isScalarValue = (v: unknown): v is string | number | boolean =>
+  typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+
 const FILE_MODE = 0o600;
 
 /** Build the {@link WorkflowFile} service bound to a concrete `WORKFLOW.md` path. */
@@ -225,22 +242,68 @@ export const WorkflowFileLive = (
 
             // Edit the parsed DOCUMENT (not a re-stringified object): untouched nodes —
             // including `tracker.api_key` and any `$VAR` — keep their exact representation.
-            const doc = parseDocument(frontMatter);
+            // `keepSourceTokens` links each node to its CST token so we can rewrite a single
+            // scalar's bytes without re-serializing its neighbours.
+            const doc = parseDocument(frontMatter, { keepSourceTokens: true });
             const { sets, deletes } = collectEdits(patch);
-            for (const edit of sets) {
-              doc.setIn([...edit.path], edit.value);
-            }
-            for (const path of deletes) {
-              doc.deleteIn([...path]);
+
+            // Prefer the byte-verbatim path: it applies iff every edit is a scalar value
+            // landing on a key that already exists as a scalar, and nothing structural
+            // (a delete) is involved. Otherwise we fall back to the Document re-serialize.
+            const scalarEdits: Array<{ token: CST.Token; value: string }> = [];
+            let byteVerbatim = deletes.length === 0;
+            if (byteVerbatim) {
+              for (const edit of sets) {
+                const node = doc.getIn([...edit.path], true);
+                if (isScalar(node) && node.srcToken !== undefined && isScalarValue(edit.value)) {
+                  scalarEdits.push({ token: node.srcToken, value: String(edit.value) });
+                } else {
+                  byteVerbatim = false;
+                  break;
+                }
+              }
             }
 
-            // Validate-then-write: refuse a patch that would yield an unparseable WORKFLOW.md.
-            yield* decodeRaw(doc.toJS() ?? {});
+            let newFrontMatter: string;
+            if (byteVerbatim && doc.contents?.srcToken !== undefined) {
+              // Rewrite ONLY the edited scalar tokens; every other byte is source-identical.
+              for (const { token, value } of scalarEdits) CST.setScalarValue(token, value);
+              newFrontMatter = CST.stringify(doc.contents.srcToken);
+            } else {
+              // Structural edits (delete / map / absent key) — best-effort: re-serialize via
+              // the Document model with flow padding off so `[orchestra]` arrays don't gain
+              // `[ orchestra ]` padding. Untouched comment alignment may normalize here.
+              for (const edit of sets) doc.setIn([...edit.path], edit.value);
+              for (const path of deletes) {
+                doc.deleteIn([...path]);
+                // Drop a now-empty parent map so a cleared ceiling leaves no dangling
+                // `budget: {}`, not the whole block re-indented.
+                if (path.length > 1) {
+                  const parentPath = path.slice(0, -1);
+                  const parent = doc.getIn([...parentPath], true);
+                  if (isMap(parent) && parent.items.length === 0) doc.deleteIn([...parentPath]);
+                }
+              }
+              newFrontMatter = doc.toString({ flowCollectionPadding: false });
+            }
 
-            const newFrontMatter = doc
-              .toString()
+            newFrontMatter = newFrontMatter
               .replace(/\r?\n/g, eol)
               .replace(new RegExp(`${eol}$`), "");
+
+            // Validate-then-write: refuse a patch that would yield an unparseable or
+            // schema-invalid WORKFLOW.md. We parse the ACTUAL output bytes (not the in-memory
+            // model) so a CST-level or structural slip is caught before the write lands.
+            const reparsed = parseDocument(newFrontMatter);
+            if (reparsed.errors.length > 0) {
+              return yield* Effect.fail(
+                new SettingsRejected({
+                  message: `patched WORKFLOW.md is invalid: ${reparsed.errors[0]?.message}`,
+                }),
+              );
+            }
+            yield* decodeRaw(reparsed.toJS() ?? {});
+
             const newContent = `---${eol}${newFrontMatter}${eol}---${eol}${body}`;
 
             // Preserve the file's existing permission bits (it may hold a literal credential).

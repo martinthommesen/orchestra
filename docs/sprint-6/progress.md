@@ -148,11 +148,21 @@ loop hot-reload), + the two observation-fixture maps.
 
 Decisions:
 - **DD-4 edit the RAW document, not a re-stringified object.** The write path uses the `yaml`
-  package's `parseDocument` + `setIn`/`deleteIn` on ONLY the whitelisted paths, then
-  `toString()`. Untouched nodes — `tracker.api_key` (literal or `$VAR`) and every other key —
-  keep their exact original representation. The Liquid body is captured verbatim (the slice
-  after the closing `---`) and re-appended unchanged. The headline test asserts the `$VAR`
-  api_key line and the body are byte-identical before/after.
+  package's `parseDocument` on ONLY the whitelisted paths. Untouched nodes — `tracker.api_key`
+  (literal or `$VAR`) and every other key — keep their exact original representation. The Liquid
+  body is captured verbatim (the slice after the closing `---`) and re-appended unchanged. The
+  headline test asserts the `$VAR` api_key line and the body are byte-identical before/after.
+- **#73 surgical edit (post-QA fix, own commit).** The original `doc.setIn(...)` + `doc.toString()`
+  re-serialized the WHOLE front-matter, normalizing trailing-comment alignment and padding flow
+  arrays (`[orchestra]` → `[ orchestra ]`) on lines the operator never touched — diff noise that
+  contradicted the surgical-edit promise. Now: a scalar change on an existing key rewrites just
+  that value's CST source token (`CST.setScalarValue` + `CST.stringify`, parsed with
+  `keepSourceTokens`), leaving the rest **byte-verbatim**. Structural edits (key delete / map set /
+  absent key) fall back to `doc.toString({ flowCollectionPadding: false })` (flow arrays stay
+  compact) and prune a now-empty parent block — best-effort, comment alignment may normalize.
+  Validation now re-parses the ACTUAL output bytes before the write. Two regression tests added
+  (`test/settings.test.ts`): a scalar PUT is byte-verbatim except the value (aligned comments +
+  flow array preserved); the budget-clear delete prunes the block and keeps arrays compact.
 - **Secret safety (constraint #4).** The editor never reads the resolved `ServiceConfig` for
   the write or the wire — it operates on the raw front matter. The editable projection
   (`{ polling, agent, budget }`) has no `tracker` key at all, so a secret can't leak to the

@@ -47,12 +47,20 @@ entirely rather than deprecating it.
 - **`HttpApi` replaced the hand-rolled router (DD-1), read stays byte-compatible.** `snapshot-server.ts`
   is gone; the read endpoint serializes the pure `snapshot.ts` projection and a round-trip
   test pins the wire bytes. No `/api/v2`, no compat shim.
-- **Settings persistence is secret-safe + atomic + hot-reloading (DD-4).** The write operates on
-  the **raw** front-matter re-read from disk (never the resolved `ServiceConfig`), edits only the
-  whitelisted keys, re-serializes the Liquid body verbatim, and writes via a **`Semaphore(1)`-serialized**
-  temp+rename (concurrent PUTs can't lose an update). `$VAR`/`tracker.api_key` never reach the
-  wire or the disk-write path. `ReloadConfig` swaps a `ConfigRef` + patches the live state knobs
-  on the next tick.
+- **Settings persistence is secret-safe + atomic + surgical + hot-reloading (DD-4, #73).** The
+  write operates on the **raw** front-matter re-read from disk (never the resolved `ServiceConfig`),
+  edits only the whitelisted keys, and writes via a **`Semaphore(1)`-serialized** temp+rename
+  (concurrent PUTs can't lose an update). The edit is **surgical**: the dominant case — changing a
+  scalar value on an already-present key — rewrites just that scalar's CST source token
+  (`CST.setScalarValue`) and re-emits the tree (`CST.stringify`), so the result is **byte-verbatim**
+  except the edited value (trailing-comment alignment, flow-vs-block style, key order, blank lines,
+  and every untouched line preserved exactly). The rarer **structural** edits (clearing a ceiling →
+  key delete, setting the `max_concurrent_agents_by_state` map, or introducing an absent whitelisted
+  key) fall back to a Document re-serialize with `flowCollectionPadding:false` (flow arrays keep
+  `[a, b]`, no `[ a, b ]` padding) and prune a now-empty parent block — **best-effort**: comment
+  alignment on untouched lines may normalize. In every case the Liquid body, `$VAR`, and
+  `tracker.api_key` stay byte-identical and never reach the wire or the disk-write path.
+  `ReloadConfig` swaps a `ConfigRef` + patches the live state knobs on the next tick.
 - **Security (DD-5).** Loopback bind; read endpoints token-free; mutating endpoints require both an
   `Authorization: Bearer <token>` and a loopback `Origin`/`Host` (401 / 403). Token from
   `ORCHESTRA_COCKPIT_TOKEN` else CSPRNG hex logged once at INFO; injected same-origin into the SPA
@@ -68,9 +76,13 @@ entirely rather than deprecating it.
   `CommandBus` and returns the wire `CommandResult`; graceful 404 when the SPA isn't built.
 - **Read-wire byte-compatibility**: a round-trip test pins `GET /api/v1/state` bytes against the
   pure projection.
-- **Settings secret-safety** (`test/settings.test.ts` / `workflow-file`): `tracker.api_key` + the
-  Liquid body are byte-identical across a write; an invalid patch is rejected **before** the write
-  lands; overlapping PUTs both land correctly (the `Semaphore(1)` prevents the lost update).
+- **Settings secret-safety + surgical edit** (`test/settings.test.ts` / `workflow-file`):
+  `tracker.api_key` + the Liquid body are byte-identical across a write; an invalid patch is
+  rejected **before** the write lands; overlapping PUTs both land correctly (the `Semaphore(1)`
+  prevents the lost update); a scalar PUT on an existing key (`max_turns`) leaves the whole file
+  **byte-verbatim except the edited value** — aligned trailing comments and a flow-style array on
+  untouched keys preserved exactly (#73); the budget-clear delete prunes the empty block and keeps
+  flow arrays compact.
 - **Token bootstrap injection** (`test/cockpit/token`): a `</script>`-bearing token is escaped
   (`\u003c`) so it can't break out of the inline `<script>`.
 - **Command-control loop** (`test/command-control.test.ts`): operator-pause withholds new dispatch
@@ -122,9 +134,9 @@ token is `ORCHESTRA_COCKPIT_TOKEN` if set, else a CSPRNG hex token logged once a
 
 - `pnpm typecheck` (root + `tsconfig.cockpit.json`) — clean.
 - `pnpm lint` (Biome over 144 files incl. `src/cockpit/`) — clean.
-- `pnpm test` — **347 passing** (was 423 at Phase-2 end; the `test/dashboard/` Ink suite was
-  deleted with the dashboard; the cross-feature decode test was re-pointed to `toFleetView` and is
-  retained).
+- `pnpm test` — **349 passing** (347 at the #72 close-out + 2 new #73 byte-verbatim regressions;
+  was 423 at Phase-2 end before the `test/dashboard/` Ink suite was deleted with the dashboard; the
+  cross-feature decode test was re-pointed to `toFleetView` and is retained).
 - `pnpm build` — tsup emits `dist/cli/main.js`; vite emits `dist/cockpit/index.html` + hashed
   `assets/`.
 

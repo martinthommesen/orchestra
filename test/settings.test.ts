@@ -57,6 +57,29 @@ const ORIGINAL = [
   "",
 ].join("\n");
 
+// A fixture with **aligned trailing comments** and a **flow-style array** among keys the patch
+// never touches — the exact shapes #73 must leave byte-for-byte. The OLD `doc.toString()` path
+// collapsed both (comment padding → single space, `[a, b]` → `[ a, b ]`).
+const ALIGNED = [
+  "---",
+  "tracker:",
+  "  kind: github                      # tracker backend",
+  "  repo: acme/widgets                # the target repo",
+  `  api_key: $${CRED_ENV_VAR}`,
+  "  required_labels: [orchestra, bot] # flow-style array stays compact",
+  "polling:",
+  "  interval_ms: 30000               # poll cadence",
+  "agent:",
+  "  max_concurrent_agents: 4         # global cap",
+  "  max_turns: 20                    # per-session turn cap",
+  "  max_retry_backoff_ms: 300000     # backoff ceiling",
+  "budget:",
+  "  max_total_tokens: 100000         # spend ceiling",
+  "---",
+  BODY,
+  "",
+].join("\n");
+
 describe("WorkflowFile settings persist (#66, DD-4)", () => {
   it.scoped(
     "headline: api_key ($VAR) + Liquid body are byte-identical across a write; knobs change",
@@ -110,6 +133,70 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
         // The in-process config (for ReloadConfig) DID resolve the secret — proving the
         // secret stays in memory and is never what we serialize to disk or the wire.
         expect(applied.config.tracker.api_key).toBe(CRED_VALUE);
+      }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped(
+    "#73 scalar PUT on an existing key is byte-verbatim — only the edited value moves",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+        const path = `${dir}/WORKFLOW.md`;
+        yield* fs.writeFileString(path, ALIGNED);
+
+        // The dominant case: change one scalar on a key that already exists. Same digit width
+        // (20 → 33) so the surrounding alignment cannot shift for any reason but ours.
+        yield* Effect.gen(function* () {
+          const wf = yield* WorkflowFile;
+          return yield* wf.applyPatch({ agent: { max_turns: 33 } });
+        }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+        const after = yield* fs.readFileString(path);
+
+        // The whole file is byte-identical except the one value — the surgical-edit promise.
+        expect(after).toBe(ALIGNED.replace("max_turns: 20", "max_turns: 33"));
+        // Spelled out: the aligned trailing comment and the flow array (untouched keys) are
+        // preserved to the byte — the exact regressions #73 fixed.
+        expect(after).toContain("  repo: acme/widgets                # the target repo");
+        expect(after).toContain(
+          "  required_labels: [orchestra, bot] # flow-style array stays compact",
+        );
+        expect(after).toContain("  max_turns: 33                    # per-session turn cap");
+      }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped(
+    "#73 budget-clear (structural delete) prunes the block + keeps flow arrays compact",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+        const path = `${dir}/WORKFLOW.md`;
+        yield* fs.writeFileString(path, ALIGNED);
+
+        // Clearing the ceiling is the structural path (a key delete). The landed guarantee:
+        // the now-empty `budget:` block is pruned (no dangling `budget: {}`), the flow array is
+        // NOT re-padded, and the secret/$VAR + Liquid body survive. Comment ALIGNMENT on the
+        // untouched lines may normalize on this best-effort path — that is accepted, not a bug.
+        yield* Effect.gen(function* () {
+          const wf = yield* WorkflowFile;
+          return yield* wf.applyPatch({ budget: { max_total_tokens: null } });
+        }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+        const after = yield* fs.readFileString(path);
+
+        // The cleared ceiling — and its now-empty parent block — are gone entirely.
+        expect(after).not.toContain("max_total_tokens");
+        expect(after).not.toContain("budget:");
+        // The flow array is preserved COMPACT (the `[ orchestra ]` padding regression stays fixed).
+        expect(after).toContain("[orchestra, bot]");
+        expect(after).not.toContain("[ orchestra");
+        // Secret value ($VAR) + Liquid body still pass through; comments survive (alignment may
+        // normalize on this structural path).
+        expect(after).toContain(`api_key: $${CRED_ENV_VAR}`);
+        expect(after).toContain(BODY);
+        expect(after).toContain("# the target repo");
       }).pipe(Effect.provide(NodeContext.layer)),
   );
 
