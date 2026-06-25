@@ -23,7 +23,7 @@ export const ConnectionBanner = ({
 }) => {
   const style = CONNECTION_STYLE[connection];
   return (
-    <div className="conn-banner" role="status">
+    <output className="conn-banner">
       <span
         className="conn-banner__dot"
         style={{ background: style.colorVar }}
@@ -34,6 +34,6 @@ export const ConnectionBanner = ({
       </span>
       {updatedLabel ? <span className="conn-banner__updated">{updatedLabel}</span> : null}
       {error ? <span className="conn-banner__error">· {error}</span> : null}
-    </div>
+    </output>
   );
 };

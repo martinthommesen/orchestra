@@ -20,9 +20,10 @@ import { Schema } from "effect";
  */
 
 export const PositiveInt = Schema.Int.pipe(Schema.positive());
+export const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 
 /** `tracker` block (SPEC §5.3.1), GitHub-flavored. */
-export const TrackerConfig = Schema.Struct({
+const TrackerConfig = Schema.Struct({
   /** REQUIRED for dispatch. v1 supports `github` (validated at preflight). */
   kind: Schema.optional(Schema.String),
   /** GitHub `owner/name`. REQUIRED for dispatch when `kind == "github"` (spec `project_slug`). */
@@ -46,7 +47,7 @@ export const TrackerConfig = Schema.Struct({
 export type TrackerConfig = typeof TrackerConfig.Type;
 
 /** `polling` block (SPEC §5.3.2). */
-export const PollingConfig = Schema.Struct({
+const PollingConfig = Schema.Struct({
   interval_ms: Schema.optionalWith(PositiveInt, { default: () => 30_000 }),
 }).annotations({ identifier: "PollingConfig" });
 export type PollingConfig = typeof PollingConfig.Type;
@@ -57,13 +58,13 @@ export type PollingConfig = typeof PollingConfig.Type;
  * `~`, and relative paths (relative to the WORKFLOW.md directory) to an absolute
  * path per §6.1.
  */
-export const WorkspaceConfig = Schema.Struct({
+const WorkspaceConfig = Schema.Struct({
   root: Schema.optional(Schema.String),
 }).annotations({ identifier: "WorkspaceConfig" });
 export type WorkspaceConfig = typeof WorkspaceConfig.Type;
 
 /** `hooks` block (SPEC §5.3.4). Each hook is an optional shell script. */
-export const HooksConfig = Schema.Struct({
+const HooksConfig = Schema.Struct({
   after_create: Schema.optional(Schema.String),
   before_run: Schema.optional(Schema.String),
   after_run: Schema.optional(Schema.String),
@@ -73,9 +74,14 @@ export const HooksConfig = Schema.Struct({
 export type HooksConfig = typeof HooksConfig.Type;
 
 /** `agent` block (SPEC §5.3.5) — orchestration knobs (concurrency, turns, backoff). */
-export const AgentConfig = Schema.Struct({
+const AgentConfig = Schema.Struct({
   max_concurrent_agents: Schema.optionalWith(PositiveInt, { default: () => 10 }),
   max_turns: Schema.optionalWith(PositiveInt, { default: () => 20 }),
+  /**
+   * Failure retries after the initial run. `0` means fail-fast/park immediately; the default
+   * allows a few transient failures without unbounded spend on permanently failing issues.
+   */
+  max_failure_retries: Schema.optionalWith(NonNegativeInt, { default: () => 3 }),
   max_retry_backoff_ms: Schema.optionalWith(PositiveInt, {
     default: () => 300_000,
   }),
@@ -92,7 +98,7 @@ export type AgentConfig = typeof AgentConfig.Type;
  * the coding agent is GitHub Copilot. `command` is the base executable; the runner
  * (Sprint 1) appends the headless flags pinned by the Sprint 0 spike.
  */
-export const CopilotConfig = Schema.Struct({
+const CopilotConfig = Schema.Struct({
   command: Schema.optionalWith(Schema.String, { default: () => "copilot" }),
   /** Optional model override (e.g. `claude-opus-4.8`); default chosen by Copilot. */
   model: Schema.optional(Schema.String),
@@ -113,7 +119,7 @@ export type CopilotConfig = typeof CopilotConfig.Type;
  * (no default baked in): the persistence layer falls back to `<workspace.root>/.orchestra`
  * when it is absent, and resolves a relative `dir` against the resolved workspace root.
  */
-export const PersistenceConfig = Schema.Struct({
+const PersistenceConfig = Schema.Struct({
   /** State directory. Default `<workspace.root>/.orchestra` (resolved by the layer). */
   dir: Schema.optional(Schema.String),
   /** Debounce window (ms) coalescing bursts of mutations into one atomic write. */

@@ -32,7 +32,7 @@ mechanisms:
   diffed their `package.json` `exports`. The `./sdk` subpath export that existed in
   **1.0.63 was REMOVED in 1.0.64-3** (the installed version). The sibling
   `@github/copilot-sdk` package exists but its `/extension` entrypoint is for
-  *authoring extensions that join an existing session*, not for *driving* the agent
+  _authoring extensions that join an existing session_, not for _driving_ the agent
   headlessly. The `.d.ts` files were mined for the full event vocabulary (§5).
 - **Live PoC:** ran one real prompt through the CLI in JSON mode against a throwaway
   workspace and captured the full JSONL stream (§4). ~26 event lines, terminal
@@ -67,16 +67,18 @@ The stream is a flat JSONL log. **Streaming/lifecycle events** share one envelop
 
 ```jsonc
 {
-  "type": "assistant.message",           // dot-notation event kind
-  "data": { /* event-specific payload */ },
-  "id": "25de54af-…",                     // event id
+  "type": "assistant.message", // dot-notation event kind
+  "data": {
+    /* event-specific payload */
+  },
+  "id": "25de54af-…", // event id
   "timestamp": "2026-06-23T11:23:38.976Z",
-  "parentId": "0e037da1-…",               // causal parent event id
-  "ephemeral": true                        // optional; transient/status events
+  "parentId": "0e037da1-…", // causal parent event id
+  "ephemeral": true, // optional; transient/status events
 }
 ```
 
-The **terminal `result`** event is a *different, flatter* shape (no `data`/`id`/
+The **terminal `result`** event is a _different, flatter_ shape (no `data`/`id`/
 `parentId`) — treat it specially:
 
 ```jsonc
@@ -89,27 +91,27 @@ The **terminal `result`** event is a *different, flatter* shape (no `data`/`id`/
     "premiumRequests": 15,
     "totalApiDurationMs": 2066,
     "sessionDurationMs": 19124,
-    "codeChanges": { "linesAdded": 0, "linesRemoved": 0, "filesModified": [] }
-  }
+    "codeChanges": { "linesAdded": 0, "linesRemoved": 0, "filesModified": [] },
+  },
 }
 ```
 
 ### Event types observed in the PoC (26 lines)
 
-| `type` | role in the turn | key `data` fields |
-|--------|------------------|-------------------|
-| `session.mcp_server_status_changed` | MCP servers connecting (×11) | `serverName`, `status` — `ephemeral` |
-| `session.mcp_servers_loaded` | MCP catalog ready (×3) | `servers[]` — `ephemeral` |
-| `session.skills_loaded` | skill catalog (×2) | `skills` — `ephemeral` |
-| `session.tools_updated` | tool catalog | tool list |
-| `session.custom_agents_updated` | custom-agent catalog | — |
-| `user.message` | the prompt as sent | `content`, `transformedContent` (system-reminder wrapped), `attachments[]` |
-| `assistant.turn_start` | turn began | `turnId` (`"0"`), `interactionId` |
-| `assistant.message_start` | assistant reply opening | `messageId` |
-| `assistant.message_delta` | streamed token chunk (×2) | `messageId`, `deltaContent` (`"p"`, …) |
-| `assistant.message` | **completed assistant message** | `role`, `model` (`claude-opus-4.8`), `content` (`"pong"`), `outputTokens` (4), `turnId`, **`toolRequests[]`** |
-| `assistant.turn_end` | turn finished | `turnId` |
-| `result` | **terminal** — process exiting | `sessionId`, `exitCode`, `usage{…}` |
+| `type`                              | role in the turn                | key `data` fields                                                                                             |
+| ----------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `session.mcp_server_status_changed` | MCP servers connecting (×11)    | `serverName`, `status` — `ephemeral`                                                                          |
+| `session.mcp_servers_loaded`        | MCP catalog ready (×3)          | `servers[]` — `ephemeral`                                                                                     |
+| `session.skills_loaded`             | skill catalog (×2)              | `skills` — `ephemeral`                                                                                        |
+| `session.tools_updated`             | tool catalog                    | tool list                                                                                                     |
+| `session.custom_agents_updated`     | custom-agent catalog            | —                                                                                                             |
+| `user.message`                      | the prompt as sent              | `content`, `transformedContent` (system-reminder wrapped), `attachments[]`                                    |
+| `assistant.turn_start`              | turn began                      | `turnId` (`"0"`), `interactionId`                                                                             |
+| `assistant.message_start`           | assistant reply opening         | `messageId`                                                                                                   |
+| `assistant.message_delta`           | streamed token chunk (×2)       | `messageId`, `deltaContent` (`"p"`, …)                                                                        |
+| `assistant.message`                 | **completed assistant message** | `role`, `model` (`claude-opus-4.8`), `content` (`"pong"`), `outputTokens` (4), `turnId`, **`toolRequests[]`** |
+| `assistant.turn_end`                | turn finished                   | `turnId`                                                                                                      |
+| `result`                            | **terminal** — process exiting  | `sessionId`, `exitCode`, `usage{…}`                                                                           |
 
 **Key takeaways for the runner:**
 
@@ -144,15 +146,15 @@ orchestrator. This is why `AgentEvent` includes a `Malformed` variant.
 
 ## 6. Decision — **subprocess for v1**
 
-| Criterion | Subprocess (CLI `-p --output-format json`) | In-process SDK (`@github/copilot`) |
-|-----------|--------------------------------------------|------------------------------------|
-| **Availability (installed 1.0.64-3)** | ✅ works today, verified by PoC | ❌ `./sdk` export **removed** in 1.0.64-3 |
-| **Stability of the contract** | ✅ CLI flags + JSONL are the supported public surface | ❌ export churned between two consecutive prereleases |
-| **Isolation** | ✅ separate PID, own `cwd`, own env — killable on stall/cancel (`TurnTimeout`, reconciliation) | ⚠️ shares the daemon process; a crash/leak can take down the orchestrator fiber |
-| **Safety Invariant 1 (§9.5)** | ✅ enforce `cwd === workspacePath` at `spawn` | ⚠️ must be emulated; agent may not honor per-call cwd |
-| **Mapping cost** | ✅ JSONL → `AgentEvent` is a line decoder | ✅ typed events, but to an unstable type |
-| **Resource teardown** | ✅ kill PID + `Scope` finalizer | ⚠️ in-process cancellation only |
-| **Secrets** | ✅ token via child env, never logged | ✅ same |
+| Criterion                             | Subprocess (CLI `-p --output-format json`)                                                     | In-process SDK (`@github/copilot`)                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| **Availability (installed 1.0.64-3)** | ✅ works today, verified by PoC                                                                | ❌ `./sdk` export **removed** in 1.0.64-3                                       |
+| **Stability of the contract**         | ✅ CLI flags + JSONL are the supported public surface                                          | ❌ export churned between two consecutive prereleases                           |
+| **Isolation**                         | ✅ separate PID, own `cwd`, own env — killable on stall/cancel (`TurnTimeout`, reconciliation) | ⚠️ shares the daemon process; a crash/leak can take down the orchestrator fiber |
+| **Safety Invariant 1 (§9.5)**         | ✅ enforce `cwd === workspacePath` at `spawn`                                                  | ⚠️ must be emulated; agent may not honor per-call cwd                           |
+| **Mapping cost**                      | ✅ JSONL → `AgentEvent` is a line decoder                                                      | ✅ typed events, but to an unstable type                                        |
+| **Resource teardown**                 | ✅ kill PID + `Scope` finalizer                                                                | ⚠️ in-process cancellation only                                                 |
+| **Secrets**                           | ✅ token via child env, never logged                                                           | ✅ same                                                                         |
 
 **Rationale:** the subprocess is the only mechanism that is (1) actually present and
 working in the installed version, (2) backed by a stable public contract, and (3)
@@ -197,7 +199,7 @@ const Usage = Schema.Struct({
   input_tokens: Schema.optional(Schema.Int),
   output_tokens: Schema.optional(Schema.Int),
   total_tokens: Schema.optional(Schema.Int),
-  premium_requests: Schema.optional(Schema.Number),      // Copilot result.usage.premiumRequests
+  premium_requests: Schema.optional(Schema.Number), // Copilot result.usage.premiumRequests
   total_api_duration_ms: Schema.optional(Schema.Number),
 });
 
@@ -209,40 +211,89 @@ const EventEnvelope = {
 };
 
 // One TaggedStruct per normalized kind; union discriminates on `_tag`.
-const SessionStarted     = Schema.TaggedStruct("SessionStarted",     { ...EventEnvelope, session_id: Schema.String, thread_id: Schema.String, turn_id: Schema.String });
-const StartupFailed      = Schema.TaggedStruct("StartupFailed",      { ...EventEnvelope, message: Schema.String });
-const TurnCompleted      = Schema.TaggedStruct("TurnCompleted",      { ...EventEnvelope, turn_id: Schema.optional(Schema.String), message: Schema.optional(Schema.String) });
-const TurnFailed         = Schema.TaggedStruct("TurnFailed",         { ...EventEnvelope, message: Schema.String });
-const TurnCancelled      = Schema.TaggedStruct("TurnCancelled",      { ...EventEnvelope, reason: Schema.optional(Schema.String) });
-const TurnEndedWithError = Schema.TaggedStruct("TurnEndedWithError", { ...EventEnvelope, message: Schema.String });
-const TurnInputRequired  = Schema.TaggedStruct("TurnInputRequired",  { ...EventEnvelope, prompt: Schema.optional(Schema.String) });
-const ApprovalAutoApproved = Schema.TaggedStruct("ApprovalAutoApproved", { ...EventEnvelope, kind: Schema.optional(Schema.String) });
-const UnsupportedToolCall  = Schema.TaggedStruct("UnsupportedToolCall",  { ...EventEnvelope, tool: Schema.String });
-const Notification       = Schema.TaggedStruct("Notification",       { ...EventEnvelope, message: Schema.String });
-const AgentMessage       = Schema.TaggedStruct("AgentMessage",       { ...EventEnvelope, role: Schema.optional(Schema.String), text: Schema.optional(Schema.String) });
-const Malformed          = Schema.TaggedStruct("Malformed",          { ...EventEnvelope, raw: Schema.String });
+const SessionStarted = Schema.TaggedStruct("SessionStarted", {
+  ...EventEnvelope,
+  session_id: Schema.String,
+  thread_id: Schema.String,
+  turn_id: Schema.String,
+});
+const StartupFailed = Schema.TaggedStruct("StartupFailed", {
+  ...EventEnvelope,
+  message: Schema.String,
+});
+const TurnCompleted = Schema.TaggedStruct("TurnCompleted", {
+  ...EventEnvelope,
+  turn_id: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String),
+});
+const TurnFailed = Schema.TaggedStruct("TurnFailed", {
+  ...EventEnvelope,
+  message: Schema.String,
+});
+const TurnCancelled = Schema.TaggedStruct("TurnCancelled", {
+  ...EventEnvelope,
+  reason: Schema.optional(Schema.String),
+});
+const TurnEndedWithError = Schema.TaggedStruct("TurnEndedWithError", {
+  ...EventEnvelope,
+  message: Schema.String,
+});
+const TurnInputRequired = Schema.TaggedStruct("TurnInputRequired", {
+  ...EventEnvelope,
+  prompt: Schema.optional(Schema.String),
+});
+const ApprovalAutoApproved = Schema.TaggedStruct("ApprovalAutoApproved", {
+  ...EventEnvelope,
+  kind: Schema.optional(Schema.String),
+});
+const UnsupportedToolCall = Schema.TaggedStruct("UnsupportedToolCall", {
+  ...EventEnvelope,
+  tool: Schema.String,
+});
+const Notification = Schema.TaggedStruct("Notification", {
+  ...EventEnvelope,
+  message: Schema.String,
+});
+const AgentMessage = Schema.TaggedStruct("AgentMessage", {
+  ...EventEnvelope,
+  role: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
+});
+const Malformed = Schema.TaggedStruct("Malformed", {
+  ...EventEnvelope,
+  raw: Schema.String,
+});
 
 export const AgentEvent = Schema.Union(
-  SessionStarted, StartupFailed, TurnCompleted, TurnFailed, TurnCancelled,
-  TurnEndedWithError, TurnInputRequired, ApprovalAutoApproved, UnsupportedToolCall,
-  Notification, AgentMessage, Malformed,
+  SessionStarted,
+  StartupFailed,
+  TurnCompleted,
+  TurnFailed,
+  TurnCancelled,
+  TurnEndedWithError,
+  TurnInputRequired,
+  ApprovalAutoApproved,
+  UnsupportedToolCall,
+  Notification,
+  AgentMessage,
+  Malformed,
 );
 export type AgentEvent = typeof AgentEvent.Type;
 ```
 
 ### Copilot JSONL → `AgentEvent` mapping table (for Sprint 1)
 
-| Copilot `type` | → `AgentEvent._tag` | notes |
-|----------------|---------------------|-------|
-| (process spawn ok, first `assistant.turn_start`) | `SessionStarted` | synthesize `session_id` from `result.sessionId`/`--session-id`; `turn_id` from `turnId` |
-| `assistant.turn_start` | (internal turn bookkeeping) | not necessarily surfaced |
-| `assistant.message` | `AgentMessage` (+ `Notification` for surfaced text) | carries `content`, `toolRequests[]`, per-msg `outputTokens` |
-| `assistant.turn_end` + `result.exitCode == 0` | `TurnCompleted` | attach `result.usage` |
-| `tool.call` for an unsupported tool | `UnsupportedToolCall` | `tool` = requested name |
-| `permission.*` auto-granted (`--allow-all-tools`) | `ApprovalAutoApproved` | high-trust policy |
-| `session.error` / `model.call_failure` | `TurnFailed` / `TurnEndedWithError` | `message` from payload |
-| `result.exitCode != 0` (or process exit ≠ 0, or no `result`) | (runner error) `AgentProcessExit` | terminal failure → orchestrator retries |
-| any unrecognized line / bad JSON | `Malformed` | `raw` = the line; never crash |
+| Copilot `type`                                               | → `AgentEvent._tag`                                 | notes                                                                                   |
+| ------------------------------------------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| (process spawn ok, first `assistant.turn_start`)             | `SessionStarted`                                    | synthesize `session_id` from `result.sessionId`/`--session-id`; `turn_id` from `turnId` |
+| `assistant.turn_start`                                       | (internal turn bookkeeping)                         | not necessarily surfaced                                                                |
+| `assistant.message`                                          | `AgentMessage` (+ `Notification` for surfaced text) | carries `content`, `toolRequests[]`, per-msg `outputTokens`                             |
+| `assistant.turn_end` + `result.exitCode == 0`                | `TurnCompleted`                                     | attach `result.usage`                                                                   |
+| `tool.call` for an unsupported tool                          | `UnsupportedToolCall`                               | `tool` = requested name                                                                 |
+| `permission.*` auto-granted (`--allow-all-tools`)            | `ApprovalAutoApproved`                              | high-trust policy                                                                       |
+| `session.error` / `model.call_failure`                       | `TurnFailed` / `TurnEndedWithError`                 | `message` from payload                                                                  |
+| `result.exitCode != 0` (or process exit ≠ 0, or no `result`) | (runner error) `AgentProcessExit`                   | terminal failure → orchestrator retries                                                 |
+| any unrecognized line / bad JSON                             | `Malformed`                                         | `raw` = the line; never crash                                                           |
 
 ## 9. Open items handed to Sprint 1
 

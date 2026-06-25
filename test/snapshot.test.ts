@@ -44,7 +44,8 @@ describe("toSnapshot", () => {
 
   it.effect("serializes Date fields to ISO strings via JSON", () =>
     Effect.sync(() => {
-      const json = JSON.parse(JSON.stringify(toSnapshot(seededState())));
+      const encoded = JSON.stringify(toSnapshot(seededState()));
+      const json = JSON.parse(encoded);
       expect(json.running[0].started_at).toBe("2024-01-01T00:00:00.000Z");
     }),
   );

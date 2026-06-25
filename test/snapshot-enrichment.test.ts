@@ -103,7 +103,8 @@ describe("toSnapshot enrichment (#37)", () => {
         delay_ms: 4000,
         error: "boom",
       });
-      const json = JSON.parse(JSON.stringify(toSnapshot(state)));
+      const encoded = JSON.stringify(toSnapshot(state));
+      const json = JSON.parse(encoded);
       const r = json.retrying[0];
       expect(r.due_at_ms).toBe(123456); // monotonic value unchanged
       expect(r.scheduled_at).toBe("2024-01-01T00:00:05.000Z");
@@ -123,7 +124,8 @@ describe("toSnapshot enrichment (#37)", () => {
           error: null,
         }),
       );
-      const json = JSON.parse(JSON.stringify(toSnapshot(state)));
+      const encoded = JSON.stringify(toSnapshot(state));
+      const json = JSON.parse(encoded);
       const r = json.retrying[0];
       expect(r.due_at_ms).toBe(999);
       expect(r.scheduled_at).toBeUndefined();

@@ -205,6 +205,7 @@ describe("loadWorkflow (file IO via FileSystem)", () => {
       expect(def.config.tracker.repo).toBe("acme/widgets");
       expect(def.config.polling.interval_ms).toBe(15_000);
       expect(def.config.agent.max_turns).toBe(8);
+      expect(def.config.agent.max_failure_retries).toBe(3);
       expect(def.config.copilot.model).toBe("claude-opus-4.8");
       expect(nodePath.isAbsolute(def.config.workspace.root as string)).toBe(true);
       expect(def.prompt_template).toContain("{{ issue.identifier }}");

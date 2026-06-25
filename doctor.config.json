@@ -1,0 +1,12 @@
+{
+  "$schema": "https://react.doctor/schema/config.json",
+  "blocking": "warning",
+  "ignore": {
+    "overrides": [
+      {
+        "files": ["src/cockpit/**/*"],
+        "rules": ["deslop/unused-file"]
+      }
+    ]
+  }
+}

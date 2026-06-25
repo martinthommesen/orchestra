@@ -1,7 +1,7 @@
 # Concept C — "Ports-First Platform"
 
 > The extensible v1: invest early in clean ports and a monorepo so Orchestra becomes
-> a *platform* (multi-tracker, multi-agent, swappable surfaces), accepting more
+> a _platform_ (multi-tracker, multi-agent, swappable surfaces), accepting more
 > upfront structure.
 
 ## Description
@@ -23,7 +23,7 @@ testable. The "drop-in Symphony" story plus a credible multi-tracker future.
 
 - Best long-term architecture; adapters swap via layer, never rewrite.
 - Forces the discipline Sage and Ivy want: orchestrator can't import an adapter.
-- Makes the eventual Linear adapter and TUI *additive*, not disruptive.
+- Makes the eventual Linear adapter and TUI _additive_, not disruptive.
 
 ## Cons
 

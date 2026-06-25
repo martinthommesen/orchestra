@@ -216,6 +216,14 @@ printf '{"type":"result","exitCode":0,"usage":{"outputTokens":4}}'
 exit 0
 `;
 
+const ENV_SCRUB = `#!/bin/sh
+printf "%s" "$ORCHESTRA_COCKPIT_TOKEN" > cockpit-token.txt
+printf "%s" "$GITHUB_TOKEN" > github-token.txt
+printf "%s" "$HTTPS_PROXY" > proxy.txt
+echo '{"type":"result","exitCode":0}'
+exit 0
+`;
+
 // Replaces the shell image with sleep so the spawned PID is exactly the one the run scope
 // must SIGTERM on interrupt — no lingering grandchild to leak (#22).
 const HANG = `#!/bin/sh
@@ -284,6 +292,48 @@ describe("CopilotRunner (subprocess)", () => {
       expect(tags).toContain("TurnCompleted");
       expect(tags.at(-1)).toBe("TurnCompleted");
     }),
+  );
+
+  it.scopedLive(
+    "scrubs daemon-only secrets but preserves connectivity env in the child process",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const previous = {
+              token: process.env.ORCHESTRA_COCKPIT_TOKEN,
+              proxy: process.env.HTTPS_PROXY,
+            };
+            process.env.ORCHESTRA_COCKPIT_TOKEN = "daemon-token-must-not-leak"; // gitleaks:allow — fake fixture token
+            process.env.HTTPS_PROXY = "http://proxy.internal:8080";
+            return previous;
+          }),
+          (previous) =>
+            Effect.sync(() => {
+              if (previous.token === undefined) {
+                delete process.env.ORCHESTRA_COCKPIT_TOKEN;
+              } else {
+                process.env.ORCHESTRA_COCKPIT_TOKEN = previous.token; // gitleaks:allow — restores saved value
+              }
+              if (previous.proxy === undefined) {
+                delete process.env.HTTPS_PROXY;
+              } else {
+                process.env.HTTPS_PROXY = previous.proxy;
+              }
+            }),
+        );
+
+        const ws = yield* runFakeCopilot(ENV_SCRUB, (events, exit) => {
+          expect(exit._tag).toBe("Success");
+          expect(events.map((e) => e._tag)).toContain("TurnCompleted");
+        });
+
+        // Daemon-only secret is blanked; GitHub token + connectivity settings pass through.
+        expect(yield* fs.readFileString(`${ws}/cockpit-token.txt`)).toBe("");
+        expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("t");
+        expect(yield* fs.readFileString(`${ws}/proxy.txt`)).toBe("http://proxy.internal:8080");
+      }).pipe(Effect.provide(platform)),
   );
 
   it.scopedLive("interrupting a worker SIGTERMs the subprocess (no orphan) (#22)", () =>

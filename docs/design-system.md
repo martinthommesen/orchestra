@@ -21,13 +21,13 @@
 
 ## The five statuses
 
-| Status | Glyph | ASCII | Color token | Meaning |
-|--------|:-----:|:-----:|-------------|---------|
-| `running` | `▶` | `>` | `info` (cyan) | A worker is actively preparing, prompting, or streaming a turn. |
-| `retrying` | `⏳` | `~` | `warn` (yellow) | A retryable fault (timeout/stall/failed attempt) is backing off for another try. |
-| `blocked` | `⏸` | `=` | `muted` (gray) | Withdrawn or waiting — cancelled by reconciliation, or awaiting input. |
-| `done` | `✓` | `+` | `success` (green) | Reached the workflow handoff/terminal state successfully. |
-| `failed` | `✗` | `x` | `danger` (red) | Terminal failure with no further retry. |
+| Status     | Glyph | ASCII | Color token       | Meaning                                                                          |
+| ---------- | :---: | :---: | ----------------- | -------------------------------------------------------------------------------- |
+| `running`  |  `▶`  |  `>`  | `info` (cyan)     | A worker is actively preparing, prompting, or streaming a turn.                  |
+| `retrying` | `⏳`  |  `~`  | `warn` (yellow)   | A retryable fault (timeout/stall/failed attempt) is backing off for another try. |
+| `blocked`  |  `⏸`  |  `=`  | `muted` (gray)    | Withdrawn or waiting — cancelled by reconciliation, or awaiting input.           |
+| `done`     |  `✓`  |  `+`  | `success` (green) | Reached the workflow handoff/terminal state successfully.                        |
+| `failed`   |  `✗`  |  `x`  | `danger` (red)    | Terminal failure with no further retry.                                          |
 
 `formatStatus("running")` → `▶ running`. With `{ color: true }` the badge is wrapped in
 the status' semantic color; with `{ ascii: true }` it renders `> running`.
@@ -37,13 +37,13 @@ the status' semantic color; with `{ ascii: true }` it renders `> running`.
 Semantic tokens decouple meaning from concrete ANSI codes (so a TUI theme can remap
 them without touching call sites):
 
-| Token | ANSI (SGR) | Used by |
-|-------|------------|---------|
-| `info` | `36` cyan | `running` |
-| `warn` | `33` yellow | `retrying` |
-| `muted` | `90` gray | `blocked`, de-emphasized metadata |
-| `success` | `32` green | `done` |
-| `danger` | `31` red | `failed`, error text |
+| Token     | ANSI (SGR)  | Used by                           |
+| --------- | ----------- | --------------------------------- |
+| `info`    | `36` cyan   | `running`                         |
+| `warn`    | `33` yellow | `retrying`                        |
+| `muted`   | `90` gray   | `blocked`, de-emphasized metadata |
+| `success` | `32` green  | `done`                            |
+| `danger`  | `31` red    | `failed`, error text              |
 
 `colorize(text, token, enabled)` wraps text in the token's SGR + reset.
 `shouldUseColor({ env, isTTY })` decides `enabled`: `NO_COLOR` set → never;
@@ -51,10 +51,10 @@ them without touching call sites):
 
 ## Truncation rules
 
-| Helper | Rule | Use for |
-|--------|------|---------|
-| `truncate(text, max=120)` | Cut to `max` chars; append `…` (counts toward the budget, so output never exceeds `max`). | single-value log fields |
-| `truncateOneLine(text, max=120)` | Collapse all whitespace/newlines → single spaces, trim, then `truncate`. | **agent messages and hook output** in logs (PROJECT_BRIEF §9.2/§9.4) |
+| Helper                           | Rule                                                                                      | Use for                                                              |
+| -------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `truncate(text, max=120)`        | Cut to `max` chars; append `…` (counts toward the budget, so output never exceeds `max`). | single-value log fields                                              |
+| `truncateOneLine(text, max=120)` | Collapse all whitespace/newlines → single spaces, trim, then `truncate`.                  | **agent messages and hook output** in logs (PROJECT_BRIEF §9.2/§9.4) |
 
 `DEFAULT_MAX_LEN = 120`, `ELLIPSIS = "…"`. Rationale: 120 keeps a status + identifier +
 message comfortably on one line in a typical terminal while preserving enough of the
@@ -77,18 +77,25 @@ The orchestrator tracks a granular `RunAttemptPhase` (SPEC §7.2, 11 phases).
 ## Example (v1 log line)
 
 ```ts
-import { formatStatus, truncateOneLine, phaseStatus } from "../core/observability/glyphs";
+import {
+  formatStatus,
+  truncateOneLine,
+  phaseStatus,
+} from "../core/observability/glyphs";
 
 // human-facing, colorized when attached to a TTY:
 formatStatus(phaseStatus("StreamingTurn"), { color: true }); // "▶ running" (cyan)
 
 // structured log annotations stay plain + bounded:
-yield* Effect.logInfo("agent turn").pipe(Effect.annotateLogs({
-  issue: issue.identifier,
-  status: phaseStatus(attempt.status),          // "running"
-  glyph: glyph(phaseStatus(attempt.status)),    // "▶"
-  message: truncateOneLine(lastAgentMessage),   // one line, ≤120 chars
-}));
+yield *
+  Effect.logInfo("agent turn").pipe(
+    Effect.annotateLogs({
+      issue: issue.identifier,
+      status: phaseStatus(attempt.status), // "running"
+      glyph: glyph(phaseStatus(attempt.status)), // "▶"
+      message: truncateOneLine(lastAgentMessage), // one line, ≤120 chars
+    }),
+  );
 ```
 
 ## Accessibility / robustness notes

@@ -26,6 +26,11 @@ export interface RetryingView {
   readonly issueId: string;
 }
 
+/** A claimed issue parked after exhausting failure retries. */
+export interface AbandonedView {
+  readonly issueId: string;
+}
+
 export type ReconcileAction =
   /** Stall: kill the worker and schedule a failure-backoff retry (SPEC §8.5 A). */
   | { readonly _tag: "StallKill"; readonly issueId: string }
@@ -46,6 +51,12 @@ export interface ReconcileInput {
    * terminal mid-backoff would still fire one more (wasted) dispatch (bug #17).
    */
   readonly retrying?: ReadonlyArray<RetryingView>;
+  /**
+   * Issues parked after exhausting failure retries. They remain claimed while active so the
+   * dispatcher cannot pick them again every poll, but they must still reconcile terminal or
+   * vanished tracker state.
+   */
+  readonly abandoned?: ReadonlyArray<AbandonedView>;
   /** Refreshed tracker states keyed by issue id; `null` means the refresh failed. */
   readonly refreshed: ReadonlyMap<string, IssueStateRef> | null;
   /** Current monotonic-clock ms. */
@@ -54,6 +65,32 @@ export interface ReconcileInput {
   readonly activeStates: ReadonlySet<string>;
   readonly terminalStates: ReadonlySet<string>;
 }
+
+/**
+ * Tracker-only reconciliation for a slot-holding issue that has no worker and no stall clock
+ * (a retry/continuation backoff window, or a parked/abandoned issue): terminal → kill + clean,
+ * vanished/other → release. Active returns `null` (no action) so the pending retry fires as
+ * planned or the exhausted issue stays parked/claimed.
+ */
+const classifyTrackerOnly = (
+  issueId: string,
+  refreshed: ReadonlyMap<string, IssueStateRef>,
+  activeStates: ReadonlySet<string>,
+  terminalStates: ReadonlySet<string>,
+): ReconcileAction | null => {
+  const ref = refreshed.get(issueId);
+  if (ref === undefined) {
+    return { _tag: "NeitherKill", issueId };
+  }
+  const state = normalizeState(ref.state);
+  if (terminalStates.has(state)) {
+    return { _tag: "TerminalKill", issueId };
+  }
+  if (!activeStates.has(state)) {
+    return { _tag: "NeitherKill", issueId };
+  }
+  return null;
+};
 
 /** Decide the reconciliation actions for one tick (SPEC §8.5). */
 export const planReconciliation = (input: ReconcileInput): ReadonlyArray<ReconcileAction> => {
@@ -82,23 +119,20 @@ export const planReconciliation = (input: ReconcileInput): ReadonlyArray<Reconci
       actions.push({ _tag: "NeitherKill", issueId: worker.issueId });
     }
   }
-  // (C) Retrying issues: tracker-state only (no stall, no UpdateActive — the pending
-  // retry is left untouched while the issue stays active). A refresh failure leaves them
-  // alone so the backoff can still fire.
+  // (C) Slot-holding issues with no worker — retry/continuation backoff windows and parked
+  // (abandoned) issues — reconcile by tracker state only (see classifyTrackerOnly). A refresh
+  // failure leaves them all untouched so a pending backoff can still fire (bug #17).
   if (input.refreshed !== null) {
-    for (const retrying of input.retrying ?? []) {
-      const ref = input.refreshed.get(retrying.issueId);
-      if (ref === undefined) {
-        actions.push({ _tag: "NeitherKill", issueId: retrying.issueId });
-        continue;
+    for (const view of [...(input.retrying ?? []), ...(input.abandoned ?? [])]) {
+      const action = classifyTrackerOnly(
+        view.issueId,
+        input.refreshed,
+        input.activeStates,
+        input.terminalStates,
+      );
+      if (action !== null) {
+        actions.push(action);
       }
-      const state = normalizeState(ref.state);
-      if (input.terminalStates.has(state)) {
-        actions.push({ _tag: "TerminalKill", issueId: retrying.issueId });
-      } else if (!input.activeStates.has(state)) {
-        actions.push({ _tag: "NeitherKill", issueId: retrying.issueId });
-      }
-      // active → no action: let the scheduled retry/continuation fire as planned.
     }
   }
   return actions;

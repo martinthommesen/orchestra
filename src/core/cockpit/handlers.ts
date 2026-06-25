@@ -41,7 +41,7 @@ const toAckWire = (result: CommandResult): AckWire =>
  * ({@link LiveBudget}, written by the owner fiber on `ReloadConfig`) so a hot settings reload
  * is reflected in the next snapshot — never the stale startup value.
  */
-export const readGroupLive = HttpApiBuilder.group(CockpitApi, "read", (handlers) =>
+const readGroupLive = HttpApiBuilder.group(CockpitApi, "read", (handlers) =>
   handlers
     .handle("state", () =>
       Effect.gen(function* () {
@@ -97,7 +97,7 @@ const sendCommand = (
   });
 
 /** The control group implementation — every endpoint is gated by the auth middleware. */
-export const controlGroupLive = HttpApiBuilder.group(CockpitApi, "control", (handlers) =>
+const controlGroupLive = HttpApiBuilder.group(CockpitApi, "control", (handlers) =>
   handlers
     .handle("pause", () => sendCommand({ _tag: "PauseDispatch" }).pipe(Effect.map(toControlWire)))
     .handle("resume", () => sendCommand({ _tag: "ResumeDispatch" }).pipe(Effect.map(toControlWire)))

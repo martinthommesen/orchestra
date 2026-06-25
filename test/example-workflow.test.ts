@@ -50,6 +50,7 @@ describe("WORKFLOW.example.md (Sprint 0 Task 11)", () => {
       expect(def.config.polling.interval_ms).toBe(30_000);
       expect(def.config.agent.max_concurrent_agents).toBe(3);
       expect(def.config.agent.max_turns).toBe(10);
+      expect(def.config.agent.max_failure_retries).toBe(3);
       expect(def.config.copilot.command).toBe("copilot");
       expect(def.config.hooks.after_create).toBe("git init -q");
       // workspace.root is resolved to an absolute path (relative → WORKFLOW dir).

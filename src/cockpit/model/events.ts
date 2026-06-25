@@ -65,11 +65,11 @@ const toEventRow = (now: number, e: EventEnvelopeWire): EventRowVM => {
 
 /** Derive the full event feed, newest-first. */
 export const toEventsView = (s: SnapshotWire, now: number): ReadonlyArray<EventRowVM> =>
-  [...s.recent_events].reverse().map((e) => toEventRow(now, e));
+  s.recent_events.toReversed().map((e) => toEventRow(now, e));
 
 /** The distinct event kinds present (sorted) — feeds the filter dropdown. */
 export const eventKinds = (rows: ReadonlyArray<EventRowVM>): ReadonlyArray<string> =>
-  [...new Set(rows.map((r) => r.kind))].sort();
+  Array.from(new Set(rows.map((r) => r.kind))).toSorted();
 
 export interface EventFilter {
   /** "all" | a specific level. */

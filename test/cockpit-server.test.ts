@@ -256,4 +256,23 @@ describe("cockpit static fallback (DD-8)", () => {
       expect(res.text).toContain("/api/v1");
     }),
   );
+
+  it.scopedLive("adds anti-framing and nosniff headers to API and static responses", () =>
+    Effect.gen(function* () {
+      const port = yield* freePort;
+      yield* bootCockpit(port).pipe(Effect.provide(cockpitContext()));
+
+      const responses = yield* fetchWhenUp(async () => {
+        const api = await fetch(`http://127.0.0.1:${port}/api/v1/state`);
+        const staticRes = await fetch(`http://127.0.0.1:${port}/`);
+        return [api, staticRes] as const;
+      });
+
+      for (const res of responses) {
+        expect(res.headers.get("x-frame-options")).toBe("DENY");
+        expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+        expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      }
+    }),
+  );
 });

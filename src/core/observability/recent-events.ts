@@ -21,7 +21,7 @@ import { truncateOneLine } from "./glyphs";
  */
 
 /** Max envelopes retained in the ring (oldest dropped past this). */
-export const RECENT_EVENTS_CAP = 200;
+const RECENT_EVENTS_CAP = 200;
 
 /** Per-message ingestion budget (chars) — keeps one event on one line, bounds size. */
 export const EVENT_MESSAGE_MAX = 160;
@@ -103,6 +103,14 @@ export const toEventDraft = (obs: Observation): EventDraft | null => {
         issue_id: obs.issueId,
         identifier: obs.identifier,
         message: `failed ${obs.identifier}: ${obs.message}`,
+      };
+    case "WorkerAbandoned":
+      return {
+        level: "warn",
+        kind: "abandoned",
+        issue_id: obs.issueId,
+        identifier: obs.identifier,
+        message: `parked ${obs.identifier} after ${obs.attempts} failure(s): ${obs.reason}`,
       };
     case "WorkerKilled":
       return {

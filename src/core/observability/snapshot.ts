@@ -83,6 +83,7 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
     return act === undefined ? ra : { ...ra, last_activity: act };
   });
   const retrying = Object.values(s.retry_attempts);
+  const abandoned = Object.values(s.abandoned);
   const budget = budgetProjection(extra.budget);
   const restore = restoreProjection(extra.restore);
   const control = controlProjection(extra.operatorPaused ?? false, extra.budget);
@@ -92,6 +93,7 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
     counts: {
       running: running.length,
       retrying: retrying.length,
+      abandoned: abandoned.length,
       completed: s.completed.length,
       claimed: s.claimed.length,
     },
@@ -99,6 +101,7 @@ export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => 
     // retrying carries the new (optional) scheduled_at/delay_ms automatically; due_at_ms
     // (monotonic) is retained unchanged.
     retrying,
+    abandoned,
     completed: s.completed,
     // Rich completion history (additive; the IDs-only `completed` above is authoritative).
     recent_completed: extra.recentCompleted ?? [],

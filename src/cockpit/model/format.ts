@@ -7,7 +7,7 @@
  */
 
 /** The sentinel shown when a timestamp cannot be parsed — never a plausible "0s". */
-export const UNKNOWN_TIME = "—";
+const UNKNOWN_TIME = "—";
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 

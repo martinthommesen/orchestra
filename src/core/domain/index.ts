@@ -4,7 +4,6 @@
  */
 export * from "./agent-event";
 export * from "./issue";
-export * from "./live-session";
 export * from "./orchestrator-state";
 export * from "./retry-entry";
 export * from "./run-attempt";

@@ -18,6 +18,14 @@ export const ROUTE_LABELS: Record<Route, string> = {
   settings: "Settings",
 };
 
+/** Single-key suffix (after the `g` prefix) that jumps to each route; shared by the nav + hook. */
+export const ROUTE_KEY: Record<Route, string> = {
+  fleet: "f",
+  kanban: "k",
+  events: "e",
+  settings: "s",
+};
+
 const isRoute = (value: string): value is Route => (ROUTES as readonly string[]).includes(value);
 
 /** Parse a `location.hash` (e.g. `"#/kanban"`) → a Route, defaulting to Fleet for anything else. */

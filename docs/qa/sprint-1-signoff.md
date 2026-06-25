@@ -27,38 +27,38 @@ Sprint 2. Four minor issues are tracked. None prevent building on these foundati
 
 ## Verification matrix
 
-| # | Success criterion / check | Result | Evidence |
-|---|---------------------------|--------|----------|
-| 1 | `pnpm install --frozen-lockfile` from clean `node_modules` | ✅ PASS | `rm -rf node_modules && pnpm install --frozen-lockfile; echo $?` → **0** |
-| 1 | `pnpm typecheck` | ✅ PASS | `tsc --noEmit` → exit **0** |
-| 1 | `pnpm lint` | ✅ PASS | `biome check .` → "Checked 72 files… No fixes applied", exit **0** |
-| 1 | `pnpm test` | ✅ PASS | **178 passed / 178**, **15 files**, exit **0** (matches done.md claim) |
-| 1 | `pnpm build` | ✅ PASS | `tsup` → `dist/cli/main.js` 68.35 KB, exit **0** |
-| 2 | CLI boots + emits logfmt `started` line | ✅ PASS | `…message="orchestra started" event=started snapshot_port=4317 pid=… version=0.0.0 workflow_path=…` |
-| 2 | Missing/invalid args exit non-zero w/ clear message | ✅ PASS | no-args → `CliUsageError: usage: orchestra <path…>` exit **1**; `--port abc/0/99999` → `--port must be an integer in 1..65535` exit **1** |
-| 2 | `--port N` exposes `GET /api/v1/state` on 127.0.0.1 | ✅ PASS | curl loopback → full JSON snapshot (200); unknown path → **404** |
-| 2 | Snapshot NOT reachable on non-loopback interface | ✅ PASS | `lsof` shows `TCP 127.0.0.1:4317 (LISTEN)` only; curl `http://<LAN-IP>:4317` → **connection refused (exit 7)** |
-| 2 | Daemon keeps looping in degraded mode when tracker errors | ✅ PASS | refused endpoint → repeating `event=tracker_error` WARN + `tick_start`/`reconciled`/`tick_end` every interval; no crash; graceful exit on SIGTERM |
-| 3 | Full loop on fakes via TestClock, no real timers/network | ✅ PASS | `orchestrator-loop.test.ts` (6 scenarios) + `e2e-fake.test.ts` |
-| 3 | dispatch → success + continuation | ✅ PASS | scenarios "dispatch → success", "dispatch → continuation" (resume `s1`) |
-| 3 | failure → backoff retry | ✅ PASS | scenario asserts `delayMs == 10_000` then retry attempt `1` succeeds |
-| 3 | issue→terminal mid-run → kill + clean | ✅ PASS | scenario asserts `WorkerKilled reason=terminal` + `WorkspaceCleaned` + removed workspace |
-| 3 | stall → kill + retry | ✅ PASS | scenario asserts `WorkerKilled reason=stall` + failure retry + success |
-| 3 | slots-full → requeue | ⚠️ PASS (with caveat) | scenario covers requeue via **reconciliation**, not via retry; see #17 — retry/continuation requeue can exceed the cap |
-| 3 | Property: no double-dispatch of a claimed issue | ✅ PASS (pure) | `orchestrator-pure.test.ts`; proven on pure `selectCandidates` (claim set incl. retrying). Live-loop never double-dispatches the *same* issue |
-| 3 | Property: concurrency never exceeds global/per-state caps | ⚠️ PARTIAL | pure `planDispatch` proven; **live loop can exceed caps** via retry/continuation → **#17 (major)** |
-| 3 | Property: backoff monotonic & capped | ✅ PASS | `failureBackoffMs` property: non-decreasing, ≤ cap, ≥ min(base,cap); `10s·2^(n-1)` |
-| 4 | Workspace cwd == workspace | ✅ PASS | runner sets both `Command.workingDirectory` and `-C`; integration test writes `cwd.txt` at workspace path |
-| 4 | path-under-root enforced | ✅ PASS | `computeWorkspacePath` + `isPathUnderRoot`; separators→`_`, `.`/`..`/equal-path rejected with `PathOutsideWorkspaceRoot` |
-| 4 | sanitized workspace key | ✅ PASS | `sanitizeWorkspaceKey` allows `[A-Za-z0-9._-]`, else `_` |
-| 4 | No secret/token logging | ✅ PASS | tracker `mapError` never embeds token; Observer logs only ids/identifier/sessionId/truncated msgs; degraded-mode logs showed only `ECONNREFUSED 127.0.0.1:59999`, **no token**. (Caveat: untruncated hook output is the one plausible leak path → **#20**) |
-| 5 | JSONL parsing robust to partial/malformed lines | ✅ PASS (1 gap) | `mapCopilotLine` never throws: blank→[], unparseable/typeless→`Malformed`; gap: no test for final result line w/o trailing newline → **#22** |
-| 5 | Child process killed on scope close (no orphans) | ✅ PASS (verified) | **Empirically verified:** hanging fake `copilot` child got `Terminated: 15` and `process.kill(pid,0)` threw after `Fiber.interrupt`. No automated test → **#22** |
-| 5 | GitHub state-mapping edge cases | ⚠️ PASS (1 edge) | open/closed + `state_reason` + status-label mapping correct **except** closed-issue-with-active-label → **#18 (major)** |
-| 5 | Reconciliation refresh-failure keeps workers | ✅ PASS | `planReconciliation(refreshed=null)` → `[]`; pure + scenario coverage |
-| 5 | Retry timer cancel-on-reschedule (no double-fire) | ✅ PASS | `scheduleRetry` interrupts existing `timerFiber` before scheduling; single-fiber mailbox serializes handling |
-| 6 | Node 22 + 24 CI | ➖ NOT RE-RUN | CI config present (`.github/workflows/ci.yml`, Node 22+24); verified locally on Node 24 only |
-| 6 | Live real-repo + real Copilot run | ➖ DEFERRED | Out of scope to run (cost/noise). Runbook documented below |
+| #   | Success criterion / check                                  | Result                | Evidence                                                                                                                                                                                                                                                   |
+| --- | ---------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `pnpm install --frozen-lockfile` from clean `node_modules` | ✅ PASS               | `rm -rf node_modules && pnpm install --frozen-lockfile; echo $?` → **0**                                                                                                                                                                                   |
+| 1   | `pnpm typecheck`                                           | ✅ PASS               | `tsc --noEmit` → exit **0**                                                                                                                                                                                                                                |
+| 1   | `pnpm lint`                                                | ✅ PASS               | `biome check .` → "Checked 72 files… No fixes applied", exit **0**                                                                                                                                                                                         |
+| 1   | `pnpm test`                                                | ✅ PASS               | **178 passed / 178**, **15 files**, exit **0** (matches done.md claim)                                                                                                                                                                                     |
+| 1   | `pnpm build`                                               | ✅ PASS               | `tsup` → `dist/cli/main.js` 68.35 KB, exit **0**                                                                                                                                                                                                           |
+| 2   | CLI boots + emits logfmt `started` line                    | ✅ PASS               | `…message="orchestra started" event=started snapshot_port=4317 pid=… version=0.0.0 workflow_path=…`                                                                                                                                                        |
+| 2   | Missing/invalid args exit non-zero w/ clear message        | ✅ PASS               | no-args → `CliUsageError: usage: orchestra <path…>` exit **1**; `--port abc/0/99999` → `--port must be an integer in 1..65535` exit **1**                                                                                                                  |
+| 2   | `--port N` exposes `GET /api/v1/state` on 127.0.0.1        | ✅ PASS               | curl loopback → full JSON snapshot (200); unknown path → **404**                                                                                                                                                                                           |
+| 2   | Snapshot NOT reachable on non-loopback interface           | ✅ PASS               | `lsof` shows `TCP 127.0.0.1:4317 (LISTEN)` only; curl `http://<LAN-IP>:4317` → **connection refused (exit 7)**                                                                                                                                             |
+| 2   | Daemon keeps looping in degraded mode when tracker errors  | ✅ PASS               | refused endpoint → repeating `event=tracker_error` WARN + `tick_start`/`reconciled`/`tick_end` every interval; no crash; graceful exit on SIGTERM                                                                                                          |
+| 3   | Full loop on fakes via TestClock, no real timers/network   | ✅ PASS               | `orchestrator-loop.test.ts` (6 scenarios) + `e2e-fake.test.ts`                                                                                                                                                                                             |
+| 3   | dispatch → success + continuation                          | ✅ PASS               | scenarios "dispatch → success", "dispatch → continuation" (resume `s1`)                                                                                                                                                                                    |
+| 3   | failure → backoff retry                                    | ✅ PASS               | scenario asserts `delayMs == 10_000` then retry attempt `1` succeeds                                                                                                                                                                                       |
+| 3   | issue→terminal mid-run → kill + clean                      | ✅ PASS               | scenario asserts `WorkerKilled reason=terminal` + `WorkspaceCleaned` + removed workspace                                                                                                                                                                   |
+| 3   | stall → kill + retry                                       | ✅ PASS               | scenario asserts `WorkerKilled reason=stall` + failure retry + success                                                                                                                                                                                     |
+| 3   | slots-full → requeue                                       | ⚠️ PASS (with caveat) | scenario covers requeue via **reconciliation**, not via retry; see #17 — retry/continuation requeue can exceed the cap                                                                                                                                     |
+| 3   | Property: no double-dispatch of a claimed issue            | ✅ PASS (pure)        | `orchestrator-pure.test.ts`; proven on pure `selectCandidates` (claim set incl. retrying). Live-loop never double-dispatches the _same_ issue                                                                                                              |
+| 3   | Property: concurrency never exceeds global/per-state caps  | ⚠️ PARTIAL            | pure `planDispatch` proven; **live loop can exceed caps** via retry/continuation → **#17 (major)**                                                                                                                                                         |
+| 3   | Property: backoff monotonic & capped                       | ✅ PASS               | `failureBackoffMs` property: non-decreasing, ≤ cap, ≥ min(base,cap); `10s·2^(n-1)`                                                                                                                                                                         |
+| 4   | Workspace cwd == workspace                                 | ✅ PASS               | runner sets both `Command.workingDirectory` and `-C`; integration test writes `cwd.txt` at workspace path                                                                                                                                                  |
+| 4   | path-under-root enforced                                   | ✅ PASS               | `computeWorkspacePath` + `isPathUnderRoot`; separators→`_`, `.`/`..`/equal-path rejected with `PathOutsideWorkspaceRoot`                                                                                                                                   |
+| 4   | sanitized workspace key                                    | ✅ PASS               | `sanitizeWorkspaceKey` allows `[A-Za-z0-9._-]`, else `_`                                                                                                                                                                                                   |
+| 4   | No secret/token logging                                    | ✅ PASS               | tracker `mapError` never embeds token; Observer logs only ids/identifier/sessionId/truncated msgs; degraded-mode logs showed only `ECONNREFUSED 127.0.0.1:59999`, **no token**. (Caveat: untruncated hook output is the one plausible leak path → **#20**) |
+| 5   | JSONL parsing robust to partial/malformed lines            | ✅ PASS (1 gap)       | `mapCopilotLine` never throws: blank→[], unparseable/typeless→`Malformed`; gap: no test for final result line w/o trailing newline → **#22**                                                                                                               |
+| 5   | Child process killed on scope close (no orphans)           | ✅ PASS (verified)    | **Empirically verified:** hanging fake `copilot` child got `Terminated: 15` and `process.kill(pid,0)` threw after `Fiber.interrupt`. No automated test → **#22**                                                                                           |
+| 5   | GitHub state-mapping edge cases                            | ⚠️ PASS (1 edge)      | open/closed + `state_reason` + status-label mapping correct **except** closed-issue-with-active-label → **#18 (major)**                                                                                                                                    |
+| 5   | Reconciliation refresh-failure keeps workers               | ✅ PASS               | `planReconciliation(refreshed=null)` → `[]`; pure + scenario coverage                                                                                                                                                                                      |
+| 5   | Retry timer cancel-on-reschedule (no double-fire)          | ✅ PASS               | `scheduleRetry` interrupts existing `timerFiber` before scheduling; single-fiber mailbox serializes handling                                                                                                                                               |
+| 6   | Node 22 + 24 CI                                            | ➖ NOT RE-RUN         | CI config present (`.github/workflows/ci.yml`, Node 22+24); verified locally on Node 24 only                                                                                                                                                               |
+| 6   | Live real-repo + real Copilot run                          | ➖ DEFERRED           | Out of scope to run (cost/noise). Runbook documented below                                                                                                                                                                                                 |
 
 Legend: ✅ pass · ⚠️ pass with caveat / partial · ➖ not run / deferred.
 
@@ -66,14 +66,14 @@ Legend: ✅ pass · ⚠️ pass with caveat / partial · ➖ not run / deferred.
 
 ## Issues filed
 
-| # | Severity | Area | Title |
-|---|----------|------|-------|
-| [#17](https://github.com/martinthommesen/orchestra/issues/17) | **major** | orchestrator | Concurrency cap exceeded: retry/continuation re-dispatch bypasses `planDispatch` (§8.3) — **reproduced** (cap=1 → 2 running) |
-| [#18](https://github.com/martinthommesen/orchestra/issues/18) | **major** | tracker | Closed GitHub issue with a lingering active status label is normalized as active (worker not stopped on close) |
-| [#19](https://github.com/martinthommesen/orchestra/issues/19) | minor | observability | Octokit default request logging emits unstructured lines into the logfmt stream |
-| [#20](https://github.com/martinthommesen/orchestra/issues/20) | minor | workspace | Hook stdout/stderr inherited untruncated (contradicts §9.2/§9.4 "truncate hook output") |
-| [#21](https://github.com/martinthommesen/orchestra/issues/21) | minor | observability | CLI: missing/unreadable WORKFLOW file surfaces generic "An error has occurred" |
-| [#22](https://github.com/martinthommesen/orchestra/issues/22) | minor | testing | Test gaps: live concurrency invariant, real subprocess kill-on-interrupt, JSONL final-line-no-newline |
+| #                                                             | Severity  | Area          | Title                                                                                                                        |
+| ------------------------------------------------------------- | --------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [#17](https://github.com/martinthommesen/orchestra/issues/17) | **major** | orchestrator  | Concurrency cap exceeded: retry/continuation re-dispatch bypasses `planDispatch` (§8.3) — **reproduced** (cap=1 → 2 running) |
+| [#18](https://github.com/martinthommesen/orchestra/issues/18) | **major** | tracker       | Closed GitHub issue with a lingering active status label is normalized as active (worker not stopped on close)               |
+| [#19](https://github.com/martinthommesen/orchestra/issues/19) | minor     | observability | Octokit default request logging emits unstructured lines into the logfmt stream                                              |
+| [#20](https://github.com/martinthommesen/orchestra/issues/20) | minor     | workspace     | Hook stdout/stderr inherited untruncated (contradicts §9.2/§9.4 "truncate hook output")                                      |
+| [#21](https://github.com/martinthommesen/orchestra/issues/21) | minor     | observability | CLI: missing/unreadable WORKFLOW file surfaces generic "An error has occurred"                                               |
+| [#22](https://github.com/martinthommesen/orchestra/issues/22) | minor     | testing       | Test gaps: live concurrency invariant, real subprocess kill-on-interrupt, JSONL final-line-no-newline                        |
 
 > No `severity:*` labels exist on the repo; severity is encoded in each title/body and the
 > `bug` + `area:*` labels are applied. (#22 is test-debt, labelled `area:testing` only.)
@@ -116,7 +116,7 @@ runbook:
 6. **Cost guardrails:** keep `max_turns` low; watch `agent_totals` in the snapshot;
    tear down with SIGTERM.
 
-A *cheap, safe* live smoke is feasible (one issue, 1 turn). I did not run it without an
+A _cheap, safe_ live smoke is feasible (one issue, 1 turn). I did not run it without an
 explicit go-ahead. Give the word and I'll execute it against a throwaway repo.
 
 ---

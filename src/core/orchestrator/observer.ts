@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, type Effect } from "effect";
 import type { ReconcileAction } from "./reconcile";
 
 /**
@@ -62,6 +62,14 @@ export type Observation =
       readonly issueId: string;
       readonly identifier: string;
       readonly message: string;
+    }
+  | {
+      readonly _tag: "WorkerAbandoned";
+      readonly issueId: string;
+      readonly identifier: string;
+      readonly attempts: number;
+      readonly maxRetries: number;
+      readonly reason: string;
     }
   | { readonly _tag: "WorkerKilled"; readonly issueId: string; readonly reason: string }
   | { readonly _tag: "WorkspaceCleaned"; readonly issueId: string; readonly identifier: string }
@@ -137,8 +145,3 @@ export class Observer extends Context.Tag("orchestra/Observer")<
     readonly emit: (obs: Observation) => Effect.Effect<void>;
   }
 >() {}
-
-/** A no-op observer (useful as a default and in micro-tests). */
-export const ObserverNoop: Layer.Layer<Observer> = Layer.succeed(Observer, {
-  emit: () => Effect.void,
-});

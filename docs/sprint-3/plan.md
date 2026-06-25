@@ -1,25 +1,28 @@
 # Sprint 3 — Durable Orchestrator + Observability v2
 
 ## Goal
+
 Make Orchestra **durable** (survives a daemon restart, resuming in-flight work) and make
 the Sprint 2 dashboard **genuinely useful** by surfacing a live event feed, per-session
 agent activity, and rich (not IDs-only) completion/retry data — all on top of the existing
 loopback snapshot API.
 
 Two workstreams:
+
 - **Phase A — Observability v2 + snapshot enrichment** (additive, low risk; lands first).
 - **Phase B — Full durability with worker/retry resume** (deep core change; gated behind a
   blocking design spike, #39).
 - **Phase C** — tests, docs, handoff.
 
 ## Non-negotiable constraints
+
 1. **The snapshot contract stays backward-compatible (strictly additive).** Keep
    `completed: string[]` and `retrying[].due_at_ms` (monotonic) exactly as they are; only
    ADD new fields. The Sprint 2 dashboard's defensive parser must keep working unchanged.
    No `/api/v2` — we are not breaking `/api/v1/state`.
 2. **Recent events are observability, NOT scheduling state.** They live in a separate
    `RecentEvents` service, never inside `OrchestratorState`. The snapshot server reads both.
-3. **`Observer` is a single Tag, not a multicast bus.** Fan-out is via an explicit *tee*
+3. **`Observer` is a single Tag, not a multicast bus.** Fan-out is via an explicit _tee_
    observer that both logs (preserving `ObserverLive` logfmt output) and appends to the
    ring buffer. `Layer.merge` does NOT fan out a Tag — do not assume it does.
 4. **Reuse `glyphs.ts`** for all statuses/colours in the new dashboard panels.
@@ -30,10 +33,12 @@ Two workstreams:
    and is therefore spike-gated.
 
 ## Snapshot contract — ADDITIVE fields only
+
 Existing fields unchanged. New (all optional/defensively-parsed on the client):
+
 - `recent_events: Array<EventEnvelope>` — bounded, newest-last, display-safe:
   `{ seq:int, emitted_at:ISO, level:"info"|"warn", kind:string, issue_id?:string,
-  identifier?:string, message:string }` (message truncated at ingestion).
+identifier?:string, message:string }` (message truncated at ingestion).
 - `recent_completed: Array<CompletedEntry>` — rich completion history (bounded):
   `{ issue_id, identifier, finished_at:ISO, outcome:"completed"|"killed"|... }`.
   (`completed: string[]` stays as the authoritative IDs-only list.)
@@ -47,6 +52,7 @@ Existing fields unchanged. New (all optional/defensively-parsed on the client):
 ## Tasks
 
 ### Phase A — Observability v2 + enrichment (additive)
+
 - **#36 — `RecentEvents` ring-buffer service + tee Observer.** New service in
   `src/core/observability/` holding the last N (cap, e.g. 200) display-safe event
   envelopes with a monotonic `seq`. A tee Observer wraps `ObserverLive`: it formats+logs
@@ -68,6 +74,7 @@ Existing fields unchanged. New (all optional/defensively-parsed on the client):
   (new fields optional; absent → omit panel). Honour `--ascii`/`NO_COLOR`. View-model tests.
 
 ### Phase B — Full durability with resume (spike-gated)
+
 - **#39 — BLOCKING durability design spike.** Resolve and prove, then STOP for Producer
   review (do NOT build Phase B until authorised). Decide: persistence format (versioned
   `Schema.encode` JSON) + location (a state dir under the workspace root or a configured
@@ -90,6 +97,7 @@ Existing fields unchanged. New (all optional/defensively-parsed on the client):
   depending on the spike's resume decision.)
 
 ### Phase C — close-out
+
 - **#43 — Tests + docs + handoff.** State round-trip property tests (encode/decode
   fixed-point), restore/reconcile scenario tests (orphaned running, due retry, corrupt
   file), event-ring + enrichment unit tests, dashboard view-model tests. Docs:
@@ -97,10 +105,12 @@ Existing fields unchanged. New (all optional/defensively-parsed on the client):
   §5/§7/§8, resolve relevant backlog items.
 
 ## Dependencies
+
 - #37 → #36 (needs RecentEvents) · #38 → #37 (consumes enriched snapshot)
 - #40 → #39 · #41 → #40 + #37 (wall-clock retry fields) · #42 → #41 · #43 → all
 
 ## Success criteria
+
 - Phase A: dashboard shows a live event feed, per-session activity, and rich completed;
   `/api/v1/state` is strictly additive (Sprint 2 dashboard still parses it unchanged).
 - Phase B: kill the daemon mid-run and restart → bookkeeping is intact and in-flight work
@@ -109,10 +119,12 @@ Existing fields unchanged. New (all optional/defensively-parsed on the client):
 - All gates 0; core loop changes minimal and reviewed; no regression in the existing suite.
 
 ## Risk / cut order (if #39 shows Phase B exceeds one sprint)
+
 Bring the decision to the user at the #39 gate. Natural cut: ship Phase A + the #39 spike in
 Sprint 3; move #40–#42 build-out to Sprint 4.
 
 ## Deferred backlog (explicitly NOT this sprint)
+
 - Raw agent-stdout log-file tailing (this sprint does the event/activity feed, not raw logs).
 - Linear tracker adapter; in-process `--tui`; snapshot historical/forensic timeline beyond
   the bounded recent rings.

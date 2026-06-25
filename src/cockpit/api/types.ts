@@ -58,6 +58,15 @@ export interface RetryEntryWire {
   readonly error: string | null;
 }
 
+/** An active issue parked after exhausting failure retries. */
+export interface AbandonedIssueWire {
+  readonly issue_id: string;
+  readonly identifier: string;
+  readonly attempts: number;
+  readonly abandoned_at: string;
+  readonly reason: string;
+}
+
 /** One lifecycle event in the bounded feed. */
 export interface EventEnvelopeWire {
   readonly seq: number;
@@ -114,11 +123,13 @@ export interface SnapshotWire {
   readonly counts: {
     readonly running: number;
     readonly retrying: number;
+    readonly abandoned: number;
     readonly completed: number;
     readonly claimed: number;
   };
   readonly running: ReadonlyArray<RunAttemptWire>;
   readonly retrying: ReadonlyArray<RetryEntryWire>;
+  readonly abandoned: ReadonlyArray<AbandonedIssueWire>;
   readonly completed: ReadonlyArray<string>;
   readonly recent_completed: ReadonlyArray<RecentCompletionWire>;
   readonly recent_events: ReadonlyArray<EventEnvelopeWire>;
@@ -136,6 +147,7 @@ export interface EditableSettingsWire {
     readonly max_concurrent_agents: number;
     readonly max_concurrent_agents_by_state: Readonly<Record<string, number>>;
     readonly max_turns: number;
+    readonly max_failure_retries: number;
     readonly max_retry_backoff_ms: number;
   };
   readonly budget: { readonly max_total_tokens: number | null };
@@ -148,6 +160,7 @@ export interface SettingsPatchWire {
     readonly max_concurrent_agents?: number;
     readonly max_concurrent_agents_by_state?: Readonly<Record<string, number>>;
     readonly max_turns?: number;
+    readonly max_failure_retries?: number;
     readonly max_retry_backoff_ms?: number;
   };
   readonly budget?: { readonly max_total_tokens?: number | null };

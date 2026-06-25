@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import {
   type FileSystem,
@@ -40,6 +40,23 @@ import { type CockpitToken, cockpitTokenLayer, logToken, resolveToken } from "./
 
 /** Default static root: `dist/cockpit/`, resolved relative to the bundled CLI entry. */
 const defaultStaticDir = (): string => fileURLToPath(new URL("../cockpit", import.meta.url));
+
+const COCKPIT_SECURITY_HEADERS = {
+  "content-security-policy": "frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+} as const;
+
+const applyCockpitSecurityHeaders = (response: ServerResponse): void => {
+  for (const [key, value] of Object.entries(COCKPIT_SECURITY_HEADERS)) {
+    response.setHeader(key, value);
+  }
+};
+
+const createCockpitServer = () =>
+  createServer((_request, response) => {
+    applyCockpitSecurityHeaders(response);
+  });
 
 export interface RunCockpitOptions {
   readonly port: number;
@@ -90,7 +107,7 @@ export const runCockpit = (
         // navigation to 127.0.0.1/localhost sends no `Origin`, so we must not require one here.
         const host = Option.getOrUndefined(Headers.get(request.headers, "host"));
         if (!hostIsLoopbackHeader(host)) {
-          return yield* HttpServerResponse.text("forbidden", { status: 403 });
+          return HttpServerResponse.text("forbidden", { status: 403 });
         }
         return request.url.startsWith("/api/") ? yield* apiApp : yield* serveStatic(request.url);
       });
@@ -101,7 +118,7 @@ export const runCockpit = (
       Layer.provide(CockpitAuthLive),
       Layer.provide(cockpitTokenLayer(resolved.token)),
       Layer.provide(NodeFileSystem.layer),
-      Layer.provide(NodeHttpServer.layer(() => createServer(), { port, host: "127.0.0.1" })),
+      Layer.provide(NodeHttpServer.layer(createCockpitServer, { port, host: "127.0.0.1" })),
     );
 
     yield* Layer.launch(serveLayer).pipe(

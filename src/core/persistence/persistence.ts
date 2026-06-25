@@ -63,7 +63,7 @@ export interface PersistencePaths {
  * an explicit `persistence.dir` is used as-is when absolute, else resolved against the
  * (already absolute) workspace root.
  */
-export const resolvePersistencePaths = (config: ServiceConfig): PersistencePaths => {
+const resolvePersistencePaths = (config: ServiceConfig): PersistencePaths => {
   // `workspace.root` is resolved to an absolute path by the loader; the schema type stays
   // optional, so fall back to cwd defensively (never hit in a loaded config).
   const root = config.workspace.root ?? process.cwd();
@@ -156,6 +156,7 @@ export const makePersistence = (
           completed: String(restored.state.completed.length),
           running: String(Object.keys(restored.state.running).length),
           retrying: String(Object.keys(restored.state.retry_attempts).length),
+          abandoned: String(Object.keys(restored.state.abandoned).length),
         }),
       );
       return Option.some(restored);

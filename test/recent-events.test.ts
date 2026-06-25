@@ -50,6 +50,14 @@ const sample: Record<Observation["_tag"], Observation> = {
   },
   WorkerCompleted: { _tag: "WorkerCompleted", issueId: "42", identifier: "#42" },
   WorkerFailed: { _tag: "WorkerFailed", issueId: "42", identifier: "#42", message: "boom" },
+  WorkerAbandoned: {
+    _tag: "WorkerAbandoned",
+    issueId: "42",
+    identifier: "#42",
+    attempts: 4,
+    maxRetries: 3,
+    reason: "boom",
+  },
   WorkerKilled: { _tag: "WorkerKilled", issueId: "42", reason: "stall" },
   WorkspaceCleaned: { _tag: "WorkspaceCleaned", issueId: "42", identifier: "#42" },
   RetryScheduled: {

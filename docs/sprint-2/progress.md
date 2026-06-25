@@ -9,14 +9,14 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
 
 ## Task board
 
-| # | Task | Depends on | Status |
-|----|------|-----------|--------|
-| #29 | Ink toolchain spike & gate (BLOCKING) | — | ✅ done (Producer-approved) |
-| #30 | CLI dispatcher + `dashboard` subcommand | #29 | ✅ done |
-| #31 | Snapshot client + polling hook | #29 | ✅ done |
-| #32 | Dashboard view-model + Ink rendering | #29, #31 | ✅ done |
-| #33 | Test suite (view-model + hook + light render) | #29, #31, #32 | ✅ done |
-| #34 | Apache-2.0 license + dashboard docs + handoff | (docs ← #32) | ✅ done |
+| #   | Task                                          | Depends on    | Status                      |
+| --- | --------------------------------------------- | ------------- | --------------------------- |
+| #29 | Ink toolchain spike & gate (BLOCKING)         | —             | ✅ done (Producer-approved) |
+| #30 | CLI dispatcher + `dashboard` subcommand       | #29           | ✅ done                     |
+| #31 | Snapshot client + polling hook                | #29           | ✅ done                     |
+| #32 | Dashboard view-model + Ink rendering          | #29, #31      | ✅ done                     |
+| #33 | Test suite (view-model + hook + light render) | #29, #31, #32 | ✅ done                     |
+| #34 | Apache-2.0 license + dashboard docs + handoff | (docs ← #32)  | ✅ done                     |
 
 ## Progress log
 
@@ -82,8 +82,8 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
 - **Design-review follow-up** (post-#34, one focused commit): three honesty/robustness
   gaps closed in the dashboard module only (core + snapshot shape untouched).
   - **Fix 1 — unknown phase rendered honestly.** `statusForPhase` previously fell back
-    to `"running"` for any unrecognized phase, so contract drift would *look like active
-    work*. Replaced with a precomputed `StatusBadgeVM`: known phases mirror `glyphs.ts`
+    to `"running"` for any unrecognized phase, so contract drift would _look like active
+    work_. Replaced with a precomputed `StatusBadgeVM`: known phases mirror `glyphs.ts`
     verbatim; an unknown phase becomes an explicit muted `? unknown` badge (`known:false`)
     and the raw phase is surfaced subtly as `phase=<value>` on that row for diagnosis.
   - **Fix 2 — invalid `started_at` no longer shows "0s".** Elapsed now renders `—` when
@@ -97,6 +97,7 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
     live via PTY smoke: bad timestamp → `—`, drifted phase → `? unknown phase=<value>`.
 
 ## Decisions (from the Sprint 2 design review)
+
 - **Operational status, not history.** MVP = live fleet view; event feed / ring
   buffer / in-process `--tui` deferred.
 - **Standalone polling client**, not in-process renderer → core loop untouched.
@@ -110,6 +111,7 @@ Branch: `feature/sprint-2` (from `main` @ 5d84402).
   countdown (monotonic `due_at_ms`).
 
 ## Notes / risks to watch
+
 - `vitest.config.ts` include is `*.test.ts` today → must widen to `{ts,tsx}` or
   `.test.tsx` is silently skipped.
 - `exactOptionalPropertyTypes` + JSX props → conditional spreads, not

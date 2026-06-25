@@ -25,7 +25,7 @@ leak) and is deliberately kept out of the lifecycle feed. Three of four gates ar
 
 **But the headline claim — "336 passed / all gates 0" — is false on re-run.** `pnpm test` is
 **non-deterministically red**: it failed **7 of 8** full-suite runs in my hands, every failure in the
-*same* test (`test/humanize.test.ts`, the never-blank property), with `fc.string()` counterexamples
+_same_ test (`test/humanize.test.ts`, the never-blank property), with `fc.string()` counterexamples
 `"valueOf"`, `"toString"`, `"__proto__"`. Root cause is a real prototype-chain lookup defect in
 `humanizeAgentEvent` (#60). Production runtime is unaffected (the only caller passes a known union
 tag), so this is a single, narrowly-scoped, one-line-fixable blocker — **not** a feature failure. I
@@ -40,27 +40,27 @@ all 8 runs, including the budget gate, restore capture, and clock-sensitive path
 
 ## Gates (clean run on the merged tree)
 
-| Gate | Command | Result | Evidence |
-|------|---------|--------|----------|
-| Typecheck | `pnpm typecheck` (`tsc --noEmit`) | ✅ PASS | exit **0** |
-| Lint | `pnpm lint` (`biome check .`) | ✅ PASS | "Checked **109 files** … No fixes applied", exit **0** |
-| Build | `pnpm build` (`tsup`) | ✅ PASS | `dist/cli/main.js` 133.96 KB + `dist/cli/dashboard.js` 33.80 KB, "Build success", exit **0** |
-| Test | `pnpm test` (`vitest run`) | ❌ **FLAKY-RED** | **7/8 full-suite runs failed**; the lone failure is `test/humanize.test.ts` (`is total and never blank…(property)`), counterexamples `valueOf` / `toString` / `__proto__`. On the rare passing seed: **336 passed (336)** across 30 files. |
+| Gate      | Command                           | Result           | Evidence                                                                                                                                                                                                                                   |
+| --------- | --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Typecheck | `pnpm typecheck` (`tsc --noEmit`) | ✅ PASS          | exit **0**                                                                                                                                                                                                                                 |
+| Lint      | `pnpm lint` (`biome check .`)     | ✅ PASS          | "Checked **109 files** … No fixes applied", exit **0**                                                                                                                                                                                     |
+| Build     | `pnpm build` (`tsup`)             | ✅ PASS          | `dist/cli/main.js` 133.96 KB + `dist/cli/dashboard.js` 33.80 KB, "Build success", exit **0**                                                                                                                                               |
+| Test      | `pnpm test` (`vitest run`)        | ❌ **FLAKY-RED** | **7/8 full-suite runs failed**; the lone failure is `test/humanize.test.ts` (`is total and never blank…(property)`), counterexamples `valueOf` / `toString` / `__proto__`. On the rare passing seed: **336 passed (336)** across 30 files. |
 
 ### Test determinism loop (skeptical re-run, as the task asked)
 
 `pnpm vitest run` ×8 from repo root:
 
-| run | result | failing test / counterexample |
-|-----|--------|-------------------------------|
-| 1 | ❌ 1 failed / 335 | `humanize` · `["valueOf"]` |
-| 2 | ❌ 1 failed / 335 | `humanize` · `["toString"]` |
-| 3 | ❌ 1 failed / 335 | `humanize` · `["valueOf"]` |
-| 4 | ❌ 1 failed / 335 | `humanize` · `["toString"]` |
-| 5 | ❌ 1 failed / 335 | `humanize` · `["toString"]` |
-| 6 | ✅ 336 passed | — |
-| 7 | ❌ 1 failed / 335 | `humanize` · `["toString"]` |
-| 8 | ❌ 1 failed / 335 | `humanize` · `["valueOf"]` |
+| run | result            | failing test / counterexample |
+| --- | ----------------- | ----------------------------- |
+| 1   | ❌ 1 failed / 335 | `humanize` · `["valueOf"]`    |
+| 2   | ❌ 1 failed / 335 | `humanize` · `["toString"]`   |
+| 3   | ❌ 1 failed / 335 | `humanize` · `["valueOf"]`    |
+| 4   | ❌ 1 failed / 335 | `humanize` · `["toString"]`   |
+| 5   | ❌ 1 failed / 335 | `humanize` · `["toString"]`   |
+| 6   | ✅ 336 passed     | —                             |
+| 7   | ❌ 1 failed / 335 | `humanize` · `["toString"]`   |
+| 8   | ❌ 1 failed / 335 | `humanize` · `["valueOf"]`    |
 
 **1 pass / 7 fail.** The failure is isolated to one suite; **no other test ever flaked** across the
 8 runs (budget gate, restore-reconcile, snapshot-server, dashboard render, persistence — all green
@@ -94,32 +94,32 @@ defect.
 
 ### #53 — Budget guardrails ✅ (code + tests sound)
 
-| Claim | Verdict | Evidence |
-|-------|---------|----------|
-| Pure pre-`planDispatch` guard pauses NEW dispatch at the token ceiling | ✅ | `evaluateBudget` (`budget.ts`) is pure/total, no IO/state. `loop.ts:593` `const toDispatch = budget.paused ? [] : planDispatch(sorted, conCtx)` — the *only* behavioral edit. |
-| In-flight workers, retries (`handleRetryDue`), reconcile never affected | ✅ | `handleTick` order (`loop.ts:537`): `TickStart → reconcile (unconditional) → preflight → fetch → budget gate → dispatch`. Reconcile runs *before* and independent of the gate; worker completion rides the mailbox `handleWorkerDone`; retries fire on their own timers via the separate `handleRetryDue`. The guard reads none of these paths. **Pinned by `budget-gate.test.ts`**: an in-flight worker that blows the ceiling still finishes & reconciles (`completed` contains `i1`, `running.i1` undefined) while a new candidate `i2` is withheld (`runs == ["i1"]`). |
-| `BudgetExceeded` fires once per transition, not per tick | ✅ | Runtime latch `budgetPaused` (`loop.ts:150,570`) emits only on `budget.paused !== budgetPaused`. Test "paused observation fires once per transition" advances 3 ticks → exactly one emission. |
-| Snapshot `budget` block present ONLY when a ceiling is configured | ✅ | `snapshot-server.ts` `budgetProjection` returns `null` unless `budget.configured`; spread `...(budget === null ? {} : { budget })`. Unconfigured → field absent. |
-| Absent config → guard fully inert (pre-#53 behavior) | ✅ | `evaluateBudget` with `max_total_tokens` undefined → `{configured:false, paused:false}`; gate is identity. `BudgetConfig` is `optionalWith` all-defaults so an unchanged `WORKFLOW.md` decodes. |
+| Claim                                                                   | Verdict | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pure pre-`planDispatch` guard pauses NEW dispatch at the token ceiling  | ✅      | `evaluateBudget` (`budget.ts`) is pure/total, no IO/state. `loop.ts:593` `const toDispatch = budget.paused ? [] : planDispatch(sorted, conCtx)` — the _only_ behavioral edit.                                                                                                                                                                                                                                                                                                                                                                                              |
+| In-flight workers, retries (`handleRetryDue`), reconcile never affected | ✅      | `handleTick` order (`loop.ts:537`): `TickStart → reconcile (unconditional) → preflight → fetch → budget gate → dispatch`. Reconcile runs _before_ and independent of the gate; worker completion rides the mailbox `handleWorkerDone`; retries fire on their own timers via the separate `handleRetryDue`. The guard reads none of these paths. **Pinned by `budget-gate.test.ts`**: an in-flight worker that blows the ceiling still finishes & reconciles (`completed` contains `i1`, `running.i1` undefined) while a new candidate `i2` is withheld (`runs == ["i1"]`). |
+| `BudgetExceeded` fires once per transition, not per tick                | ✅      | Runtime latch `budgetPaused` (`loop.ts:150,570`) emits only on `budget.paused !== budgetPaused`. Test "paused observation fires once per transition" advances 3 ticks → exactly one emission.                                                                                                                                                                                                                                                                                                                                                                              |
+| Snapshot `budget` block present ONLY when a ceiling is configured       | ✅      | `snapshot-server.ts` `budgetProjection` returns `null` unless `budget.configured`; spread `...(budget === null ? {} : { budget })`. Unconfigured → field absent.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Absent config → guard fully inert (pre-#53 behavior)                    | ✅      | `evaluateBudget` with `max_total_tokens` undefined → `{configured:false, paused:false}`; gate is identity. `BudgetConfig` is `optionalWith` all-defaults so an unchanged `WORKFLOW.md` decodes.                                                                                                                                                                                                                                                                                                                                                                            |
 
-Honest follow-up acknowledged in `done.md`: the runtime *resume* latch is unreachable in production
+Honest follow-up acknowledged in `done.md`: the runtime _resume_ latch is unreachable in production
 (spend only grows, config loads once). Correct and harmless — covered for a future config-reload. No
 issue filed (it's a documented, non-blocking design note, not a defect).
 
 ### #54 — Restore visibility ✅
 
-| Claim | Verdict | Evidence |
-|-------|---------|----------|
-| Set-once capture at boot on a real restore; cold start → field ABSENT | ✅ | `restoreFromCheckpoint` early-returns `[]` when running/retry/completed all empty (`loop.ts:811`) **before** any `restoreStatus.record`, so cold start never records. `makeRestoreStatus` is `Ref<RestoreSummary|null>` seeded `null`, `record: Ref.update(prev => prev ?? summary)` (set-once). `snapshot-server` omits `restore` when `get` is `null`. |
-| Display-only — #41's restore/re-arm/reconcile byte-identical | ✅ | The `record` call sits *alongside* the existing `RestoredAfterRestart` emit on the same path; it touches no scheduling state. `at` is stamped from the injected clock (`new Date(wallNow)`), deterministic under TestClock. `restore-reconcile.test.ts` (re-armed-from-wall-clock invariants) green across all 8 loop runs. |
+| Claim                                                                 | Verdict | Evidence                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Set-once capture at boot on a real restore; cold start → field ABSENT | ✅      | `restoreFromCheckpoint` early-returns `[]` when running/retry/completed all empty (`loop.ts:811`) **before** any `restoreStatus.record`, so cold start never records. `makeRestoreStatus` is `Ref<RestoreSummary                                                                                                            | null>`seeded`null`, `record: Ref.update(prev => prev ?? summary)`(set-once).`snapshot-server`omits`restore`when`get`is`null`. |
+| Display-only — #41's restore/re-arm/reconcile byte-identical          | ✅      | The `record` call sits _alongside_ the existing `RestoredAfterRestart` emit on the same path; it touches no scheduling state. `at` is stamped from the injected clock (`new Date(wallNow)`), deterministic under TestClock. `restore-reconcile.test.ts` (re-armed-from-wall-clock invariants) green across all 8 loop runs. |
 
 ### #55 — Humanized events ⚠️ (correct mapping; prototype-key contract defect → #60)
 
-| Claim | Verdict | Evidence |
-|-------|---------|----------|
-| Known tags → friendly summaries; unknown → raw label (never blank) | ⚠️ | True for the 12 known tags and ordinary unknown strings. **Fails for `Object.prototype` key names** (`toString`/`valueOf`/`__proto__`/…), which return a function/object — see #60. |
-| Maps by tag only, never echoes payload → no content leak | ✅ | Both call sites pass `obs.eventTag` only (`live-observer.ts:96`, `observer-tee.ts:34`). The `AgentEvent` observation carries only `{issueId, identifier, sessionId, eventTag}` — `eventTag = event._tag` (a union tag), no message/prompt/tool-arg text. No path to leak issue content. Compile-checked `Record<AgentEventTag,string>` table. |
-| Deliberately NOT flooded into `recent_events` | ✅ | `toEventDraft` (`recent-events.ts:62`) returns `null` for `AgentEvent` (and Tick*/Reconciled). `BudgetExceeded`/`RestoredAfterRestart` transitions *are* in the feed — correct (once-per-transition / once-at-boot, not chatter). |
+| Claim                                                              | Verdict | Evidence                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Known tags → friendly summaries; unknown → raw label (never blank) | ⚠️      | True for the 12 known tags and ordinary unknown strings. **Fails for `Object.prototype` key names** (`toString`/`valueOf`/`__proto__`/…), which return a function/object — see #60.                                                                                                                                                           |
+| Maps by tag only, never echoes payload → no content leak           | ✅      | Both call sites pass `obs.eventTag` only (`live-observer.ts:96`, `observer-tee.ts:34`). The `AgentEvent` observation carries only `{issueId, identifier, sessionId, eventTag}` — `eventTag = event._tag` (a union tag), no message/prompt/tool-arg text. No path to leak issue content. Compile-checked `Record<AgentEventTag,string>` table. |
+| Deliberately NOT flooded into `recent_events`                      | ✅      | `toEventDraft` (`recent-events.ts:62`) returns `null` for `AgentEvent` (and Tick*/Reconciled). `BudgetExceeded`/`RestoredAfterRestart` transitions *are\* in the feed — correct (once-per-transition / once-at-boot, not chatter).                                                                                                            |
 
 ### #56 — Close-out ✅ (with the gate caveat above)
 
@@ -156,8 +156,8 @@ green on all loop runs.
 
 ## Issues filed
 
-| # | Severity | Area | Title |
-|---|----------|------|-------|
+| #                                                             | Severity  | Area                                  | Title                                                                                                                       |
+| ------------------------------------------------------------- | --------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | [#60](https://github.com/martinthommesen/orchestra/issues/60) | **major** | `area:observability` + `area:testing` | `humanizeAgentEvent` returns non-string for `Object.prototype` keys → property test flaky-red (`pnpm test` fails ~7/8 runs) |
 
 No `severity:*` labels exist on the repo (as in Sprints 1/3/4); severity is in the title/body, with
@@ -212,7 +212,7 @@ there.
 
 **#60 — `humanizeAgentEvent` prototype-key defect (`44c7416`) — CORRECT.**
 The lookup is now guarded with `Object.hasOwn(AGENT_EVENT_SUMMARIES, eventTag)`, so only genuinely
-mapped own keys return a summary; every other input — unknown tags *and* `Object.prototype` member
+mapped own keys return a summary; every other input — unknown tags _and_ `Object.prototype` member
 names — falls through to the unchanged raw-label / generic-blank fallback. The `as AgentEventTag`
 cast is now sound (reached only when the key is provably own). Public signature, summaries, callers,
 and the no-payload-leak property are all unchanged. Direct re-check returns a **string** for every
@@ -236,7 +236,7 @@ This is the residual #40/#43 flake my 8× loop missed (base rate ~2/30). `awaitF
 by a fixed 500-`setImmediate` iteration budget which, under parallel-suite IO contention, can spin
 out in a few ms of wall-clock — less than a contended `mkdir→write→rename` — yielding a false
 negative on the debounced flush. The fix rebounds the poll by a **real ~5s wall-clock deadline**
-(`Effect.suspend` capturing `Date.now() + 5_000` per call — and `Date.now()` is *not* patched by
+(`Effect.suspend` capturing `Date.now() + 5_000` per call — and `Date.now()` is _not_ patched by
 `TestClock`, only Effect's `Clock` service is) with a real `setTimeout` inter-poll delay
 (`realDelay`, correctly **not** `Effect.sleep`, which would freeze under the installed `TestClock`).
 I confirmed via `git show` that the change is confined to `test/persistence.test.ts` — **production
@@ -246,12 +246,12 @@ happens) still returns `false` and fails the assertion within the deadline inste
 
 ### Gates (re-run @ `bd557a2`)
 
-| Gate | Result | Evidence |
-|------|--------|----------|
-| `pnpm typecheck` | ✅ PASS | exit **0** |
-| `pnpm lint` | ✅ PASS | "Checked **109 files** … No fixes applied", exit **0** |
-| `pnpm build` | ✅ PASS | "Build success", exit **0** |
-| `pnpm test` | ✅ PASS | **336 passed (336)** — now **deterministic** (see loop) |
+| Gate             | Result  | Evidence                                                |
+| ---------------- | ------- | ------------------------------------------------------- |
+| `pnpm typecheck` | ✅ PASS | exit **0**                                              |
+| `pnpm lint`      | ✅ PASS | "Checked **109 files** … No fixes applied", exit **0**  |
+| `pnpm build`     | ✅ PASS | "Build success", exit **0**                             |
+| `pnpm test`      | ✅ PASS | **336 passed (336)** — now **deterministic** (see loop) |
 
 ### Determinism loop (my own, ≥30× as requested)
 
@@ -277,4 +277,3 @@ the initial pass stands unchanged: all three features are functionally sound, th
 strictly additive, no payload leak, in-flight work is never killed by the budget gate. **Verdict:
 ✅ SHIP.** No new bugs found during re-verification. No open QA blockers remain (#60, #61 both
 closed). I did not push or open a PR.
-

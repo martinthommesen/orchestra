@@ -22,6 +22,7 @@ export interface SettingsFormModel {
   readonly intervalMs: string;
   readonly maxConcurrentAgents: string;
   readonly maxTurns: string;
+  readonly maxFailureRetries: string;
   readonly maxRetryBackoffMs: string;
   /** Empty string means "no ceiling" (→ null on the wire). */
   readonly maxTotalTokens: string;
@@ -33,6 +34,7 @@ export type FieldId =
   | "intervalMs"
   | "maxConcurrentAgents"
   | "maxTurns"
+  | "maxFailureRetries"
   | "maxRetryBackoffMs"
   | "maxTotalTokens"
   | `byState:${string}`;
@@ -51,6 +53,7 @@ export const toFormModel = (s: EditableSettingsWire): SettingsFormModel => ({
   intervalMs: String(s.polling.interval_ms),
   maxConcurrentAgents: String(s.agent.max_concurrent_agents),
   maxTurns: String(s.agent.max_turns),
+  maxFailureRetries: String(s.agent.max_failure_retries),
   maxRetryBackoffMs: String(s.agent.max_retry_backoff_ms),
   maxTotalTokens: s.budget.max_total_tokens === null ? "" : String(s.budget.max_total_tokens),
   byState: Object.entries(s.agent.max_concurrent_agents_by_state)
@@ -66,6 +69,14 @@ const parsePositiveInt = (raw: string): number | null => {
   if (!/^\d+$/.test(trimmed)) return null;
   const n = Number(trimmed);
   return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+/** Parse a string as a non-negative integer; returns null when invalid. */
+const parseNonNegativeInt = (raw: string): number | null => {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return Number.isInteger(n) && n >= 0 ? n : null;
 };
 
 /** Shallow value-equality for the by-state concurrency map (keys are fixed by the schema). */
@@ -104,6 +115,9 @@ export const validateSettings = (
   const maxTurns = parsePositiveInt(form.maxTurns);
   if (maxTurns === null) errors.maxTurns = POSITIVE_INT_MSG;
 
+  const maxFailureRetries = parseNonNegativeInt(form.maxFailureRetries);
+  if (maxFailureRetries === null) errors.maxFailureRetries = "must be a whole number 0 or greater";
+
   const backoff = parsePositiveInt(form.maxRetryBackoffMs);
   if (backoff === null) errors.maxRetryBackoffMs = POSITIVE_INT_MSG;
 
@@ -132,6 +146,7 @@ export const validateSettings = (
   const agentPatch: {
     max_concurrent_agents?: number;
     max_turns?: number;
+    max_failure_retries?: number;
     max_retry_backoff_ms?: number;
     max_concurrent_agents_by_state?: Record<string, number>;
   } = {};
@@ -140,6 +155,9 @@ export const validateSettings = (
   }
   if ((maxTurns as number) !== baseline.agent.max_turns) {
     agentPatch.max_turns = maxTurns as number;
+  }
+  if ((maxFailureRetries as number) !== baseline.agent.max_failure_retries) {
+    agentPatch.max_failure_retries = maxFailureRetries as number;
   }
   if ((backoff as number) !== baseline.agent.max_retry_backoff_ms) {
     agentPatch.max_retry_backoff_ms = backoff as number;

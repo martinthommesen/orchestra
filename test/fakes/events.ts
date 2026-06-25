@@ -28,20 +28,8 @@ export const agentMessage = (text: string): AgentEvent => ({
   text,
 });
 
-export const notification = (message: string): AgentEvent => ({
-  _tag: "Notification",
-  timestamp: ts(),
-  message,
-});
-
 export const turnCompleted = (usage?: Usage): AgentEvent => ({
   _tag: "TurnCompleted",
   timestamp: ts(),
   ...(usage ? { usage } : {}),
-});
-
-export const turnFailed = (message: string): AgentEvent => ({
-  _tag: "TurnFailed",
-  timestamp: ts(),
-  message,
 });

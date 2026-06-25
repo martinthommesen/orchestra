@@ -12,6 +12,7 @@ const WIRE: EditableSettingsWire = {
     max_concurrent_agents: 10,
     max_concurrent_agents_by_state: { triage: 2, build: 4 },
     max_turns: 20,
+    max_failure_retries: 3,
     max_retry_backoff_ms: 60000,
   },
   budget: { max_total_tokens: 100000 },
@@ -25,6 +26,7 @@ describe("toFormModel", () => {
     expect(f.intervalMs).toBe("30000");
     expect(f.maxConcurrentAgents).toBe("10");
     expect(f.maxTurns).toBe("20");
+    expect(f.maxFailureRetries).toBe("3");
     expect(f.maxRetryBackoffMs).toBe("60000");
     expect(f.maxTotalTokens).toBe("100000");
     expect(f.byState).toEqual([
@@ -64,6 +66,12 @@ describe("validateSettings", () => {
     expect(r.patch?.budget).toBeUndefined();
   });
 
+  it("includes max_failure_retries when the retry cap changes", () => {
+    const r = validateSettings({ ...validForm(), maxFailureRetries: "0" }, WIRE);
+    expect(r.ok).toBe(true);
+    expect(r.patch).toEqual({ agent: { max_failure_retries: 0 } });
+  });
+
   it("includes max_concurrent_agents_by_state only when it actually changed", () => {
     const r = validateSettings(
       {
@@ -96,6 +104,7 @@ describe("validateSettings", () => {
     ["intervalMs", "-5"],
     ["maxConcurrentAgents", "1.5"],
     ["maxTurns", "abc"],
+    ["maxFailureRetries", "-1"],
     ["maxRetryBackoffMs", ""],
   ])("rejects %s = %j as not a positive integer", (field, value) => {
     const r = validateSettings({ ...validForm(), [field]: value } as SettingsFormModel, WIRE);

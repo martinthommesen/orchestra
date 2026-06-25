@@ -1,0 +1,12 @@
+{
+  "ignorePaths": [
+    ".deepsec/**",
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "coverage/**",
+    ".orchestra/**",
+    "workspaces/**",
+    "symphony_workspaces/**"
+  ]
+}

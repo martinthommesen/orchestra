@@ -4,19 +4,26 @@ import { badgeForPhase, toFleetView } from "../src/cockpit/model/fleet";
 
 const NOW = Date.parse("2026-01-01T00:01:00.000Z");
 
-const baseSnapshot = (over: Partial<SnapshotWire> = {}): SnapshotWire => ({
-  poll_interval_ms: 1000,
-  max_concurrent_agents: 3,
-  counts: { running: 0, retrying: 0, completed: 0, claimed: 0 },
-  running: [],
-  retrying: [],
-  completed: [],
-  recent_completed: [],
-  recent_events: [],
-  totals: { input_tokens: 10, output_tokens: 20, total_tokens: 30, runtime_seconds: 65 },
-  rate_limits: null,
-  ...over,
-});
+type SnapshotOverride = Omit<Partial<SnapshotWire>, "counts"> & {
+  readonly counts?: Partial<SnapshotWire["counts"]>;
+};
+
+const baseSnapshot = (over: SnapshotOverride = {}): SnapshotWire => {
+  const base: SnapshotWire = {
+    poll_interval_ms: 1000,
+    max_concurrent_agents: 3,
+    counts: { running: 0, retrying: 0, abandoned: 0, completed: 0, claimed: 0 },
+    running: [],
+    retrying: [],
+    abandoned: [],
+    completed: [],
+    recent_completed: [],
+    recent_events: [],
+    totals: { input_tokens: 10, output_tokens: 20, total_tokens: 30, runtime_seconds: 65 },
+    rate_limits: null,
+  };
+  return { ...base, ...over, counts: { ...base.counts, ...over.counts } };
+};
 
 describe("badgeForPhase", () => {
   it("maps known phases via the design-system status vocabulary", () => {
@@ -92,7 +99,6 @@ describe("toFleetView", () => {
     const vm = toFleetView(baseSnapshot(), NOW);
     expect(vm.budget).toBeNull();
     expect(vm.restore).toBeNull();
-    expect(vm.control).toBeNull();
     expect(vm.rateLimits.available).toBe(false);
     expect(vm.rateLimits.summary).toBe("unavailable");
   });
@@ -117,25 +123,6 @@ describe("toFleetView", () => {
       "1 running · 0 retrying · 3 completed · restored 12s ago",
     );
     expect(vm.rateLimits).toEqual({ available: true, summary: '{"remaining":42}' });
-  });
-
-  it("maps the operator control banner (#64) when dispatch is paused", () => {
-    const vm = toFleetView(
-      baseSnapshot({ control: { dispatch_paused: true, paused_by: "operator" } }),
-      NOW,
-    );
-    expect(vm.control?.pausedBy).toBe("operator");
-    expect(vm.control?.message).toContain("operator");
-    expect(vm.control?.message).toContain("in-flight work continues");
-  });
-
-  it("distinguishes the budget-driven control banner", () => {
-    const vm = toFleetView(
-      baseSnapshot({ control: { dispatch_paused: true, paused_by: "budget" } }),
-      NOW,
-    );
-    expect(vm.control?.pausedBy).toBe("budget");
-    expect(vm.control?.message).toContain("budget");
   });
 
   it("formats totals runtime as a human duration", () => {

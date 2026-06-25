@@ -120,6 +120,18 @@ export const formatObservation = (obs: Observation): LogLine => {
           message: truncate(obs.message),
         }),
       };
+    case "WorkerAbandoned":
+      return {
+        level: "warn",
+        message: `${glyph("blocked")} parked ${obs.identifier} after ${obs.attempts} failure(s): ${truncate(obs.reason)}`,
+        annotations: ev("worker_abandoned", {
+          issue_id: obs.issueId,
+          issue_identifier: obs.identifier,
+          attempts: String(obs.attempts),
+          max_retries: String(obs.maxRetries),
+          reason: truncate(obs.reason),
+        }),
+      };
     case "WorkerKilled":
       return {
         level: "warn",

@@ -93,7 +93,8 @@ describe("cross-feature: budget + restore + last_activity coexist on one snapsho
     expect(row.last_activity?.event_tag).toBe("TurnCompleted");
 
     // The whole thing must JSON round-trip (the wire is the cockpit's only input).
-    const json = JSON.parse(JSON.stringify(snap));
+    const encoded = JSON.stringify(snap);
+    const json = JSON.parse(encoded);
     expect(json.budget.paused).toBe(true);
     expect(json.restore.at).toBe("2026-06-24T10:00:00.000Z");
     expect(json.running[0].last_activity.message).toBe("finished turn");
@@ -123,7 +124,7 @@ describe("cross-feature: the cockpit view-model resolves a fully-loaded snapshot
     const wire: SnapshotWire = {
       poll_interval_ms: 1000,
       max_concurrent_agents: 4,
-      counts: { running: 1, retrying: 1, completed: 3, claimed: 0 },
+      counts: { running: 1, retrying: 1, abandoned: 0, completed: 3, claimed: 0 },
       running: [
         {
           issue_id: "i1",
@@ -142,6 +143,7 @@ describe("cross-feature: the cockpit view-model resolves a fully-loaded snapshot
       retrying: [
         { issue_id: "i2", identifier: "ORC-2", attempt: 2, due_at_ms: 123456, error: "boom" },
       ],
+      abandoned: [],
       completed: ["a", "b", "c"],
       recent_events: [],
       recent_completed: [],

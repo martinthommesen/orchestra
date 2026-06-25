@@ -16,18 +16,18 @@ the core-loop surgery was kept minimal and reviewed, exactly as Phase A did.
 
 ## What shipped
 
-| # | Issue | Outcome |
-|---|-------|---------|
-| #40 | Persistence layer | `src/core/persistence/` — versioned `PersistedStateV1` codec (`Schema.parseJson`, ISO `Date` round-trip, forward-only `migrateToCurrent` seam), a `Persistence` service over `@effect/platform` `FileSystem` (`load` missing→`none` / corrupt→rename-aside+`none`, never throws; `save` **atomic** temp+rename, total; `markDirty` coalescing `Queue.sliding(1)`; `runWriter` single scoped debounced fiber + **guaranteed final flush** finalizer), and `layerDurableOrchestratorStore` — a transparent drop-in for `layerOrchestratorStore` so `loop.ts`/`snapshot-server.ts` need no edits. (`dc154f3`) |
-| #41 | Restore + reconcile on boot + retry re-arm | `loop.ts` `restoreFromCheckpoint`: rebuild the in-memory registry from `running`/`retry_attempts`, **convert each orphaned `running` → a due-immediately `kind:"continuation"` retry** (rides the existing retry/reconcile/dispatch path), **re-arm every pending retry from wall-clock** (`remainingWallMs` = `scheduled_at + delay_ms − now`; the monotonic `due_at_ms` is never read), emit one `RestoredAfterRestart`. Additive `RunAttempt.{turn,failure_attempts}` + `RetryEntry.kind`. The seed restores the **full** state; the loop's reconcile completes it. (`daf75c9`) |
-| #42 | Session continuity (opt-in resume) | Additive `RunAttempt.session_id` / `RetryEntry.session_id` (captured at the existing `StreamingTurn`/`setRunning`/`setRetry` sites). `persistence.resume_sessions` (default **off**). When on, a restored continuation carries its `session_id` into the existing `--resume` dispatch argument; when off it runs fresh — byte-for-byte the #41 path. **Self-healing:** a rejected resume fails the worker → failure-backoff → re-dispatch fresh; never strands, never crashes. (`76fa17d`) |
-| #43 | Tests + docs + handoff | Stabilized the pre-existing #40 debounce/final-flush `TestClock` flake (two real races, fixed deterministically — see below), filled the audited coverage gaps, and wrote this close-out. (`0e83f87` tests; docs commit closes the issue.) |
+| #   | Issue                                      | Outcome                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #40 | Persistence layer                          | `src/core/persistence/` — versioned `PersistedStateV1` codec (`Schema.parseJson`, ISO `Date` round-trip, forward-only `migrateToCurrent` seam), a `Persistence` service over `@effect/platform` `FileSystem` (`load` missing→`none` / corrupt→rename-aside+`none`, never throws; `save` **atomic** temp+rename, total; `markDirty` coalescing `Queue.sliding(1)`; `runWriter` single scoped debounced fiber + **guaranteed final flush** finalizer), and `layerDurableOrchestratorStore` — a transparent drop-in for `layerOrchestratorStore` so `loop.ts`/`snapshot-server.ts` need no edits. (`dc154f3`) |
+| #41 | Restore + reconcile on boot + retry re-arm | `loop.ts` `restoreFromCheckpoint`: rebuild the in-memory registry from `running`/`retry_attempts`, **convert each orphaned `running` → a due-immediately `kind:"continuation"` retry** (rides the existing retry/reconcile/dispatch path), **re-arm every pending retry from wall-clock** (`remainingWallMs` = `scheduled_at + delay_ms − now`; the monotonic `due_at_ms` is never read), emit one `RestoredAfterRestart`. Additive `RunAttempt.{turn,failure_attempts}` + `RetryEntry.kind`. The seed restores the **full** state; the loop's reconcile completes it. (`daf75c9`)                         |
+| #42 | Session continuity (opt-in resume)         | Additive `RunAttempt.session_id` / `RetryEntry.session_id` (captured at the existing `StreamingTurn`/`setRunning`/`setRetry` sites). `persistence.resume_sessions` (default **off**). When on, a restored continuation carries its `session_id` into the existing `--resume` dispatch argument; when off it runs fresh — byte-for-byte the #41 path. **Self-healing:** a rejected resume fails the worker → failure-backoff → re-dispatch fresh; never strands, never crashes. (`76fa17d`)                                                                                                                 |
+| #43 | Tests + docs + handoff                     | Stabilized the pre-existing #40 debounce/final-flush `TestClock` flake (two real races, fixed deterministically — see below), filled the audited coverage gaps, and wrote this close-out. (`0e83f87` tests; docs commit closes the issue.)                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## Key design decisions (so a future sprint doesn't regress them)
 
 - **#40/#41 seed boundary is one restore flow.** The durable store seeds the **complete**
   `OrchestratorState` (scheduling slice included), but seeding `running`/`retry_attempts` is
-  only safe *because* `restoreFromCheckpoint` rebuilds the registry, converts orphans, and
+  only safe _because_ `restoreFromCheckpoint` rebuilds the registry, converts orphans, and
   re-arms timers before the first dispatch. The two halves are inseparable — do not seed the
   scheduling slice without the loop-side reconcile, or issues strand. Reloadable knobs
   (`poll_interval_ms`, `max_concurrent_agents`) always come from the **live config**, never the
@@ -42,7 +42,7 @@ the core-loop surgery was kept minimal and reviewed, exactly as Phase A did.
   of progress and Copilot's cross-restart session liveness is unverified. Resume can only help,
   never strand.
 - **Observability rings are not persisted.** They boot empty and emit one synthetic
-  `RestoredAfterRestart` event so the feed gap is honest. The authoritative counts/totals *are*
+  `RestoredAfterRestart` event so the feed gap is honest. The authoritative counts/totals _are_
   restored.
 
 ### Boot-ordering exactly-once invariant (DO NOT REGRESS)
@@ -68,7 +68,7 @@ to prevent. The scenario tests in `test/restore-reconcile.test.ts` pin all three
 
 The #40 debounce/final-flush `TestClock` tests flaked intermittently under full-suite parallel
 load (reproduced on clean `main` @ `b494e83` — pre-existing, not caused by #42). **Two distinct
-real races**, both fixed deterministically *without weakening the assertions*:
+real races**, both fixed deterministically _without weakening the assertions_:
 
 1. **Sleep-registration race.** The test advanced the virtual clock before the forked debounced
    writer had parked in `Effect.sleep(debounce_ms)`, so its sleep deadline was computed from an
@@ -76,7 +76,7 @@ real races**, both fixed deterministically *without weakening the assertions*:
    `awaitWriterParked` blocks on `TestClock.sleeps()` until the writer's sleep is registered
    (yielding to the scheduler between polls).
 2. **Real-FS settle race (the dominant one).** After the window fires, the multi-step atomic
-   write (`mkdir → writeFile → rename`) runs on the *real* event loop; a fixed pair of
+   write (`mkdir → writeFile → rename`) runs on the _real_ event loop; a fixed pair of
    `setImmediate` settles is not a reliable barrier under load, so `fs.exists` could observe the
    file before `rename` landed. **Fix:** `awaitFileExists` polls the real FS, **bounded** (returns
    `false` on a genuine regression rather than hanging).

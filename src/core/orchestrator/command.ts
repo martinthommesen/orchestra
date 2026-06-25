@@ -74,7 +74,7 @@ export class CommandBus extends Context.Tag("orchestra/CommandBus")<
 >() {}
 
 /** Build a {@link CommandBus} backed by an unbounded queue + per-command `Deferred`. */
-export const makeCommandBus = (): Effect.Effect<Context.Tag.Service<CommandBus>> =>
+const makeCommandBus = (): Effect.Effect<Context.Tag.Service<CommandBus>> =>
   Effect.gen(function* () {
     const queue = yield* Queue.unbounded<EnqueuedCommand>();
     return {

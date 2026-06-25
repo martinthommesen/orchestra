@@ -3,7 +3,7 @@
 > Project: **Orchestra** — an end-to-end type-safe TypeScript reimplementation of
 > OpenAI Symphony, driving the GitHub Copilot SDK / headless CLI, built on Effect.
 >
-> The *what* is decided. This brainstorm debates the *how*: architecture, scope,
+> The _what_ is decided. This brainstorm debates the _how_: architecture, scope,
 > and the riskiest design decisions. Phase 1 is raw ideas — no filtering.
 
 Participants: **Remy** (Producer), **Kira** (Product/DX), **Milo** (Art/CLI
@@ -17,12 +17,12 @@ ergonomics), **Nova** (Frontend/runtime), **Sage** (Backend/orchestration),
 1. **One file to rule it all.** Keep Symphony's `WORKFLOW.md` as the entire control
    surface — YAML front matter + a Liquid prompt body. A developer should be able to
    adopt Orchestra by dropping one file in their repo. That's the product.
-2. **GitHub-native, not Linear.** Our agent *is* Copilot. The tracker should be
+2. **GitHub-native, not Linear.** Our agent _is_ Copilot. The tracker should be
    GitHub Issues by default — `gh`-style auth, labels, project boards. Asking people
    to wire up Linear to use a GitHub-Copilot orchestrator feels backwards.
 3. **"Manage work, not agents."** The headline promise. The default experience after
-   `orchestra ./WORKFLOW.md` should be a calm status line that says *N running,
-   M queued, here's what changed* — not a firehose of agent tokens.
+   `orchestra ./WORKFLOW.md` should be a calm status line that says _N running,
+   M queued, here's what changed_ — not a firehose of agent tokens.
 
 ### Milo (Art / CLI Ergonomics)
 
@@ -55,7 +55,7 @@ ergonomics), **Nova** (Frontend/runtime), **Sage** (Backend/orchestration),
 2. **Ports everywhere the spec has a seam.** `IssueTracker`, `AgentRunner`,
    `WorkspaceManager`, `Clock` — all Effect services behind `Layer`s. Swapping
    GitHub↔Linear or Copilot-CLI↔Copilot-SDK becomes a layer swap, not a rewrite.
-2.5. **The orchestrator is a single fiber owning all state**, exactly as the spec
+   2.5. **The orchestrator is a single fiber owning all state**, exactly as the spec
    demands ("only component that mutates scheduling state"). Workers report back via
    a `Queue`. No shared mutable maps across fibers.
 3. **Maybe go durable.** The spec is in-memory, but a small SQLite of retry state

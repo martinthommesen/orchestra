@@ -4,8 +4,37 @@
 packages:
   - "packages/*"
 
+# Supply-chain hardening: installs ignore newly-published package versions until
+# they have had five days to be vetted, and reject trust-signal downgrades.
+minimumReleaseAge: 7200
+minimumReleaseAgeExclude:
+  # Exact versions already pinned in the lockfile. Future updates still have to
+  # satisfy the release-age policy.
+  - "@sentry/core@10.61.0"
+  - "@sentry/node-core@10.61.0"
+  - "@sentry/node@10.61.0"
+  - "@sentry/opentelemetry@10.61.0"
+  - "@sentry/server-utils@10.61.0"
+  - "@tybys/wasm-util@0.10.3"
+  - "@typescript-eslint/types@8.62.0"
+  - "@vitejs/plugin-react@6.0.3"
+  - browserslist@4.28.4
+  - electron-to-chromium@1.5.378
+  - import-in-the-middle@3.2.0
+  - nanoid@3.3.15
+  - node-releases@2.0.50
+  - vite@8.1.0
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  # Existing lockfile version used by Vite's file watcher stack. Keep this
+  # exception version-pinned so future chokidar changes still face the policy.
+  - chokidar@4.0.3
+  # React Doctor's eslint-plugin-react-hooks transitively resolves this legacy
+  # semver build; pin the exception to avoid weakening future semver installs.
+  - semver@6.3.1
+
 allowBuilds:
-  '@parcel/watcher': false
+  "@parcel/watcher": false
   esbuild: false
   msgpackr-extract: false
 

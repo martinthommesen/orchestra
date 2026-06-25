@@ -69,7 +69,8 @@ describe("restore snapshot projection (#54, strictly additive)", () => {
   });
 
   it("survives JSON round-trip with ISO `at` intact", () => {
-    const json = JSON.parse(JSON.stringify(toSnapshot(state, { restore: summary() })));
+    const encoded = JSON.stringify(toSnapshot(state, { restore: summary() }));
+    const json = JSON.parse(encoded);
     expect(json.restore.at).toBe("2026-06-24T10:00:00.000Z");
     expect(json.restore.restored_completed).toBe(3);
   });

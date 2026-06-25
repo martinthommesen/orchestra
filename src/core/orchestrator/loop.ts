@@ -34,6 +34,7 @@ import type { Msg, WorkerOutcome } from "./messages";
 import { Observer, type RetryKind } from "./observer";
 import { preflight } from "./preflight";
 import {
+  type AbandonedView,
   planReconciliation,
   type ReconcileAction,
   type RetryingView,
@@ -41,6 +42,7 @@ import {
 } from "./reconcile";
 import { selectCandidates, selectionContext } from "./selection";
 import {
+  abandon,
   addUsage,
   clearRetry,
   clearRunning,
@@ -401,6 +403,56 @@ export const runOrchestrator = (
           });
         });
 
+      const abandonFailure = (
+        rec: IssueRuntime,
+        reason: string,
+      ): Effect.Effect<void, never, Scope.Scope> =>
+        Effect.gen(function* () {
+          const issueId = rec.issue.id;
+          if (rec.timerFiber !== null) {
+            yield* Fiber.interrupt(rec.timerFiber);
+            rec.timerFiber = null;
+          }
+          rec.pendingKind = null;
+          rec.pendingAttempt = 0;
+          const ws = rec.workspace;
+          if (ws !== null) {
+            rec.workspace = null;
+            // Await the removal BEFORE persisting the parked state. The issue stays claimed
+            // and active, and `AbandonedIssue` carries no workspace_path, so a forked `rm`
+            // that loses the race against the next checkpoint would leak the dir forever
+            // (startup cleanup only reaps terminal issues). Best-effort: a failure logs and
+            // continues — we still park the issue.
+            yield* cleanupWorkspaceEffect(issueId, rec.issue.identifier, ws);
+          }
+          const wall = yield* clock.currentTimeMillis;
+          yield* store.update((s) =>
+            abandon(s, {
+              issue_id: issueId,
+              identifier: rec.issue.identifier,
+              attempts: rec.failureAttempts,
+              abandoned_at: new Date(wall),
+              reason,
+            }),
+          );
+          yield* observer.emit({
+            _tag: "WorkerAbandoned",
+            issueId,
+            identifier: rec.issue.identifier,
+            attempts: rec.failureAttempts,
+            maxRetries: liveConfig.agent.max_failure_retries,
+            reason,
+          });
+        });
+
+      const retryFailureOrAbandon = (
+        rec: IssueRuntime,
+        reason: string,
+      ): Effect.Effect<void, never, Scope.Scope> =>
+        rec.failureAttempts > liveConfig.agent.max_failure_retries
+          ? abandonFailure(rec, reason)
+          : scheduleRetry(rec, "failure", rec.failureAttempts, reason);
+
       // ───────────────────────────── Reconciliation ─────────────────────────────
 
       /**
@@ -434,18 +486,21 @@ export const runOrchestrator = (
         return n;
       };
 
-      const cleanupWorkspace = (issueId: string, identifier: string, ws: Workspace) =>
-        Effect.forkScoped(
-          wsm.removeWorkspace(ws).pipe(
-            Effect.matchCauseEffect({
-              onSuccess: () => observer.emit({ _tag: "WorkspaceCleaned", issueId, identifier }),
-              onFailure: (cause) =>
-                Effect.logWarning(`workspace cleanup failed: ${causeToMessage(cause)}`).pipe(
-                  Effect.annotateLogs({ issue_id: issueId, issue_identifier: identifier }),
-                ),
-            }),
-          ),
+      const cleanupWorkspaceEffect = (issueId: string, identifier: string, ws: Workspace) =>
+        wsm.removeWorkspace(ws).pipe(
+          Effect.matchCauseEffect({
+            onSuccess: () => observer.emit({ _tag: "WorkspaceCleaned", issueId, identifier }),
+            onFailure: (cause) =>
+              Effect.logWarning(`workspace cleanup failed: ${causeToMessage(cause)}`).pipe(
+                Effect.annotateLogs({ issue_id: issueId, issue_identifier: identifier }),
+              ),
+          }),
         );
+
+      /** Fork the removal — terminal/neither reconcile reaps a completed issue, so the tick
+       *  need not block on the `rm`; the issue is already off every map. */
+      const cleanupWorkspace = (issueId: string, identifier: string, ws: Workspace) =>
+        Effect.forkScoped(cleanupWorkspaceEffect(issueId, identifier, ws));
 
       const applyReconcileAction = (
         action: ReconcileAction,
@@ -468,7 +523,7 @@ export const runOrchestrator = (
                 reason: "stall",
               });
               rec.failureAttempts += 1;
-              yield* scheduleRetry(rec, "failure", rec.failureAttempts, "stalled");
+              yield* retryFailureOrAbandon(rec, "stalled");
               break;
             }
             case "TerminalKill": {
@@ -533,7 +588,10 @@ export const runOrchestrator = (
         const retryingIds = Object.keys(state.retry_attempts).filter(
           (id) => state.running[id] === undefined,
         );
-        const refreshIds = Array.from(new Set([...runningIds, ...retryingIds]));
+        const abandonedIds = Object.keys(state.abandoned).filter(
+          (id) => state.running[id] === undefined && state.retry_attempts[id] === undefined,
+        );
+        const refreshIds = Array.from(new Set([...runningIds, ...retryingIds, ...abandonedIds]));
         if (refreshIds.length === 0) {
           yield* observer.emit({ _tag: "Reconciled", actions: [] });
           return;
@@ -556,9 +614,13 @@ export const runOrchestrator = (
           lastEventAt: registry.get(id)?.lastEventAt ?? now,
         }));
         const retrying: ReadonlyArray<RetryingView> = retryingIds.map((id) => ({ issueId: id }));
+        const abandonedIssues: ReadonlyArray<AbandonedView> = abandonedIds.map((id) => ({
+          issueId: id,
+        }));
         const actions = planReconciliation({
           running,
           retrying,
+          abandoned: abandonedIssues,
           refreshed,
           now,
           stallTimeoutMs: config.copilot.stall_timeout_ms,
@@ -710,7 +772,7 @@ export const runOrchestrator = (
               identifier: rec.issue.identifier,
               message: outcome.message,
             });
-            yield* scheduleRetry(rec, "failure", rec.failureAttempts, outcome.message);
+            yield* retryFailureOrAbandon(rec, outcome.message);
           }
         });
 
@@ -991,8 +1053,14 @@ export const runOrchestrator = (
           const restored = yield* store.get;
           const runningEntries = Object.entries(restored.running);
           const retryEntries = Object.entries(restored.retry_attempts);
+          const abandonedEntries = Object.entries(restored.abandoned);
           const restoredCompleted = restored.completed.length;
-          if (runningEntries.length === 0 && retryEntries.length === 0 && restoredCompleted === 0) {
+          if (
+            runningEntries.length === 0 &&
+            retryEntries.length === 0 &&
+            abandonedEntries.length === 0 &&
+            restoredCompleted === 0
+          ) {
             return []; // cold start — nothing was restored.
           }
 
@@ -1073,6 +1141,18 @@ export const runOrchestrator = (
             registry.set(id, rec);
             plan.push({ rec, delayMs: remainingWallMs(entry, wallNow) });
             reArmedRetries += 1;
+          }
+
+          // 3) Exhausted failures → rebuild an inert registry record so the first tick can
+          // reconcile terminal/vanished tracker state. Active issues stay parked/claimed.
+          for (const [id, entry] of abandonedEntries) {
+            if (registry.has(id)) {
+              continue;
+            }
+            const rec = freshRuntime(restoredIssue(id, entry.identifier));
+            rec.failureAttempts = entry.attempts;
+            rec.lastEventAt = monoNow;
+            registry.set(id, rec);
           }
 
           // #54: capture the one-shot restore summary as a durable, display-only fact so

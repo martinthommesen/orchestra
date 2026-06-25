@@ -5,12 +5,12 @@ humanized event summaries). Branch: `feature/sprint-5` (off `main` @ `ec31b4c`).
 
 ## Board
 
-| # | Task | Effort · Risk | Status |
-|---|------|---------------|--------|
-| #53 | Budget guardrails (pause dispatch at a spend ceiling) | M · Med | ✅ done |
-| #54 | Surface durability/restore state in snapshot + dashboard | S–M · Low | ✅ done |
-| #55 | Humanized agent-event summaries | M · Low | ✅ done |
-| #56 | Tests + docs + handoff close-out | M · Low | ✅ done |
+| #   | Task                                                     | Effort · Risk | Status  |
+| --- | -------------------------------------------------------- | ------------- | ------- |
+| #53 | Budget guardrails (pause dispatch at a spend ceiling)    | M · Med       | ✅ done |
+| #54 | Surface durability/restore state in snapshot + dashboard | S–M · Low     | ✅ done |
+| #55 | Humanized agent-event summaries                          | M · Low       | ✅ done |
+| #56 | Tests + docs + handoff close-out                         | M · Low       | ✅ done |
 
 Dependencies: #53/#54/#55 independent · #56 → all.
 Build order: #53 (review-gated) → #54 → #55 → #56.
@@ -45,11 +45,12 @@ stays minimal. The token ceiling fully delivers the headline behavior.
 **Guard placement + in-flight-work-untouched guarantee (the key bit).**
 In `loop.ts` `handleTick`, immediately after `const state = yield* store.get;` and BEFORE
 `planDispatch`: `evaluateBudget(config.budget, state.agent_totals)` computes spend vs.
-ceiling, then the *only* behavioral change is one line —
+ceiling, then the _only_ behavioral change is one line —
 `const toDispatch = budget.paused ? [] : planDispatch(sorted, conCtx);`. When paused we
 plan **zero** fresh dispatches and emit `TickEnd { dispatchSkipped: true }`.
 
 Why in-flight work is provably untouched:
+
 - the gate is a pure pre-`planDispatch` read; it does **not** modify the concurrency math,
   the retry math, or reconcile — `reconcile` already ran at the top of the tick and runs
   unchanged whether or not the budget is paused;
@@ -84,6 +85,7 @@ active → `▶ running` (info), paused → `⏸ blocked` (warn). `components.ts
 like the existing panels.
 
 **Files changed.**
+
 - `src/core/domain/workflow.ts` — `BudgetConfig` + `budget` on `ServiceConfig`.
 - `src/core/orchestrator/budget.ts` — **new** pure `evaluateBudget` / `BudgetStatus`.
 - `src/core/orchestrator/loop.ts` — `budgetPaused` latch + pre-`planDispatch` gate + transition emit.
@@ -129,8 +131,8 @@ deterministic under `TestClock`). Cold start → the loop never records → the 
 `null`. This is the cleanest home because the snapshot server already resolves these
 observability rings from context; the loop already threads `Observer`/`RecentCompletions`
 the same way. (The budget config went through `runSnapshotServer(port, budgetConfig)` because
-it's *static config*; the restore fact is *runtime data computed at boot AFTER the snapshot
-fiber starts*, so it must be a shared Ref-backed context service, not a closed-over value.)
+it's _static config_; the restore fact is _runtime data computed at boot AFTER the snapshot
+fiber starts_, so it must be a shared Ref-backed context service, not a closed-over value.)
 
 **The additive `restore` block (strictly additive, no /api/v2).** `toSnapshot` emits it
 ONLY when a summary was captured — absent on a cold start / older daemons, exactly like
@@ -159,6 +161,7 @@ header **only when `vm.restore !== null`**; it honors `--ascii`/`NO_COLOR`/non-T
 existing panels. Example line: `⟳ restored after restart · 1 running · 0 retrying · 3 completed · restored 30s ago`.
 
 **Files changed.**
+
 - `src/core/observability/restore-status.ts` — **new** set-once `RestoreStatus` service + `RestoreSummary`.
 - `src/core/orchestrator/loop.ts` — capture the summary into `RestoreStatus` at boot (next to the existing `RestoredAfterRestart` emit); added `RestoreStatus` to `OrchestratorDeps`.
 - `src/core/observability/snapshot-server.ts` — additive `restore` extra + `restoreProjection`; the router reads `RestoreStatus` (added to `runSnapshotServer` requirements).
@@ -184,6 +187,7 @@ clock (epoch under `TestClock`), and the dashboard relative-time tests fix `NOW`
 indicator isn't one of the five canonical worker statuses, so it can't reuse a `STATUS_STYLES`
 row wholesale; it follows the budget panel's precompute-both-glyphs structure and the
 design-system color palette so `--ascii`/`NO_COLOR`/non-TTY all stay correct.
+
 ### #55 — Humanized agent-event summaries ✅
 
 Display-only slice: a **pure humanizer** turns the raw `AgentEvent.eventTag` into a friendly
@@ -198,34 +202,36 @@ The humanizer lives at the existing AgentEvent surfaces instead.
 
 **Pure core (the testable bit).** New `src/core/observability/humanize.ts`:
 `humanizeAgentEvent(eventTag: string): string`, total and **never blank** —
+
 - known tag → mapped summary (table typed `Record<AgentEventTag, string>`, so a new union
   variant trips a compile error here — no silent miss);
 - unknown tag → the raw label verbatim (fidelity over invention);
 - blank/whitespace tag → generic `"agent event"` (defensive; tags are normally non-empty).
-No Effect, no IO. **Maps by tag only — never echoes agent payload text** (messages, prompts,
-tool args), so a summary can't leak issue content into logs/snapshot (BRIEF §9.2).
+  No Effect, no IO. **Maps by tag only — never echoes agent payload text** (messages, prompts,
+  tool args), so a summary can't leak issue content into logs/snapshot (BRIEF §9.2).
 
 **Tags humanized (exactly the 12 the `AgentEvent` union emits — no speculative taxonomy).**
 The illustrative issue examples ("editing files", "running tests") are NOT real tags, so I did
 not invent them; I mapped what the runner actually streams (`event._tag` in `loop.ts`
 `handleAgentEvent`):
 
-| `eventTag` | summary |
-|---|---|
-| `SessionStarted` | started session |
-| `StartupFailed` | failed to start session |
-| `TurnCompleted` | finished turn |
-| `TurnFailed` | turn failed |
-| `TurnCancelled` | turn cancelled |
-| `TurnEndedWithError` | turn ended with error |
-| `TurnInputRequired` | waiting for input |
-| `ApprovalAutoApproved` | auto-approved an action |
-| `UnsupportedToolCall` | requested an unsupported tool |
-| `Notification` | sent a notification |
-| `AgentMessage` | working |
-| `Malformed` | emitted an unrecognized event |
+| `eventTag`             | summary                       |
+| ---------------------- | ----------------------------- |
+| `SessionStarted`       | started session               |
+| `StartupFailed`        | failed to start session       |
+| `TurnCompleted`        | finished turn                 |
+| `TurnFailed`           | turn failed                   |
+| `TurnCancelled`        | turn cancelled                |
+| `TurnEndedWithError`   | turn ended with error         |
+| `TurnInputRequired`    | waiting for input             |
+| `ApprovalAutoApproved` | auto-approved an action       |
+| `UnsupportedToolCall`  | requested an unsupported tool |
+| `Notification`         | sent a notification           |
+| `AgentMessage`         | working                       |
+| `Malformed`            | emitted an unrecognized event |
 
 **Wiring (raw tag kept on the wire everywhere for fidelity/debugging).**
+
 1. `live-observer.ts` `case "AgentEvent"`: message is now
    `${glyph("running")} ${identifier} ${humanizeAgentEvent(eventTag)}`; the `event_tag`
    annotation still carries the raw tag.
@@ -243,6 +249,7 @@ unchanged — the line still uses the existing `glyph("running")` helper, so
 `--ascii`/`NO_COLOR`/non-TTY keep working (no new glyphs introduced).
 
 **Files changed.**
+
 - `src/core/observability/humanize.ts` — **new** pure humanizer + summary table.
 - `src/core/observability/live-observer.ts` — humanize the AgentEvent logfmt message.
 - `src/core/observability/observer-tee.ts` — populate `LiveActivity.message` via the humanizer.

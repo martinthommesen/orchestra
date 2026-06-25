@@ -1,24 +1,17 @@
-import type { Status } from "../design/tokens";
-import { statusVisual } from "../design/tokens";
+import type { StatusBadgeVM } from "../model/fleet";
 
 /**
- * Shared status chip (#68) — reused by Fleet (#69) and Kanban (#70). Renders the status' glyph
- * **and** label (color is never the only signal — parity with the CLI accessibility note) and
- * colors itself from the one design-token source.
+ * Shared status chip (#68) — the single place a status badge is rendered. Consumes the
+ * render-ready `StatusBadgeVM` derived once in `model/fleet.ts` (glyph + label + color var) so
+ * Fleet (#69) and Kanban (#70) stay markup-free and can't drift. The visible label always carries
+ * the status (color is never the only signal — parity with the CLI's accessibility note); the
+ * glyph is decorative, so it's `aria-hidden` and the chip needs no extra ARIA role/label.
  */
-export const StatusChip = ({ status }: { status: Status }) => {
-  const v = statusVisual(status);
-  return (
-    <span
-      className="status-chip"
-      role="img"
-      style={{ color: v.colorVar, borderColor: v.colorVar }}
-      aria-label={`status: ${v.label}`}
-    >
-      <span className="status-chip__glyph" aria-hidden="true">
-        {v.glyph}
-      </span>
-      <span className="status-chip__label">{v.label}</span>
+export const StatusChip = ({ badge }: { badge: StatusBadgeVM }) => (
+  <span className="status-chip" style={{ color: badge.colorVar, borderColor: badge.colorVar }}>
+    <span className="status-chip__glyph" aria-hidden="true">
+      {badge.glyph}
     </span>
-  );
-};
+    <span className="status-chip__label">{badge.label}</span>
+  </span>
+);

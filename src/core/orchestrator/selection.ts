@@ -59,8 +59,9 @@ export const isEligible = (issue: Issue, ctx: SelectionContext): boolean => {
   if (ctx.claimed.has(issue.id)) {
     return false;
   }
+  const labels = new Set(issue.labels);
   for (const label of ctx.requiredLabels) {
-    if (!issue.labels.includes(label)) {
+    if (!labels.has(label)) {
       return false;
     }
   }
@@ -103,8 +104,4 @@ export const compareIssues = (a: Issue, b: Issue): number => {
 export const selectCandidates = (
   issues: ReadonlyArray<Issue>,
   ctx: SelectionContext,
-): ReadonlyArray<Issue> =>
-  issues
-    .filter((issue) => isEligible(issue, ctx))
-    .slice()
-    .sort(compareIssues);
+): ReadonlyArray<Issue> => issues.filter((issue) => isEligible(issue, ctx)).toSorted(compareIssues);

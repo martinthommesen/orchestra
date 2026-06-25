@@ -78,6 +78,7 @@ describe("cockpit API client (#67)", () => {
           max_concurrent_agents: 4,
           max_concurrent_agents_by_state: {},
           max_turns: 7,
+          max_failure_retries: 3,
           max_retry_backoff_ms: 300000,
         },
         budget: { max_total_tokens: null },

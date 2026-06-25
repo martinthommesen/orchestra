@@ -11,7 +11,7 @@ SDK, Ink TUI, Linear adapter) are additive swaps rather than rewrites.
 
 ## Ratified architecture decisions
 
-1. **Language/runtime:** TypeScript on **Effect** — *all the way through* the core
+1. **Language/runtime:** TypeScript on **Effect** — _all the way through_ the core
    and the CLI (no Promise escape hatch in the core). Pay down the learning curve
    with `docs/effect-guide.md` (owned by Nova).
 2. **Tracker:** **GitHub Issues** adapter for v1, behind an `IssueTracker` port
@@ -60,13 +60,13 @@ SDK, Ink TUI, Linear adapter) are additive swaps rather than rewrites.
 
 ## Risks & mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| Copilot integration surface unknown/churning | Sprint 0 spike, pinned behind `AgentRunner` + `Schema` snapshot tests |
-| Effect learning curve for contributors | `docs/effect-guide.md`, small obvious service interfaces, "good first issue" path |
-| Subprocess stdout framing brittleness | Runner owns parsing; orchestrator consumes typed events only; snapshot tests |
-| GitHub↔Linear model mismatch | Port shaped to spec's normalized Issue; document GitHub field mapping in brief |
-| Scope creep toward the dashboard | Dashboard reads a snapshot, never gates the daemon; TUI is a separate post-v1 package |
+| Risk                                         | Mitigation                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Copilot integration surface unknown/churning | Sprint 0 spike, pinned behind `AgentRunner` + `Schema` snapshot tests                 |
+| Effect learning curve for contributors       | `docs/effect-guide.md`, small obvious service interfaces, "good first issue" path     |
+| Subprocess stdout framing brittleness        | Runner owns parsing; orchestrator consumes typed events only; snapshot tests          |
+| GitHub↔Linear model mismatch                 | Port shaped to spec's normalized Issue; document GitHub field mapping in brief        |
+| Scope creep toward the dashboard             | Dashboard reads a snapshot, never gates the daemon; TUI is a separate post-v1 package |
 
 ## Immediate next steps
 

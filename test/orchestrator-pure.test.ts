@@ -458,6 +458,39 @@ describe("reconciliation", () => {
       }),
     );
   });
+
+  it("parked (abandoned) issues reconcile by tracker state only — no stall, no UpdateActive", () => {
+    const actions = planReconciliation({
+      running: [],
+      abandoned: [{ issueId: "term" }, { issueId: "act" }, { issueId: "gone" }],
+      refreshed: new Map([
+        ["term", makeStateRef("term", "Done")],
+        ["act", makeStateRef("act", "In Progress")],
+      ]),
+      now: 10_000,
+      stallTimeoutMs: 5_000,
+      activeStates: active,
+      terminalStates: terminal,
+    });
+    // active → left parked (no action); terminal → reap; vanished → release.
+    expect(actions).toEqual([
+      { _tag: "TerminalKill", issueId: "term" },
+      { _tag: "NeitherKill", issueId: "gone" },
+    ]);
+  });
+
+  it("leaves abandoned issues untouched when the tracker refresh failed", () => {
+    const actions = planReconciliation({
+      running: [],
+      abandoned: [{ issueId: "a" }],
+      refreshed: null,
+      now: 10_000,
+      stallTimeoutMs: 5_000,
+      activeStates: active,
+      terminalStates: terminal,
+    });
+    expect(actions).toEqual([]);
+  });
 });
 
 // ───────────────────────────── state transitions (§7) ─────────────────────────────

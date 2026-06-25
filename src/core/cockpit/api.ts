@@ -37,7 +37,7 @@ export const AckWire = Schema.Struct({
 export type AckWire = typeof AckWire.Type;
 
 /** Path schema for the per-issue mutating endpoints (`:id`). */
-export const IssueIdParam = Schema.Struct({ id: Schema.String });
+const IssueIdParam = Schema.Struct({ id: Schema.String });
 
 /**
  * Auth/Origin middleware applied to the **control** group only (DD-5). It fails closed with
@@ -49,7 +49,7 @@ export class CockpitAuth extends HttpApiMiddleware.Tag<CockpitAuth>()("orchestra
 }) {}
 
 /** Read group — token-free loopback reads. */
-export class ReadGroup extends HttpApiGroup.make("read")
+class ReadGroup extends HttpApiGroup.make("read")
   .add(
     // Byte-compatible snapshot: the handler returns a raw HttpServerResponse, so `Unknown`
     // here just declares a 200 body without re-encoding the projection through a schema.
@@ -63,7 +63,7 @@ export class ReadGroup extends HttpApiGroup.make("read")
   ) {}
 
 /** Control group — every endpoint requires the bearer token + loopback Origin (DD-5). */
-export class ControlGroup extends HttpApiGroup.make("control")
+class ControlGroup extends HttpApiGroup.make("control")
   .add(
     HttpApiEndpoint.post("pause", "/api/v1/control/pause")
       .addSuccess(ControlStateWire)

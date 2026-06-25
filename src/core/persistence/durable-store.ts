@@ -33,7 +33,7 @@ import { layerPersistence, Persistence } from "./persistence";
  * progress and a `retry_attempts` entry with no re-armed timer would never fire. The two
  * halves (this seed + the loop's reconcile) are a single restore flow.
  */
-export const seedState = (
+const seedState = (
   loaded: Option.Option<PersistedState>,
   config: ServiceConfig,
 ): OrchestratorState =>

@@ -28,8 +28,11 @@ import { mapCopilotLine } from "./map";
  *   orchestrator interrupts the worker (stall kill, reconciliation, shutdown) the scope
  *   finalizer SIGTERM's the PID. A `turn_timeout_ms` guard fails the stream if the turn
  *   outlives the deadline.
- * - **Secrets:** the resolved GitHub token is handed to the child via env
- *   (`GITHUB_TOKEN`/`COPILOT_GITHUB_TOKEN`/`GH_TOKEN`) and is never logged.
+ * - **Secrets:** the child gets a scrubbed environment: runtime + connectivity basics are
+ *   preserved, inherited non-runtime variables are blanked, and only the resolved GitHub
+ *   token is intentionally handed over via `GITHUB_TOKEN`/`COPILOT_GITHUB_TOKEN`/`GH_TOKEN`.
+ *   Non-secret network settings (proxy + custom-CA trust) pass through so the CLI can still
+ *   reach GitHub in proxied / private-CA deployments.
  * - **Continuation:** first turn pins a generated `--session-id`; a resumed turn passes
  *   `--resume <sessionId>`. Either way a `SessionStarted` carrying that id is emitted
  *   first so the orchestrator can resume the thread.
@@ -37,7 +40,54 @@ import { mapCopilotLine } from "./map";
  *   terminal `result` (or process exit) is the success/failure signal — exit 0 with a
  *   `result` ⇒ `TurnCompleted`, otherwise `AgentProcessExit`.
  */
-export const makeCopilotRunner = (
+const CHILD_ENV_PASSTHROUGH = new Set([
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TEMP",
+  "TERM",
+  "TMP",
+  "TMPDIR",
+  "USER",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  // Non-secret connectivity settings: blanking these breaks the CLI's GitHub access in
+  // proxied / private-CA deployments. Both casings — *nix tooling reads either.
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+]);
+
+const childEnv = (base: NodeJS.ProcessEnv, ghAuth: string | undefined): Record<string, string> => {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) {
+      continue;
+    }
+    env[key] = CHILD_ENV_PASSTHROUGH.has(key) ? value : "";
+  }
+  env.COPILOT_AUTO_UPDATE = "false";
+  if (ghAuth !== undefined && ghAuth !== "") {
+    env.GITHUB_TOKEN = ghAuth;
+    env.COPILOT_GITHUB_TOKEN = ghAuth;
+    env.GH_TOKEN = ghAuth;
+  }
+  return env;
+};
+
+const makeCopilotRunner = (
   config: ServiceConfig,
 ): Effect.Effect<typeof AgentRunner.Service, never, CommandExecutor.CommandExecutor> =>
   Effect.gen(function* () {
@@ -66,12 +116,7 @@ export const makeCopilotRunner = (
       ).pipe(
         // Safety Invariant 1: the OS-level cwd is the workspace, not just `-C`.
         Command.workingDirectory(params.workspacePath),
-        Command.env({
-          COPILOT_AUTO_UPDATE: "false",
-          ...(ghAuth
-            ? { GITHUB_TOKEN: ghAuth, COPILOT_GITHUB_TOKEN: ghAuth, GH_TOKEN: ghAuth }
-            : {}),
-        }),
+        Command.env(childEnv(process.env, ghAuth)),
         Command.stdout("pipe"),
         Command.stderr("inherit"),
       );
