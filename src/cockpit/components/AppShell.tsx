@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
-import { ROUTE_LABELS, ROUTES, type Route, routeHref } from "../router";
+import { ROUTE_KEY, ROUTE_LABELS, ROUTES, type Route } from "../router";
 
 /**
  * App shell (#68) — the persistent nav frame around every view. Renders the four nav targets
- * (Fleet · Kanban · Events · Settings) as hash links, marks the active one, and slots the active
- * view into `<main>`. Presentational only: route state is owned above (in `App` via `useRoute`).
+ * (Fleet · Kanban · Events · Settings) as buttons, marks the active one, exposes each button's
+ * `g`-prefixed keyboard shortcut (`aria-keyshortcuts` + `title`), and slots the active view into
+ * `<main>`. Presentational only: route state is owned above (in `App` via `useRoute`).
  */
 export const AppShell = ({
   route,
@@ -26,20 +27,17 @@ export const AppShell = ({
       </div>
       <nav className="app-shell__nav" aria-label="Primary">
         {ROUTES.map((r) => (
-          <a
+          <button
             key={r}
-            href={routeHref(r)}
+            type="button"
             className={r === route ? "nav-link nav-link--active" : "nav-link"}
             aria-current={r === route ? "page" : undefined}
-            onClick={(e) => {
-              // Let modified clicks (open-in-new-tab) behave normally.
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault();
-              onNavigate(r);
-            }}
+            aria-keyshortcuts={`g ${ROUTE_KEY[r]}`}
+            title={`${ROUTE_LABELS[r]} — press g then ${ROUTE_KEY[r]}`}
+            onClick={() => onNavigate(r)}
           >
             {ROUTE_LABELS[r]}
-          </a>
+          </button>
         ))}
       </nav>
     </header>

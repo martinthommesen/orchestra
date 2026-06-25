@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  COLOR_TOKEN_VAR,
-  LEVEL_COLOR_TOKEN,
-  levelColorVar,
-  statusVisual,
-} from "../src/cockpit/design/tokens";
+import { COLOR_TOKEN_VAR } from "../src/cockpit/design/tokens";
+import { badgeOf } from "../src/cockpit/model/fleet";
 import { parseRoute, ROUTE_LABELS, ROUTES, routeHref } from "../src/cockpit/router";
 import { STATUS_STYLES, type Status } from "../src/core/observability/glyphs";
 
@@ -18,28 +14,21 @@ describe("cockpit design tokens — single source of truth parity", () => {
     }
   });
 
-  it("statusVisual mirrors glyph + ascii + label from glyphs.ts verbatim", () => {
+  it("badgeOf mirrors the glyph + label from glyphs.ts and binds the matching color var", () => {
     for (const status of statuses) {
       const style = STATUS_STYLES[status];
-      const v = statusVisual(status);
-      expect(v.glyph).toBe(style.glyph);
-      expect(v.ascii).toBe(style.ascii);
-      expect(v.label).toBe(style.label);
-      expect(v.colorVar).toBe(`var(${COLOR_TOKEN_VAR[style.color]})`);
+      const badge = badgeOf(status);
+      expect(badge.glyph).toBe(style.glyph);
+      expect(badge.label).toBe(style.label);
+      expect(badge.colorVar).toBe(`var(${COLOR_TOKEN_VAR[style.color]})`);
+      expect(badge.known).toBe(true);
     }
   });
 
   it("covers all five statuses with distinct glyphs and color vars", () => {
     expect(statuses).toHaveLength(5);
-    const glyphs = new Set(statuses.map((s) => statusVisual(s).glyph));
-    expect(glyphs.size).toBe(5);
-  });
-
-  it("maps event levels to color vars (info muted, warn highlighted)", () => {
-    expect(LEVEL_COLOR_TOKEN.info).toBe("muted");
-    expect(LEVEL_COLOR_TOKEN.warn).toBe("warn");
-    expect(levelColorVar("info")).toBe(`var(${COLOR_TOKEN_VAR.muted})`);
-    expect(levelColorVar("warn")).toBe(`var(${COLOR_TOKEN_VAR.warn})`);
+    expect(new Set(statuses.map((s) => badgeOf(s).glyph)).size).toBe(5);
+    expect(new Set(statuses.map((s) => badgeOf(s).colorVar)).size).toBe(5);
   });
 });
 

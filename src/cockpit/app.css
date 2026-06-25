@@ -9,7 +9,9 @@
 .app-shell__bar {
   display: flex;
   align-items: center;
-  gap: var(--sp-6);
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-6);
   padding: var(--sp-3) var(--sp-5);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
@@ -47,9 +49,12 @@
 .nav-link {
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-muted);
   font-size: var(--fs-sm);
+  font-family: inherit;
   border: 1px solid transparent;
+  cursor: pointer;
   transition:
     background var(--motion-fast) var(--ease),
     color var(--motion-fast) var(--ease);
@@ -85,6 +90,11 @@
   box-shadow: var(--shadow);
 }
 
+/* `aux` panels (additive side data) recede so the primary panel of a view leads. */
+.panel--aux {
+  box-shadow: none;
+}
+
 .panel__header {
   display: flex;
   align-items: center;
@@ -98,6 +108,11 @@
   margin: 0;
   font-size: var(--fs-md);
   font-weight: 600;
+}
+
+.panel--aux .panel__title {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .panel__actions {
@@ -155,18 +170,63 @@
   color: var(--status-danger);
 }
 
-.control-banner {
+/* Fleet header toolbar: connection status on the left, dispatch control on the right. */
+.fleet-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-4);
   padding: var(--sp-3) var(--sp-4);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
 
-.control-banner__glyph {
-  font-size: var(--fs-lg);
+/* Global dispatch Pause/Resume control (Fleet toolbar + Settings panel). */
+.dispatch-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-4);
+}
+
+.dispatch-control__state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.dispatch-control__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dispatch-control__dot.is-running {
+  background: var(--status-success);
+}
+
+.dispatch-control__dot.is-paused {
+  background: var(--status-warn);
+}
+
+.dispatch-control__state strong {
+  font-size: var(--fs-sm);
+}
+
+.dispatch-control__hint {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+  max-width: 46ch;
+}
+
+.dispatch-control__error {
+  flex-basis: 100%;
+  margin: 0;
+  text-align: right;
 }
 
 .metric-row {
@@ -202,6 +262,10 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--sp-4);
+}
+
+.table-scroll {
+  overflow-x: auto;
 }
 
 .data-table {
@@ -276,7 +340,7 @@
 .filters input {
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-sm);
@@ -372,6 +436,13 @@
   font-size: var(--fs-sm);
 }
 
+.kanban__hint {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -432,19 +503,18 @@
   padding: var(--sp-1) var(--sp-2);
 }
 
-/* ─── Settings + pause/resume (#71) ──────────────────────────────────────────── */
-
-.pause-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
+/* Destructive confirm (armed Cancel) and the warn-tinted Pause action. */
+.btn--danger {
+  border-color: var(--status-danger);
+  color: var(--status-danger);
 }
 
-.pause-toggle p {
-  margin: var(--sp-1) 0 0;
-  font-size: var(--fs-sm);
+.btn--warn {
+  border-color: var(--status-warn);
+  color: var(--status-warn);
 }
+
+/* ─── Settings (#71) ─────────────────────────────────────────────────────────── */
 
 .settings-form {
   display: flex;
@@ -467,7 +537,7 @@
 .field input {
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: var(--sp-2) var(--sp-3);
   font-family: var(--font-mono);
@@ -475,6 +545,11 @@
 
 .field input[aria-invalid="true"] {
   border-color: var(--status-danger);
+}
+
+.field__hint {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
 }
 
 .field__error {
@@ -501,4 +576,26 @@
   color: var(--status-success);
   font-size: var(--fs-sm);
   margin: 0;
+}
+
+/* ─── Narrow viewports ───────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .app-shell__main {
+    padding: var(--sp-4) var(--sp-3);
+    gap: var(--sp-4);
+  }
+
+  .app-shell__nav {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .fleet-toolbar,
+  .dispatch-control {
+    justify-content: flex-start;
+  }
+
+  .dispatch-control__error {
+    text-align: left;
+  }
 }

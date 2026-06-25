@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { describeError } from "../api/errors";
 import { COCKPIT_POLL_MS, client } from "../api/instance";
 import { ConnectionBanner } from "../components/ConnectionBanner";
+import { StatusChip } from "../components/StatusChip";
 import { type CardAction, type KanbanCard, toKanban } from "../model/kanban";
 import { usePolling } from "../usePolling";
 
@@ -64,10 +66,7 @@ export const KanbanView = () => {
       // Revert on error: surface the reason and re-enable the button for another attempt.
       setActions((a) => ({
         ...a,
-        [card.instanceKey]: {
-          phase: "error",
-          message: err instanceof Error ? err.message : String(err),
-        },
+        [card.instanceKey]: { phase: "error", message: describeError(err) },
       }));
     }
   };
@@ -88,7 +87,11 @@ export const KanbanView = () => {
               <div className="kanban__cards">
                 {col.countOnly ? (
                   <p className="kanban__count-only muted">
-                    {col.count} reserved, awaiting dispatch
+                    {col.count} reserved, awaiting dispatch.
+                    <span className="kanban__hint">
+                      The daemon doesn't expose claimed issues individually yet, so they show as a
+                      count rather than cards.
+                    </span>
                   </p>
                 ) : col.cards.length === 0 ? (
                   <p className="kanban__empty muted">—</p>
@@ -113,6 +116,9 @@ export const KanbanView = () => {
 
 const ACTION_LABEL: Record<CardAction, string> = { cancel: "Cancel", retry: "Retry now" };
 
+/** Cancel kills a live session, so it arms a one-shot inline confirm before firing (no modal). */
+const CONFIRM_WINDOW_MS = 4000;
+
 const Card = ({
   card,
   action,
@@ -124,30 +130,48 @@ const Card = ({
 }) => {
   const pending = action?.phase === "pending";
   const done = action?.phase === "ok";
+  const [armed, setArmed] = useState(false);
+
+  // Auto-disarm so a half-clicked Cancel can't linger and fire long after the operator moved on.
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), CONFIRM_WINDOW_MS);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  const act = card.action;
+  const confirmable = act === "cancel";
+
+  const onClick = () => {
+    if (act === null) return;
+    if (confirmable && !armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
+    onAct(act, card);
+  };
+
+  const baseLabel = act === null ? "" : ACTION_LABEL[act];
+  const label = pending ? "…" : done ? "requested ✓" : armed ? "Confirm cancel" : baseLabel;
+
   return (
     <article className="card">
       <div className="card__head">
         <span className="card__id mono">{card.identifier}</span>
-        <span
-          className="status-chip"
-          role="img"
-          aria-label={`status: ${card.badge.label}`}
-          style={{ color: card.badge.colorVar, borderColor: card.badge.colorVar }}
-        >
-          <span aria-hidden="true">{card.badge.glyph}</span>
-          <span>{card.badge.label}</span>
-        </span>
+        <StatusChip badge={card.badge} />
       </div>
       <p className="card__detail muted">{card.detail}</p>
-      {card.action ? (
+      {act ? (
         <div className="card__actions">
           <button
             type="button"
-            className="btn btn--sm"
+            className={armed ? "btn btn--sm btn--danger" : "btn btn--sm"}
             disabled={pending || done}
-            onClick={() => card.action && onAct(card.action, card)}
+            onClick={onClick}
+            title={armed ? "Click again to confirm — this stops the running session" : undefined}
           >
-            {pending ? "…" : done ? "requested ✓" : ACTION_LABEL[card.action]}
+            {label}
           </button>
           {action?.phase === "error" ? (
             <span className="card__error" role="alert">

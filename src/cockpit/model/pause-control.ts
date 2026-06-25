@@ -1,4 +1,3 @@
-import { ApiError } from "../api/client";
 import type { ControlWire } from "../api/types";
 
 /**
@@ -38,7 +37,3 @@ export const derivePauseControl = (control: ControlWire | null): PauseControlMod
     buttonLabel: canResume ? "Resume dispatch" : "Pause dispatch",
   };
 };
-
-/** Normalize any thrown value into a user-facing message (`ApiError`/`Error` → its message). */
-export const messageOf = (err: unknown): string =>
-  err instanceof ApiError || err instanceof Error ? err.message : String(err);

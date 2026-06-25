@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { describeError } from "../api/errors";
 import { COCKPIT_POLL_MS, client } from "../api/instance";
 import type { EditableSettingsWire } from "../api/types";
 import { ConnectionBanner } from "../components/ConnectionBanner";
+import { DispatchControl } from "../components/DispatchControl";
 import { Panel } from "../components/Panel";
-import { derivePauseControl, messageOf } from "../model/pause-control";
 import {
   type FieldId,
   type SettingsFormModel,
@@ -13,11 +14,11 @@ import {
 import { usePolling } from "../usePolling";
 
 /**
- * Sprint 6 / #71 — the Settings view + global Pause/Resume toggle.
+ * Sprint 6 / #71 — the Settings view + global Pause/Resume control.
  *
  * The form is built from `GET /api/v1/settings` (the whitelisted subset — never any secret/
  * `tracker` key), validated client-side against the same schema (`validateSettings`, pure), and
- * saved via `PUT /api/v1/settings`. The Pause/Resume toggle reflects the live
+ * saved via `PUT /api/v1/settings`. The shared `DispatchControl` reflects the live
  * `control.dispatch_paused`/`paused_by` from the polled snapshot and calls the control endpoints.
  */
 
@@ -38,10 +39,6 @@ export const SettingsView = () => {
   const [baseline, setBaseline] = useState<EditableSettingsWire | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>({ phase: "idle" });
-  const [pauseBusy, setPauseBusy] = useState(false);
-  // A pause/resume failure (401 missing dev token, 503 command timeout, network) must SURFACE —
-  // mirrors the Save/Kanban error pattern instead of becoming a silent unhandled rejection.
-  const [pauseError, setPauseError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -54,7 +51,7 @@ export const SettingsView = () => {
         }
       })
       .catch((err) => {
-        if (alive) setLoadError(messageOf(err));
+        if (alive) setLoadError(describeError(err));
       });
     return () => {
       alive = false;
@@ -74,24 +71,7 @@ export const SettingsView = () => {
       setBaseline(updated);
       setSave({ phase: "saved" });
     } catch (err) {
-      setSave({ phase: "error", message: messageOf(err) });
-    }
-  };
-
-  // Only the operator latch is clearable from here: `ResumeDispatch` clears ONLY the operator
-  // pause, so offering "Resume" while dispatch is held by the BUDGET gate would be a no-op
-  // (confusing UX). When paused by budget we render guidance instead of a dead button.
-  const pause = derivePauseControl(control);
-
-  const togglePause = async () => {
-    setPauseBusy(true);
-    setPauseError(null);
-    try {
-      await (pause.action === "resume" ? client.resume() : client.pause());
-    } catch (err) {
-      setPauseError(messageOf(err));
-    } finally {
-      setPauseBusy(false);
+      setSave({ phase: "error", message: describeError(err) });
     }
   };
 
@@ -103,36 +83,7 @@ export const SettingsView = () => {
       <ConnectionBanner connection={poll.connection} error={poll.error} updatedLabel={null} />
 
       <Panel title="Dispatch control">
-        <div className="pause-toggle">
-          <div>
-            <strong>
-              {pause.dispatchPaused
-                ? `Dispatch is paused${pause.pausedBy ? ` (by ${pause.pausedBy})` : ""}`
-                : "Dispatch is running"}
-            </strong>
-            <p className="muted">
-              {pause.pausedByBudget
-                ? "Paused by the budget gate — raise or clear the token ceiling below to resume."
-                : "Pausing withholds new sessions only — in-flight work keeps running."}
-            </p>
-          </div>
-          {pause.showToggle ? (
-            <button
-              type="button"
-              className="btn"
-              disabled={pauseBusy}
-              onClick={togglePause}
-              aria-pressed={pause.dispatchPaused}
-            >
-              {pauseBusy ? "…" : pause.buttonLabel}
-            </button>
-          ) : null}
-        </div>
-        {pauseError !== null ? (
-          <p className="card__error" role="alert">
-            Dispatch control failed: {pauseError}
-          </p>
-        ) : null}
+        <DispatchControl control={control} />
       </Panel>
 
       <Panel
@@ -165,6 +116,7 @@ export const SettingsView = () => {
             <NumberField
               id="intervalMs"
               label="Poll interval (ms)"
+              hint="How often the daemon scans for work and refreshes this view. Lower is more responsive but adds load."
               value={form.intervalMs}
               error={validation.errors.intervalMs}
               onChange={(v) => patch({ intervalMs: v })}
@@ -172,6 +124,7 @@ export const SettingsView = () => {
             <NumberField
               id="maxConcurrentAgents"
               label="Max concurrent agents"
+              hint="Hard ceiling on sessions running at once, across every issue state."
               value={form.maxConcurrentAgents}
               error={validation.errors.maxConcurrentAgents}
               onChange={(v) => patch({ maxConcurrentAgents: v })}
@@ -179,6 +132,7 @@ export const SettingsView = () => {
             <NumberField
               id="maxTurns"
               label="Max turns"
+              hint="A session is stopped after this many agent turns, even if it hasn't finished."
               value={form.maxTurns}
               error={validation.errors.maxTurns}
               onChange={(v) => patch({ maxTurns: v })}
@@ -186,6 +140,7 @@ export const SettingsView = () => {
             <NumberField
               id="maxRetryBackoffMs"
               label="Max retry backoff (ms)"
+              hint="Upper bound on the exponential wait between retries of a failed attempt."
               value={form.maxRetryBackoffMs}
               error={validation.errors.maxRetryBackoffMs}
               onChange={(v) => patch({ maxRetryBackoffMs: v })}
@@ -193,6 +148,7 @@ export const SettingsView = () => {
             <NumberField
               id="maxTotalTokens"
               label="Max total tokens (blank = no ceiling)"
+              hint="When set, dispatch auto-pauses once total token spend crosses this budget."
               value={form.maxTotalTokens}
               error={validation.errors.maxTotalTokens}
               onChange={(v) => patch({ maxTotalTokens: v })}
@@ -237,6 +193,7 @@ export const SettingsView = () => {
 const NumberField = ({
   id,
   label,
+  hint,
   value,
   error,
   onChange,
@@ -244,26 +201,36 @@ const NumberField = ({
 }: {
   id: FieldId;
   label: string;
+  hint?: string;
   value: string;
   error: string | undefined;
   onChange: (value: string) => void;
   allowEmpty?: boolean;
-}) => (
-  <div className="field">
-    <label htmlFor={id}>{label}</label>
-    <input
-      id={id}
-      type="number"
-      inputMode="numeric"
-      min={allowEmpty ? undefined : 1}
-      value={value}
-      aria-invalid={error !== undefined}
-      onChange={(e) => onChange(e.target.value)}
-    />
-    {error !== undefined ? (
-      <span className="field__error" role="alert">
-        {error}
-      </span>
-    ) : null}
-  </div>
-);
+}) => {
+  const hintId = hint ? `${id}-hint` : undefined;
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      {hint ? (
+        <span className="field__hint" id={hintId}>
+          {hint}
+        </span>
+      ) : null}
+      <input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={allowEmpty ? undefined : 1}
+        value={value}
+        aria-invalid={error !== undefined}
+        aria-describedby={hintId}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {error !== undefined ? (
+        <span className="field__error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+};

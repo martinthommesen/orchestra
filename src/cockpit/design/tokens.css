@@ -25,11 +25,13 @@
   --bg: #0b0f14;
   --bg-panel: #131a22;
   --bg-elevated: #1b242e;
-  --border: #243240;
-  --border-strong: #34465a;
+  /* Decorative separators (panel/table/card outlines): ~2:1, calm but clearly visible. */
+  --border: #445463;
+  /* Interactive boundaries (inputs, buttons, active nav): ≥3:1 per WCAG SC 1.4.11. */
+  --border-strong: #5f748d;
   --text: #e6edf3;
-  --text-muted: #94a3b8;
-  --text-faint: #64748b;
+  --text-muted: #94a3b8; /* ≥6:1 on every surface */
+  --text-faint: #8693a6; /* ≥5:1 on every surface — secondary text still meets AA 4.5:1 */
   --accent: var(--status-info);
 
   /* Typography. */
@@ -97,10 +99,10 @@ button {
 /* High-contrast posture: reinforce borders and text (mirrors NO_COLOR/--ascii spirit). */
 @media (prefers-contrast: more) {
   :root {
-    --border: #5b7186;
-    --border-strong: #8aa0b4;
+    --border: #6c8298;
+    --border-strong: #88a0b6;
     --text-muted: #c7d2dc;
-    --text-faint: #9fb0bf;
+    --text-faint: #aebccb;
   }
 }
 

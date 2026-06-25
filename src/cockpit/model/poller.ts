@@ -1,4 +1,4 @@
-import { ApiError } from "../api/client";
+import { describeError } from "../api/errors";
 
 /**
  * Sprint 6 / #69 — a framework-agnostic, non-overlapping poller for the cockpit. Kept
@@ -40,12 +40,6 @@ export interface PollerDeps<T> {
   readonly now?: () => number;
 }
 
-const messageOf = (err: unknown): string => {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return String(err);
-};
-
 export class Poller<T> {
   private state: PollState<T> = initialPollState<T>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -84,19 +78,27 @@ export class Poller<T> {
     return (this.deps.now ?? Date.now)();
   }
 
+  private applySuccess(data: T): void {
+    if (this.stopped) return;
+    this.emit({ data, connection: "live", error: null, lastUpdatedAtMs: this.now() });
+  }
+
+  private applyFailure(err: unknown): void {
+    if (this.stopped) return;
+    this.emit({
+      connection: this.state.data === null ? "connecting" : "stale",
+      error: describeError(err),
+    });
+  }
+
   private async poll(): Promise<void> {
     if (this.stopped) return;
     try {
       const data = await this.deps.fetch();
-      if (this.stopped) return;
-      this.emit({ data, connection: "live", error: null, lastUpdatedAtMs: this.now() });
+      this.applySuccess(data);
     } catch (err) {
-      if (this.stopped) return;
       // Keep the last good value — a single failed poll must not blank the UI.
-      this.emit({
-        connection: this.state.data === null ? "connecting" : "stale",
-        error: messageOf(err),
-      });
+      this.applyFailure(err);
     }
     this.scheduleNext();
   }

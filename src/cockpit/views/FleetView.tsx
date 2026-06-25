@@ -1,6 +1,8 @@
 import { COCKPIT_POLL_MS, client } from "../api/instance";
 import { ConnectionBanner } from "../components/ConnectionBanner";
+import { DispatchControl } from "../components/DispatchControl";
 import { Panel } from "../components/Panel";
+import { StatusChip } from "../components/StatusChip";
 import { toFleetView } from "../model/fleet";
 import { formatDuration } from "../model/format";
 import { usePolling } from "../usePolling";
@@ -22,9 +24,15 @@ export const FleetView = () => {
   if (poll.data === null) {
     return (
       <>
-        <ConnectionBanner connection={poll.connection} error={poll.error} updatedLabel={null} />
+        <div className="fleet-toolbar">
+          <ConnectionBanner connection={poll.connection} error={poll.error} updatedLabel={null} />
+        </div>
         <Panel title="Fleet">
           <p className="view-placeholder">Waiting for the first snapshot…</p>
+          <p className="muted">
+            The cockpit polls the daemon every {Math.round(COCKPIT_POLL_MS / 1000)}s. If the daemon
+            isn't running yet, start it — this view connects and populates on its own.
+          </p>
         </Panel>
       </>
     );
@@ -34,27 +42,14 @@ export const FleetView = () => {
 
   return (
     <>
-      <ConnectionBanner
-        connection={poll.connection}
-        error={poll.error}
-        updatedLabel={updatedLabel}
-      />
-
-      {vm.control ? (
-        <div
-          className="control-banner"
-          role="status"
-          style={{
-            borderColor:
-              vm.control.pausedBy === "operator" ? "var(--status-info)" : "var(--status-warn)",
-          }}
-        >
-          <span className="control-banner__glyph" aria-hidden="true">
-            ⏸
-          </span>
-          <span>{vm.control.message}</span>
-        </div>
-      ) : null}
+      <div className="fleet-toolbar">
+        <ConnectionBanner
+          connection={poll.connection}
+          error={poll.error}
+          updatedLabel={updatedLabel}
+        />
+        <DispatchControl control={poll.data.control ?? null} />
+      </div>
 
       <div className="metric-row">
         <Metric label="Running" value={vm.counts.running} />
@@ -68,46 +63,40 @@ export const FleetView = () => {
         {vm.running.length === 0 ? (
           <p className="view-placeholder">No sessions running right now.</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Issue</th>
-                <th>Status</th>
-                <th>Elapsed</th>
-                <th>Attempt</th>
-                <th>Workspace</th>
-                <th>Last activity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {vm.running.map((r) => (
-                <tr key={r.issueId}>
-                  <td className="mono">{r.identifier}</td>
-                  <td>
-                    <span
-                      className="status-chip"
-                      role="img"
-                      aria-label={`status: ${r.badge.label}`}
-                      style={{ color: r.badge.colorVar, borderColor: r.badge.colorVar }}
-                    >
-                      <span aria-hidden="true">{r.badge.glyph}</span>
-                      <span>{r.badge.label}</span>
-                    </span>
-                    {r.badge.known ? null : <span className="phase-hint"> phase={r.phase}</span>}
-                  </td>
-                  <td className="mono">{r.elapsedLabel}</td>
-                  <td className="mono">{r.attemptLabel}</td>
-                  <td className="mono workspace">{r.workspace}</td>
-                  <td className="muted">{r.lastActivityLabel ?? "—"}</td>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th>Status</th>
+                  <th>Elapsed</th>
+                  <th>Attempt</th>
+                  <th>Workspace</th>
+                  <th>Last activity</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {vm.running.map((r) => (
+                  <tr key={r.issueId}>
+                    <td className="mono">{r.identifier}</td>
+                    <td>
+                      <StatusChip badge={r.badge} />
+                      {r.badge.known ? null : <span className="phase-hint"> phase={r.phase}</span>}
+                    </td>
+                    <td className="mono">{r.elapsedLabel}</td>
+                    <td className="mono">{r.attemptLabel}</td>
+                    <td className="mono workspace">{r.workspace}</td>
+                    <td className="muted">{r.lastActivityLabel ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Panel>
 
       <div className="panel-grid">
-        <Panel title="Totals">
+        <Panel title="Totals" variant="aux">
           <dl className="kv">
             <Kv k="Input tokens" v={vm.totals.inputTokens.toLocaleString()} />
             <Kv k="Output tokens" v={vm.totals.outputTokens.toLocaleString()} />
@@ -117,7 +106,7 @@ export const FleetView = () => {
         </Panel>
 
         {vm.budget ? (
-          <Panel title="Budget">
+          <Panel title="Budget" variant="aux">
             <p>
               <span style={{ color: vm.budget.colorVar }}>{vm.budget.stateLabel}</span> ·{" "}
               {vm.budget.summary}
@@ -126,13 +115,13 @@ export const FleetView = () => {
         ) : null}
 
         {vm.restore ? (
-          <Panel title="Restore">
+          <Panel title="Restore" variant="aux">
             <p className="muted">{vm.restore.summary}</p>
           </Panel>
         ) : null}
 
         {vm.rateLimits.available ? (
-          <Panel title="Rate limits">
+          <Panel title="Rate limits" variant="aux">
             <p className="mono muted">{vm.rateLimits.summary}</p>
           </Panel>
         ) : null}

@@ -13,8 +13,9 @@ import { attemptLabel, formatDuration, formatElapsed, formatRelative } from "./f
  * Sprint 6 / #69 — the pure Fleet (session-overview) view-model. Turns a `SnapshotWire` + a
  * client `now` into a fully render-ready model so the React view stays presentational and the
  * whole derivation is unit-tested under Node. Reuses the one design-system source (`glyphs.ts`)
- * for status glyphs/colors. Every additive block (`budget`/`restore`/`control`/`last_activity`)
- * maps to `null`/absent when the daemon omits it — the view then omits the panel.
+ * for status glyphs/colors. Every additive block (`budget`/`restore`/`last_activity`) maps to
+ * `null`/absent when the daemon omits it — the view then omits the panel. The raw `control` block
+ * is consumed directly by the `DispatchControl` component (live Pause/Resume), not mapped here.
  */
 
 const WORKSPACE_MAX = 60;
@@ -87,12 +88,6 @@ export interface RateLimitsVM {
   readonly summary: string;
 }
 
-/** Control banner (#64) — present only when dispatch is withheld. */
-export interface ControlBannerVM {
-  readonly pausedBy: "operator" | "budget";
-  readonly message: string;
-}
-
 export interface FleetViewModel {
   readonly pollIntervalMs: number;
   readonly maxConcurrentAgents: number;
@@ -107,7 +102,6 @@ export interface FleetViewModel {
   readonly budget: BudgetVM | null;
   readonly restore: RestoreVM | null;
   readonly rateLimits: RateLimitsVM;
-  readonly control: ControlBannerVM | null;
 }
 
 const formatLastActivity = (now: number, r: RunAttemptWire): string | null => {
@@ -159,18 +153,6 @@ const summarizeRateLimits = (rateLimits: unknown): RateLimitsVM => {
   }
 };
 
-const toControlBanner = (s: SnapshotWire): ControlBannerVM | null => {
-  if (s.control === undefined) return null;
-  const by = s.control.paused_by;
-  return {
-    pausedBy: by,
-    message:
-      by === "operator"
-        ? "Dispatch paused by operator — in-flight work continues; no new sessions start."
-        : "Dispatch paused by the token budget — in-flight work continues; no new sessions start.",
-  };
-};
-
 export const toFleetView = (s: SnapshotWire, now: number): FleetViewModel => ({
   pollIntervalMs: s.poll_interval_ms,
   maxConcurrentAgents: s.max_concurrent_agents,
@@ -185,5 +167,4 @@ export const toFleetView = (s: SnapshotWire, now: number): FleetViewModel => ({
   budget: s.budget === undefined ? null : toBudgetVM(s.budget),
   restore: s.restore === undefined ? null : toRestoreVM(now, s.restore),
   rateLimits: summarizeRateLimits(s.rate_limits),
-  control: toControlBanner(s),
 });
