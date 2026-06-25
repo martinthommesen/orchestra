@@ -2,7 +2,7 @@
 
 Five sprints in, Orchestra is a durable, legible daemon — but every operator surface is
 **read-only** (logfmt logs, the loopback `GET /api/v1/state` snapshot, the Ink dashboard).
-Sprint 6 promotes the long-deferred *"web dashboard"* and the parked *"fleet view"* ideas
+Sprint 6 promotes the long-deferred _"web dashboard"_ and the parked _"fleet view"_ ideas
 (`docs/ideas-backlog.md`) into a **complete Web Cockpit**: a browser UI **served by the
 daemon** that gives an operator **full control** — kanban, session overview, an events
 feed, and **live-edit + persist** of `WORKFLOW.md` settings.
@@ -25,7 +25,7 @@ without violating the single-state-owning-fiber / structural-exactly-once invari
 
 - **No remote/multi-user access.** The cockpit stays **loopback-only** (`127.0.0.1`). No
   TLS, no accounts, no RBAC — it is a local operator tool (security posture below).
-- **No tracker writes from the cockpit.** Orchestra remains a tracker *reader*; the agent
+- **No tracker writes from the cockpit.** Orchestra remains a tracker _reader_; the agent
   writes issue state. Kanban cards are actionable on **Orchestra's** dispatch/session
   state (retry/cancel), never by dragging issues between tracker states.
 - **No editing of structural config** (tracker `repo`/`api_key`/`endpoint`, workspace
@@ -41,12 +41,12 @@ without violating the single-state-owning-fiber / structural-exactly-once invari
 1. **The single state-owning fiber stays the only writer.** Every mutating request becomes
    a message on the **same serial mailbox** the owner fiber already drains. No HTTP handler
    ever touches `OrchestratorStore` or the registry. Exactly-once stays **structural**.
-2. **In-flight work is never collateral.** Operator-pause withholds *new* dispatch only
+2. **In-flight work is never collateral.** Operator-pause withholds _new_ dispatch only
    (exactly like the budget gate). Only an explicit per-issue **cancel** interrupts a
    worker — and only the one it names.
 3. **The read snapshot stays backward-additive.** `GET /api/v1/state` keeps its exact wire
    shape; new fields are additive (a `control` block appears only when relevant). The
-   *server implementation* is rebuilt on `HttpApi` (forward-only — see DD-1), but the bytes
+   _server implementation_ is rebuilt on `HttpApi` (forward-only — see DD-1), but the bytes
    a reader sees do not regress.
 4. **Secrets never reach the wire or the disk-write path.** Settings editing operates on
    the **raw** front-matter map (re-read from disk), never the resolved `ServiceConfig`, so
@@ -58,6 +58,7 @@ without violating the single-state-owning-fiber / structural-exactly-once invari
 ## Design Decisions
 
 ### DD-1 — Backend: one typed `HttpApi`, and `/api/v1/state` is reorganized into it
+
 The hand-rolled `HttpRouter` in `snapshot-server.ts` is **replaced** by a single
 `@effect/platform` `HttpApi` (`CockpitApi`) that exposes the read snapshot **and** the
 mutating endpoints as typed endpoint groups. Under the forward-only mandate we do **not**
@@ -68,6 +69,7 @@ wire shape (the additive tradition continues), but it is now one `HttpApiEndpoin
 that is exactly the "dual API just in case" the mandate forbids._
 
 ### DD-2 — Command channel: an Effect `Queue` `CommandBus` + per-command `Deferred` ack
+
 A new `CommandBus` context service wraps a `Queue<EnqueuedCommand>` where
 `EnqueuedCommand = { command: Command; reply: Deferred<CommandResult> }`. At boot the loop
 forks one tiny pump fiber that drains the `CommandBus` and offers a **new mailbox `Msg`** —
@@ -85,15 +87,17 @@ state the architecture deliberately bans._
 `CancelSession(issueId)` · `ReloadConfig(rawPatch)`.
 
 ### DD-3 — Operator-pause is a runtime gate, additive on the snapshot
+
 Operator pause is a **new, distinct** concept from the budget pause. The loop gains a
 runtime `operatorPaused` latch; the dispatch gate becomes
 `toDispatch = (budget.paused || operatorPaused) ? [] : planDispatch(...)` — the same shape
 as the Sprint-5 budget gate, touching nothing else. It is **runtime-only** (not persisted;
 a restart resumes dispatch) and surfaces as an additive `control: { dispatch_paused,
-paused_by }` block on the snapshot so the cockpit (and the events feed) can show *why*
+paused_by }` block on the snapshot so the cockpit (and the events feed) can show _why_
 dispatch is idle (`operator` vs `budget`).
 
 ### DD-4 — Settings: edit a whitelisted subset of the **raw** front-matter, atomic write,
+
 hot-reload the safe knobs
 A new `WorkflowFile` service reads the **raw** `WORKFLOW.md`, parses the front matter as a
 YAML map (preserving the Liquid body verbatim), exposes a **whitelisted editable subset**,
@@ -102,14 +106,14 @@ and writes it back **atomically** (temp + `rename`, mirroring the Sprint-4 check
 discipline). The whitelist — the only keys the cockpit may read or write — is exactly the
 hot-applicable orchestration knobs:
 
-| Key | Why it is safe to edit + hot-apply |
-|-----|-----------------------------------|
-| `polling.interval_ms` | next sleep reads it; no in-flight effect |
-| `agent.max_concurrent_agents` | read by the dispatch planner each tick |
-| `agent.max_concurrent_agents_by_state` | read by the dispatch planner each tick |
-| `agent.max_turns` | gates continuation scheduling on the next completion |
-| `agent.max_retry_backoff_ms` | applied to the next backoff computation |
-| `budget.max_total_tokens` | the pure budget gate re-evaluates it each tick |
+| Key                                    | Why it is safe to edit + hot-apply                   |
+| -------------------------------------- | ---------------------------------------------------- |
+| `polling.interval_ms`                  | next sleep reads it; no in-flight effect             |
+| `agent.max_concurrent_agents`          | read by the dispatch planner each tick               |
+| `agent.max_concurrent_agents_by_state` | read by the dispatch planner each tick               |
+| `agent.max_turns`                      | gates continuation scheduling on the next completion |
+| `agent.max_retry_backoff_ms`           | applied to the next backoff computation              |
+| `budget.max_total_tokens`              | the pure budget gate re-evaluates it each tick       |
 
 **Secret safety (constraint #4).** The editor operates on the **raw** front-matter map, so
 `tracker.api_key` (a literal or a `$VAR`) is **outside the whitelist and never touched** —
@@ -126,6 +130,7 @@ re-parsing the patched file fails schema validation, the write is rejected befor
 (validate-then-write) and the `CommandResult` carries the typed error.
 
 ### DD-5 — Security: loopback bind + per-session bearer token + Origin allowlist
+
 The server stays bound to `127.0.0.1`. **Read** (`GET /api/v1/state`) stays token-free
 (loopback, read-only — keeps the bytes contract simple). **Every mutating endpoint** (`POST`/`PUT`)
 requires `Authorization: Bearer <token>` **and** an `Origin`/`Host` allowlist check
@@ -141,6 +146,7 @@ _Rejected: cookie-session auth (cookies are auto-sent cross-site → the CSRF fo
 avoiding)._
 
 ### DD-6 — The Ink dashboard is **removed**
+
 The web cockpit is a strict superset of the Ink dashboard's read view, plus control.
 Keeping two read UIs is exactly the debt the forward-only mandate says to delete. Once the
 cockpit's read views land and pass QA, the close-out task **deletes** `src/cli/dashboard/`,
@@ -150,14 +156,16 @@ _Rejected: keeping the Ink dashboard "for headless/SSH operators" — that is a 
 separate need; if it returns it should be a thin cockpit-API client, not preserved legacy._
 
 ### DD-7 — Kanban: columns mapped from state; cards actioned by **buttons**, not drag
+
 Columns: **Candidate/Claimed → Running → Retrying → Completed**, derived from the snapshot
 (`claimed`, `running`, `retrying`, `completed`) joined with each card's tracker identifier.
-Cards are **actionable via explicit buttons** — *Cancel* on a running card, *Retry now* on
+Cards are **actionable via explicit buttons** — _Cancel_ on a running card, _Retry now_ on
 a retrying card. **Drag is deliberately disallowed**: dragging a card between columns would
-imply Orchestra moves tracker state, but Orchestra is a *reader* (the agent writes state).
+imply Orchestra moves tracker state, but Orchestra is a _reader_ (the agent writes state).
 Buttons keep the actions honest about what Orchestra actually owns.
 
 ### DD-8 — Serving: Vite build → static assets served by `@effect/platform`; dev = proxy
+
 The SPA lives in `src/cockpit/`. `vite build` → `dist/cockpit/`. The daemon's `HttpApi`
 serves `dist/cockpit/` as static assets (existing `@effect/platform`/`-node`
 `HttpServer`/`FileSystem` — **no new runtime dep**) at `/`, with the SPA fallback to
@@ -202,7 +210,7 @@ flag.
   middleware (DD-5): bearer-token + loopback-Origin required on mutating endpoints, read
   stays token-free. Serve `dist/cockpit/` static assets with SPA fallback + token injection
   into `index.html` (DD-8). `runSnapshotServer(port, budget)` becomes `runCockpit(port,
-  …)`; `daemon.ts` wiring updated.
+…)`; `daemon.ts` wiring updated.
   **AC:** `GET /api/v1/state` returns the same shape Sprint-5 readers expect (a wire
   round-trip test pins it); every mutating endpoint rejects a missing/blank token (401) and
   a cross-origin `Origin` (403); a valid command returns its `CommandResult`; the SPA index
@@ -249,14 +257,14 @@ flag.
 - **#69 — Fleet / Session overview + Events feed views.** _Owner: Nova · Effort M · Risk Low
   · dep: #67, #68._
   The **Fleet** view (default): live running sessions with elapsed/status/workspace/attempt
-  + humanized last-activity, totals, budget, restore, rate-limits — the dashboard's content,
-  richer, polling `GET /api/v1/state` (non-overlapping, last-good-on-error, like the Ink
-  poller). The **Events** view: the `recent_events` feed, newest-first, glyph+level styled,
-  filterable by kind/level.
-  **AC:** the fleet renders every snapshot block honestly (absent field → panel omitted,
-  matching the additive contract); polling never overlaps and shows stale-with-data on a
-  failed poll; the events feed reflects new lifecycle events (incl. the new `control`
-  pause/resume + cancel observations); view-model mappers are unit-tested; all gates green.
+  - humanized last-activity, totals, budget, restore, rate-limits — the dashboard's content,
+    richer, polling `GET /api/v1/state` (non-overlapping, last-good-on-error, like the Ink
+    poller). The **Events** view: the `recent_events` feed, newest-first, glyph+level styled,
+    filterable by kind/level.
+    **AC:** the fleet renders every snapshot block honestly (absent field → panel omitted,
+    matching the additive contract); polling never overlaps and shows stale-with-data on a
+    failed poll; the events feed reflects new lifecycle events (incl. the new `control`
+    pause/resume + cancel observations); view-model mappers are unit-tested; all gates green.
 
 - **#70 — Kanban board view with actionable cards.** _Owner: Nova · Effort M · Risk Med ·
   dep: #67, #68, #64._
@@ -306,26 +314,27 @@ flag.
 Build order: **#64 → #65 → #66** (backend control plane; #64 is the only loop-assembly
 change — gate it for review like the budget gate), then **#67 → #68** (scaffold + design),
 then **#69/#70/#71** (the four views, parallelizable), then **#72** close-out (the deletion
-+ docs land last, after the cockpit has proven itself). Estimate ~8–11 days.
+
+- docs land last, after the cockpit has proven itself). Estimate ~8–11 days.
 
 ## API surface (contract level)
 
 **Read (token-free, loopback):**
 
-| Method · Path | Returns |
-|---|---|
-| `GET /api/v1/state` | the snapshot — **byte-compatible** Sprint-5 shape + additive `control` block |
-| `GET /api/v1/settings` | the whitelisted editable subset (raw values, **no secrets**) |
+| Method · Path          | Returns                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `GET /api/v1/state`    | the snapshot — **byte-compatible** Sprint-5 shape + additive `control` block |
+| `GET /api/v1/settings` | the whitelisted editable subset (raw values, **no secrets**)                 |
 
 **Mutating (`Authorization: Bearer <token>` + loopback `Origin` required):**
 
-| Method · Path | Command | `CommandResult` |
-|---|---|---|
-| `POST /api/v1/control/pause` | `PauseDispatch` | `{ dispatch_paused: true, paused_by: "operator" }` |
-| `POST /api/v1/control/resume` | `ResumeDispatch` | `{ dispatch_paused, paused_by }` |
-| `POST /api/v1/issues/:id/retry` | `RetryNow(id)` | `{ accepted: boolean, reason? }` |
-| `POST /api/v1/issues/:id/cancel` | `CancelSession(id)` | `{ accepted: boolean, reason? }` |
-| `PUT /api/v1/settings` | (validate+write+`ReloadConfig`) | the new editable subset, or a typed validation error |
+| Method · Path                    | Command                         | `CommandResult`                                      |
+| -------------------------------- | ------------------------------- | ---------------------------------------------------- |
+| `POST /api/v1/control/pause`     | `PauseDispatch`                 | `{ dispatch_paused: true, paused_by: "operator" }`   |
+| `POST /api/v1/control/resume`    | `ResumeDispatch`                | `{ dispatch_paused, paused_by }`                     |
+| `POST /api/v1/issues/:id/retry`  | `RetryNow(id)`                  | `{ accepted: boolean, reason? }`                     |
+| `POST /api/v1/issues/:id/cancel` | `CancelSession(id)`             | `{ accepted: boolean, reason? }`                     |
+| `PUT /api/v1/settings`           | (validate+write+`ReloadConfig`) | the new editable subset, or a typed validation error |
 
 Errors: `401` (missing/blank token), `403` (cross-origin / non-loopback), `400`/typed body
 (invalid patch), `404`/`{accepted:false}` (unknown issue id). Every mutating endpoint
@@ -333,12 +342,12 @@ returns only **after** the owner fiber has acked the command (bounded timeout �
 
 ## Frontend information architecture
 
-| View | Source | Content |
-|---|---|---|
-| **Fleet / Session overview** (default) | `GET /api/v1/state` poll | running sessions (elapsed/status/workspace/attempt + humanized activity), totals, **budget**, **restore**, rate-limits, the `control` banner |
-| **Kanban** | `GET /api/v1/state` poll | Candidate/Claimed → Running → Retrying → Completed; Cancel/Retry-now buttons (DD-7) |
-| **Events** | `GET /api/v1/state` poll | the `recent_events` feed, newest-first, filterable |
-| **Settings** | `GET/PUT /api/v1/settings` + control | editable whitelist + global Pause/Resume toggle |
+| View                                   | Source                               | Content                                                                                                                                      |
+| -------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fleet / Session overview** (default) | `GET /api/v1/state` poll             | running sessions (elapsed/status/workspace/attempt + humanized activity), totals, **budget**, **restore**, rate-limits, the `control` banner |
+| **Kanban**                             | `GET /api/v1/state` poll             | Candidate/Claimed → Running → Retrying → Completed; Cancel/Retry-now buttons (DD-7)                                                          |
+| **Events**                             | `GET /api/v1/state` poll             | the `recent_events` feed, newest-first, filterable                                                                                           |
+| **Settings**                           | `GET/PUT /api/v1/settings` + control | editable whitelist + global Pause/Resume toggle                                                                                              |
 
 ## Security posture (summary, see DD-5)
 
@@ -351,12 +360,12 @@ leaves the daemon or reaches the browser. Documented in the README before any wi
 
 **Add (justified):**
 
-| Dep | Kind | Why |
-|---|---|---|
-| `vite` | dev | the LOCKED SPA build/dev-server stack |
-| `@vitejs/plugin-react` | dev | React JSX + Fast-Refresh for Vite |
-| `react-dom` | dep | the SPA's React renderer (Vite bundles it into static assets) |
-| `@types/react-dom` | dev | types for the above |
+| Dep                    | Kind | Why                                                           |
+| ---------------------- | ---- | ------------------------------------------------------------- |
+| `vite`                 | dev  | the LOCKED SPA build/dev-server stack                         |
+| `@vitejs/plugin-react` | dev  | React JSX + Fast-Refresh for Vite                             |
+| `react-dom`            | dep  | the SPA's React renderer (Vite bundles it into static assets) |
+| `@types/react-dom`     | dev  | types for the above                                           |
 
 **Remove (DD-6, net-neutral):** `ink`, `ink-testing-library`, `react-devtools-core` — they
 existed solely for the deleted Ink dashboard. `react` stays (now used by the SPA).

@@ -5,21 +5,21 @@
 
 ## Status by task
 
-| # | Task | Phase | Status |
-|---|------|-------|--------|
-| 1 | `OrchestratorState` service | 1 | ✅ done |
-| 2 | Candidate selection + sorting | 1 | ✅ done |
-| 3 | Concurrency control | 1 | ✅ done |
-| 4 | Retry + backoff | 1 | ✅ done |
-| 5 | Reconciliation | 1 | ✅ done |
-| 6 | Poll loop assembly | 1 | ✅ done |
-| 7 | GitHub Issues adapter (Octokit) | 2 | ✅ done |
-| 8 | Workspace manager | 2 | ✅ done |
-| 9 | Copilot agent runner | 2 | ✅ done |
-| 10 | Fakes (tracker / runner / workspace) | 1 | ✅ done |
-| 11 | Property + scenario tests | 1 / 3 | ✅ done — pure + loop scenarios (Phase 1) + explicit no-double-dispatch property (Phase 3) |
-| 12 | Observability: logs + JSON snapshot | 3 | ✅ done — Live Observer (logfmt + glyphs) + loopback `GET /api/v1/state` behind `--port` |
-| 13 | Fake end-to-end + docs | 3 | ✅ done — combined fake e2e, `AppLive` wired in `src/cli/main.ts`, README run section |
+| #   | Task                                 | Phase | Status                                                                                     |
+| --- | ------------------------------------ | ----- | ------------------------------------------------------------------------------------------ |
+| 1   | `OrchestratorState` service          | 1     | ✅ done                                                                                    |
+| 2   | Candidate selection + sorting        | 1     | ✅ done                                                                                    |
+| 3   | Concurrency control                  | 1     | ✅ done                                                                                    |
+| 4   | Retry + backoff                      | 1     | ✅ done                                                                                    |
+| 5   | Reconciliation                       | 1     | ✅ done                                                                                    |
+| 6   | Poll loop assembly                   | 1     | ✅ done                                                                                    |
+| 7   | GitHub Issues adapter (Octokit)      | 2     | ✅ done                                                                                    |
+| 8   | Workspace manager                    | 2     | ✅ done                                                                                    |
+| 9   | Copilot agent runner                 | 2     | ✅ done                                                                                    |
+| 10  | Fakes (tracker / runner / workspace) | 1     | ✅ done                                                                                    |
+| 11  | Property + scenario tests            | 1 / 3 | ✅ done — pure + loop scenarios (Phase 1) + explicit no-double-dispatch property (Phase 3) |
+| 12  | Observability: logs + JSON snapshot  | 3     | ✅ done — Live Observer (logfmt + glyphs) + loopback `GET /api/v1/state` behind `--port`   |
+| 13  | Fake end-to-end + docs               | 3     | ✅ done — combined fake e2e, `AppLive` wired in `src/cli/main.ts`, README run section      |
 
 ## Phase 1 — State machine on fakes (tasks 1–6, 10) — ✅ COMPLETE
 
@@ -28,6 +28,7 @@ full poll→claim→workspace→session→reconcile→retry loop deterministical
 **No real network or Copilot touched.**
 
 ### What was built
+
 - `src/core/orchestrator/state.ts` (#1) — pure `OrchestratorState` transitions
   (`claim`/`setRunning`/`setRetry`/`markCompleted`/`release`/`addUsage`/…) + the
   `OrchestratorStore` service (Ref-backed `get`/`update`/`modify`) and
@@ -67,6 +68,7 @@ full poll→claim→workspace→session→reconcile→retry loop deterministical
   stall→kill+retry, concurrency cap of 1 → requeue.
 
 ### Verification (all un-piped, real exit codes)
+
 - `pnpm typecheck` → EXIT 0
 - `pnpm lint` → EXIT 0
 - `pnpm test` → EXIT 0 — **123 tests passing** (9 files)
@@ -77,7 +79,7 @@ full poll→claim→workspace→session→reconcile→retry loop deterministical
 
 1. **Added `FakeWorkspaceManager`** (not separately listed in the plan — task 10 names only
    tracker+runner fakes). The loop depends on `WorkspaceManager`; the fake is in-memory (no
-   FS) but composes the *real* `computeWorkspacePath`/`sanitizeWorkspaceKey` helpers so the
+   FS) but composes the _real_ `computeWorkspacePath`/`sanitizeWorkspaceKey` helpers so the
    §9.5 invariants are still exercised. The real adapter is Task 8 (Phase 2).
 2. **Concurrency counts only `state.running`** toward slots — a literal reading of
    `available_slots = max(limit - running, 0)`. Continuation/failure **re-dispatch** (via
@@ -93,7 +95,7 @@ full poll→claim→workspace→session→reconcile→retry loop deterministical
 5. **`OrchestratorStore` Tag** is named distinctly from the domain `OrchestratorState` schema
    to avoid a name clash (the Context.Tag id string stays `orchestra/OrchestratorState`).
 6. **Worker-kill robustness:** the per-issue runtime `registry` (owner-fiber-only `Map`) is the
-   source of truth. On any kill we drop/null the registry entry *first*, then `Fiber.interrupt`;
+   source of truth. On any kill we drop/null the registry entry _first_, then `Fiber.interrupt`;
    every message handler early-returns if the entry is gone, and the worker's failure handler
    skips posting `WorkerDone` on interrupt (`Cause.isInterrupted`). This makes behavior correct
    regardless of external-interrupt finalizer semantics.
@@ -107,6 +109,7 @@ at these adapter boundaries (`Effect.tryPromise` / `@effect/platform`); the core
 Promise-free. Each adapter is a `layer*(config)` factory so the CLI composes them in Phase 3.
 
 ### What was built
+
 - `src/adapters/tracker-github/` (#7) — `IssueTracker` via Octokit (`@octokit/rest` 21).
   - `normalize.ts` — **pure, network-free** GitHub→domain mapping (unit-tested): `number` →
     `id`/`identifier`; status-label → state with open→`active_states[0]` / closed→terminal
@@ -132,7 +135,7 @@ Promise-free. Each adapter is a `layer*(config)` factory so the CLI composes the
     terminals; `permission.*` → `ApprovalAutoApproved`; garbage/typeless → `Malformed`; unknown
     known-shaped events dropped (forward-compat). Never throws.
   - `copilot-runner.ts` — spawns `copilot -p … --output-format json -C <ws> --allow-all-tools
-    --no-color --log-level none` with **both** `cwd === workspacePath` and `-C` (Safety
+--no-color --log-level none` with **both** `cwd === workspacePath` and `-C` (Safety
     Invariant 1), inside a `Scope` (worker interrupt → SIGTERM). Streams stdout lines so the
     loop's `lastEventAt` stall detection stays live; emits `SessionStarted` first;
     `--session-id`(first)/`--resume`(continuation); `turn_timeout_ms` guard; GitHub token via
@@ -141,6 +144,7 @@ Promise-free. Each adapter is a `layer*(config)` factory so the CLI composes the
     tests cover happy path (incl. the cwd invariant), crash, and `session.error`.
 
 ### Verification (all un-piped, real exit codes)
+
 - `pnpm typecheck` → EXIT 0
 - `pnpm lint` → EXIT 0
 - `pnpm test` → EXIT 0 — **166 tests passing** (12 files; +43 over Phase 1: 16 tracker, 10
@@ -152,9 +156,9 @@ Promise-free. Each adapter is a `layer*(config)` factory so the CLI composes the
 ## Decisions & deviations (Phase 2)
 
 8. **GitHub state mapping is a documented convention** (GitHub issues are only open/closed). A
-   *status label* matching a configured state wins; otherwise open→`active_states[0]`,
+   _status label_ matching a configured state wins; otherwise open→`active_states[0]`,
    closed→terminal (`not_planned`→cancel-flavored, else closed/done). `id == identifier ==
-   String(number)`. `blocked_by` states are left `null` (GitHub has no native blocker state) →
+String(number)`. `blocked_by` states are left `null` (GitHub has no native blocker state) →
    the §8.2 Todo-blocker rule treats them as unresolved.
 9. **404 on per-id refresh ⇒ omit** rather than error: a deleted/transferred issue simply drops
    out of the refresh set (reconciliation `NeitherKill`); other statuses still fail the refresh.
@@ -170,7 +174,6 @@ Promise-free. Each adapter is a `layer*(config)` factory so the CLI composes the
 13. **Renamed a local `token` → `ghAuth`** in `copilot-runner.ts` to avoid a gitleaks
     `shell-export-secret` false positive (the rule flags any `*token* = <12+ chars>`, here a
     reference assignment, not a literal). No secret involved.
-
 
 - Phase 2 (7–9): Octokit GitHub adapter, real WorkspaceManager (hooks via `sh -lc`, timeouts,
   safety invariants), Copilot subprocess runner per the Sprint 0 spike (`@effect/platform`

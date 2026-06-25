@@ -14,16 +14,17 @@ All six issues closed: **#29 → #34**.
 
 ## What was built
 
-| # | Issue | Outcome |
-|---|-------|---------|
-| #29 | Ink toolchain spike & gate | ink@7.1.0 + react@19.2.7 + react-devtools-core, `@types/react`@19.2.x + ink-testing-library@4; `jsx: react-jsx`, vitest include widened to `{ts,tsx}`, 2nd tsup entry. **Producer-approved.** |
-| #30 | CLI dispatcher + `dashboard` subcommand | Extracted `src/cli/daemon.ts` (`runDaemon` + `appLayer`); `main.ts` is now a thin dispatcher (`argv[0]==="dashboard"` → dashboard, else daemon). Separate dashboard arg parser (`--port/--host/--interval-ms/--ascii/--help`); the daemon's `parseArgs` is untouched. |
-| #31 | Snapshot client + polling hook | Defensive `parseSnapshot` (typed `Snapshot` view, throws `SnapshotParseError`), injectable `makeFetchSnapshot(timeoutMs)` (combines caller signal with `AbortSignal.timeout`). Framework-agnostic `SnapshotPoller` (non-overlapping, `connecting/live/stale`, keeps last good snapshot, `stop()` aborts + clears timer) + thin `useSnapshot` React hook. |
-| #32 | View-model + Ink rendering | Pure `toViewModel(snapshot, now, opts)` + Ink `<Box>` components reusing `glyphs.ts`. Honest rendering (see below). `q`/Ctrl-C unmount + abort + clear timer. |
-| #33 | Tests (Ivy shape) | view-model state matrix (13), fake-timer poller (5), light ink-testing-library render (4). |
-| #34 | License + docs + handoff | Apache-2.0 `LICENSE` + `NOTICE`, `package.json` `"license"`, README Dashboard + License sections, this handoff, `PROJECT_BRIEF.md` §5/§7/§8, backlog License item resolved. |
+| #   | Issue                                   | Outcome                                                                                                                                                                                                                                                                                                                                                  |
+| --- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #29 | Ink toolchain spike & gate              | ink@7.1.0 + react@19.2.7 + react-devtools-core, `@types/react`@19.2.x + ink-testing-library@4; `jsx: react-jsx`, vitest include widened to `{ts,tsx}`, 2nd tsup entry. **Producer-approved.**                                                                                                                                                            |
+| #30 | CLI dispatcher + `dashboard` subcommand | Extracted `src/cli/daemon.ts` (`runDaemon` + `appLayer`); `main.ts` is now a thin dispatcher (`argv[0]==="dashboard"` → dashboard, else daemon). Separate dashboard arg parser (`--port/--host/--interval-ms/--ascii/--help`); the daemon's `parseArgs` is untouched.                                                                                    |
+| #31 | Snapshot client + polling hook          | Defensive `parseSnapshot` (typed `Snapshot` view, throws `SnapshotParseError`), injectable `makeFetchSnapshot(timeoutMs)` (combines caller signal with `AbortSignal.timeout`). Framework-agnostic `SnapshotPoller` (non-overlapping, `connecting/live/stale`, keeps last good snapshot, `stop()` aborts + clears timer) + thin `useSnapshot` React hook. |
+| #32 | View-model + Ink rendering              | Pure `toViewModel(snapshot, now, opts)` + Ink `<Box>` components reusing `glyphs.ts`. Honest rendering (see below). `q`/Ctrl-C unmount + abort + clear timer.                                                                                                                                                                                            |
+| #33 | Tests (Ivy shape)                       | view-model state matrix (13), fake-timer poller (5), light ink-testing-library render (4).                                                                                                                                                                                                                                                               |
+| #34 | License + docs + handoff                | Apache-2.0 `LICENSE` + `NOTICE`, `package.json` `"license"`, README Dashboard + License sections, this handoff, `PROJECT_BRIEF.md` §5/§7/§8, backlog License item resolved.                                                                                                                                                                              |
 
 ### Honest rendering (#32)
+
 - **running**: identifier, status badge (glyph + label), **client-calculated** elapsed
   from `started_at` (not server-trusted), workspace, attempt label (`—` for first run,
   `#n` for retries). Phase → operator status via the core `PHASE_TO_STATUS` map; unknown
@@ -67,13 +68,14 @@ terminal still exits on SIGINT/SIGTERM. This is the only behavioral surprise we 
 `src/cli/dashboard/{args,snapshot-client,poller,use-snapshot,view-model}.ts`,
 `src/cli/dashboard/{components,app,run}.tsx`.
 **New (tests):** `test/dashboard/{fixtures,args,snapshot-client,view-model,poller}.test.ts`
-+ `test/dashboard/render.test.tsx`.
-**New (license/docs):** `LICENSE`, `NOTICE`, `docs/sprint-2/done.md`.
-**Modified:** `src/cli/main.ts` (dispatcher), `package.json` (deps + `license` +
-`dev:dashboard`), `pnpm-lock.yaml`, `tsconfig.json` (`jsx`), `tsup.config.ts` (2nd entry),
-`vitest.config.ts` (`{ts,tsx}`), `README.md`, `PROJECT_BRIEF.md` (§5/§7/§8),
-`docs/ideas-backlog.md`, `docs/sprint-2/progress.md`.
-**Removed:** `test/dashboard-spike.test.tsx` (the #29 spike served its purpose).
+
+- `test/dashboard/render.test.tsx`.
+  **New (license/docs):** `LICENSE`, `NOTICE`, `docs/sprint-2/done.md`.
+  **Modified:** `src/cli/main.ts` (dispatcher), `package.json` (deps + `license` +
+  `dev:dashboard`), `pnpm-lock.yaml`, `tsconfig.json` (`jsx`), `tsup.config.ts` (2nd entry),
+  `vitest.config.ts` (`{ts,tsx}`), `README.md`, `PROJECT_BRIEF.md` (§5/§7/§8),
+  `docs/ideas-backlog.md`, `docs/sprint-2/progress.md`.
+  **Removed:** `test/dashboard-spike.test.tsx` (the #29 spike served its purpose).
 
 ## How to run / verify
 

@@ -4,29 +4,35 @@ Branch: `feature/sprint-4` (off `main` @ `0e48363`).
 Design of record: `docs/sprint-3/durability-spike.md`.
 
 ## Task board
-| # | Task | Status |
-|---|------|--------|
-| 40 | Persistence layer (versioned, atomic, debounced) | ✅ done |
-| 41 | Restore + reconcile on boot + retry re-arm | ✅ done |
-| 42 | Session continuity (persist session_id / resume) | ✅ done |
-| 43 | Tests + docs + handoff | ✅ done |
+
+| #   | Task                                             | Status  |
+| --- | ------------------------------------------------ | ------- |
+| 40  | Persistence layer (versioned, atomic, debounced) | ✅ done |
+| 41  | Restore + reconcile on boot + retry re-arm       | ✅ done |
+| 42  | Session continuity (persist session_id / resume) | ✅ done |
+| 43  | Tests + docs + handoff                           | ✅ done |
 
 ## Carry-over context
+
 - Rolled from Sprint 3 at the #39 gate (Producer + user decision): Phase A (Observability v2)
-  + the durability spike shipped in Sprint 3; the Phase B *build* is this sprint.
+  - the durability spike shipped in Sprint 3; the Phase B _build_ is this sprint.
 - Full design, file:line current-state analysis, and per-issue sizing live in
   `docs/sprint-3/durability-spike.md`. Don't re-spike — build from it.
 
 ## Sequencing
+
 - #40 first (self-contained, low risk) → #41 the risky core surgery (orphan reconcile +
   wall-clock re-arm + boot ordering) with heavy scenario tests → #42 session continuity
   (schema folds into #41) → #43 close-out.
 
 ## Notes
+
 - (updated as work lands)
 
 ### #40 — Persistence layer (done)
+
 **Files created:**
+
 - `src/core/persistence/persisted-state.ts` — versioned `PersistedStateV1 = { version, saved_at, state }`
   over the existing `OrchestratorState`. `Schema.parseJson(...)` codec (`encodePersisted`/`decodePersisted`)
   so `Date`s round-trip as ISO and decode is validated. **Forward-only migration seam**:
@@ -46,11 +52,11 @@ Design of record: `docs/sprint-3/durability-spike.md`.
   untouched. `seedState` is the #40/#41 boundary (below).
 - `src/core/persistence/index.ts` — barrel.
 - `test/persistence.test.ts` — 9 tests: codec fixed-point (§2.8, Dates equal as Dates) + corrupt-string
-  `ParseError`; service save→load round-trip (no temp leftover); missing→`none`; corrupt→rename-aside
-  +`none` (no throw); bookkeeping-only seed boundary; **debounce gating + final flush under `TestClock`**;
+  `ParseError`; service save→load round-trip (no temp leftover); missing→`none`; corrupt→rename-aside +`none` (no throw); bookkeeping-only seed boundary; **debounce gating + final flush under `TestClock`**;
   `layerDurableOrchestratorStore` drop-in cold start.
 
 **Files changed:**
+
 - `src/core/domain/workflow.ts` — additive optional `persistence?: { dir?, debounce_ms (default 500) }`
   block on `ServiceConfig` (all-defaults → unchanged `WORKFLOW.md` still decodes; loader untouched, it
   spreads `...config`).
@@ -58,7 +64,7 @@ Design of record: `docs/sprint-3/durability-spike.md`.
   (its `FileSystem` comes from the ambient `NodeContext.layer` already at the program root).
 
 **KEY DECISION — seed-vs-reconcile boundary (#40 restores BOOKKEEPING ONLY):**
-The checkpoint persists the *whole* state (the writer saves live `store.get`, scheduling included), but
+The checkpoint persists the _whole_ state (the writer saves live `store.get`, scheduling included), but
 on restore #40 seeds only the **safe bookkeeping** — `completed`, `agent_totals`, `agent_rate_limits`,
 and the config-derived knobs. The **scheduling slice** (`running`, `claimed`, `retry_attempts`) is reset
 to empty with a `TODO(#41)` hook. Rationale: the loop builds reconcile/dispatch inputs from the in-memory
@@ -75,7 +81,9 @@ those belong to #41/#42 (kept minimal, non-speculative).
 **Gates:** typecheck 0 · lint 0 · build 0 · **275 tests** (266 baseline + 9 new), full suite green.
 
 ### #41 — Restore + reconcile + retry re-arm on boot (done)
+
 **Files changed:**
+
 - `src/core/persistence/durable-store.ts` — **`seedState` replaced**: bookkeeping-only path +
   `TODO(#41)` hook deleted; now seeds the **complete** `OrchestratorState` (running / claimed /
   retry_attempts included). Reloadable knobs (`poll_interval_ms`, `max_concurrent_agents`) always
@@ -150,9 +158,11 @@ aside).
 scenarios + 1 recent-events draft), full suite green.
 
 ### #42 — Session continuity (opt-in, self-healing resume) (done)
+
 **Files changed:**
+
 - `src/core/domain/run-attempt.ts` — additive optional `session_id?: string | null`. Captured
-  from `SessionStarted`, persisted so a restart can *optionally* resume the agent thread.
+  from `SessionStarted`, persisted so a restart can _optionally_ resume the agent thread.
 - `src/core/domain/retry-entry.ts` — additive optional `session_id?: string | null`, carried onto
   a (continuation) retry so it survives the orphan→retry reduction across a restart.
 - `src/core/domain/workflow.ts` — `PersistenceConfig` gains `resume_sessions: boolean`
@@ -209,9 +219,11 @@ test is a **pre-existing** #40 load-dependent flake (reproduced on clean `b494e8
 change; passes in isolation and on re-run) — untouched by #42 (no change to `durable-store.ts`).
 
 ### #43 — Tests + docs + handoff (done)
+
 **A) Flaky test stabilized (the #40 debounce/final-flush `TestClock` flake, pre-existing on
 clean `b494e83`).** Two distinct real races, both fixed **deterministically** in
 `test/persistence.test.ts` — **test-only seam, no production-code change**:
+
 1. **Sleep-registration race** — the test advanced the virtual clock before the forked
    debounced writer had parked in `Effect.sleep(debounce_ms)`, so its deadline was computed
    from an already-advanced clock and the window-crossing `adjust` never reached it. Fixed with
@@ -222,11 +234,12 @@ clean `b494e83`).** Two distinct real races, both fixed **deterministically** in
    are not a reliable barrier under load, so `fs.exists` could observe the file before `rename`
    landed. Fixed with `awaitFileExists` (bounded real-FS poll — returns `false` on a genuine
    regression rather than hanging).
-Assertions unchanged in strength (parked → 499 ms no file → +1 ms write lands). Verified with a
-**20× full-suite parallel-load loop: 20/20 green**.
+   Assertions unchanged in strength (parked → 499 ms no file → +1 ms write lands). Verified with a
+   **20× full-suite parallel-load loop: 20/20 green**.
 
 **B) Coverage audited + filled (no duplication).** The restore/reconcile/resume scenarios
 (#41/#42) and leaf-schema codec tests were already complete. Added only the genuine gaps:
+
 - Enriched `sampleState` with the #41/#42 additive continuity fields (`turn`,
   `failure_attempts`, `session_id`, `kind`) so the codec fixed-point **and** the real
   `save → load` round-trip now prove those survive `encode → write → read → decode` end-to-end.
@@ -246,12 +259,12 @@ coalescing test), deterministically green (20/20 loop).
 
 Final board — **all four issues done**:
 
-| # | Task | Status |
-|---|------|--------|
-| 40 | Persistence layer (versioned, atomic, debounced) | ✅ done |
-| 41 | Restore + reconcile on boot + retry re-arm | ✅ done |
-| 42 | Session continuity (persist session_id / resume) | ✅ done |
-| 43 | Tests + docs + handoff | ✅ done |
+| #   | Task                                             | Status  |
+| --- | ------------------------------------------------ | ------- |
+| 40  | Persistence layer (versioned, atomic, debounced) | ✅ done |
+| 41  | Restore + reconcile on boot + retry re-arm       | ✅ done |
+| 42  | Session continuity (persist session_id / resume) | ✅ done |
+| 43  | Tests + docs + handoff                           | ✅ done |
 
 Durable orchestrator shipped: versioned atomic debounced checkpoint, restore + orphan→continuation
 reconcile + wall-clock retry re-arm, opt-in self-healing session resume; corrupt/missing → clean

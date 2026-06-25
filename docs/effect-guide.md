@@ -32,7 +32,8 @@ export const renderPrompt = (
   Effect.gen(function* () {
     const parsed = yield* Effect.try({
       try: () => engine.parse(template),
-      catch: (e) => new TemplateParseError({ message: errorMessage(e), cause: e }),
+      catch: (e) =>
+        new TemplateParseError({ message: errorMessage(e), cause: e }),
     });
     // ...renderSync, also wrapped in Effect.try...
     return rendered;
@@ -53,7 +54,7 @@ types won't let you.
 
 A **`Context.Tag`** is a typed key for a service (an interface). A **`Layer`** is a
 recipe that builds that service (and may need other services/resources to do so). The
-program declares *what* it needs via tags; `main.ts` provides the *how* via layers. Swap
+program declares _what_ it needs via tags; `main.ts` provides the _how_ via layers. Swap
 a real layer for a fake in tests — same program, different wiring.
 
 Orchestra's seams are the four ports, defined as tags with **signatures only** (impls
@@ -63,17 +64,21 @@ land in Sprint 1):
 // src/core/ports/agent-runner.ts
 export class AgentRunner extends Context.Tag("orchestra/AgentRunner")<
   AgentRunner,
-  { readonly run: (params: AgentRunParams) => Stream.Stream<AgentEvent, AgentError> }
+  {
+    readonly run: (
+      params: AgentRunParams,
+    ) => Stream.Stream<AgentEvent, AgentError>;
+  }
 >() {}
 
 // consume it anywhere by yielding the tag:
 const program = Effect.gen(function* () {
-  const runner = yield* AgentRunner;            // R now includes AgentRunner
+  const runner = yield* AgentRunner; // R now includes AgentRunner
   // ...use runner.run(...)
 });
 
 // provide it at the edge (main.ts):
-program.pipe(Effect.provide(AgentRunnerLive));   // R discharged
+program.pipe(Effect.provide(AgentRunnerLive)); // R discharged
 ```
 
 **Why it matters here:** the orchestrator depends on `IssueTracker` / `AgentRunner` /
@@ -82,7 +87,7 @@ provide `FakeTracker`/`FakeAgentRunner` layers; production provides the real ada
 The whole architecture hinges on this.
 
 **Gotchas:** `AppLive` in `main.ts` is `Layer.empty` today — it's the seam Sprint 1
-grows. A leftover service in `R` that you forgot to provide is a *type error* at
+grows. A leftover service in `R` that you forgot to provide is a _type error_ at
 `runMain`, which is exactly what you want.
 
 ---
@@ -90,16 +95,16 @@ grows. A leftover service in `R` that you forgot to provide is a *type error* at
 ## 3. `Schema` — parse, don't validate
 
 `Schema` is a two-way codec: `Encoded` (wire form) ↔ `Type` (domain form), with
-`decodeUnknown` turning untrusted input into a typed value *or* a `ParseError`. We use
+`decodeUnknown` turning untrusted input into a typed value _or_ a `ParseError`. We use
 it at **both ends**: WORKFLOW front matter coming in, and the `AgentEvent` stream coming
-off the agent. Defaults, transforms, and normalization live *in the schema*, so any
+off the agent. Defaults, transforms, and normalization live _in the schema_, so any
 decoded value is guaranteed normalized.
 
 ```ts
 // src/core/domain/issue.ts — normalization encoded in the type, not left to callers.
 export const NormalizedLabel = Schema.transform(Schema.String, Schema.String, {
   strict: true,
-  decode: (raw) => raw.trim().toLowerCase(),   // every decoded label is normalized
+  decode: (raw) => raw.trim().toLowerCase(), // every decoded label is normalized
   encode: (normalized) => normalized,
 });
 
@@ -109,9 +114,13 @@ export const PollingConfig = Schema.Struct({
 });
 
 // src/core/workflow/loader.ts — untrusted YAML → typed config or WorkflowParseError.
-const decoded = yield* Schema.decodeUnknown(ServiceConfig)(raw).pipe(
-  Effect.mapError((e) => new WorkflowParseError({ message: errorMessage(e), cause: e })),
-);
+const decoded =
+  yield *
+  Schema.decodeUnknown(ServiceConfig)(raw).pipe(
+    Effect.mapError(
+      (e) => new WorkflowParseError({ message: errorMessage(e), cause: e }),
+    ),
+  );
 ```
 
 **Why it matters here:** "parse, don't validate" — once `decodeUnknown` succeeds you
@@ -139,7 +148,7 @@ export class TurnTimeout extends Data.TaggedError("TurnTimeout")<{
 
 // You can fail directly by yielding an instance (TaggedError is yieldable):
 if (elapsed > limit) {
-  return yield* new TurnTimeout({ timeout_ms: limit });
+  return yield * new TurnTimeout({ timeout_ms: limit });
 }
 
 // Handle just the cases you care about; the rest stay in the type:
@@ -161,7 +170,7 @@ For structural equality in tests use `Equal.equals(a, b)` from `effect`.
 
 ## 5. `Schedule` — composable retry/repeat policies
 
-A `Schedule<Out, In>` is a reusable, **composable** description of *when* to repeat or
+A `Schedule<Out, In>` is a reusable, **composable** description of _when_ to repeat or
 retry — fixed delay, exponential backoff, capped, jittered, bounded by count. You attach
 it with `Effect.retry` / `Effect.repeat` instead of hand-writing loops and `setTimeout`.
 
@@ -170,16 +179,20 @@ it with `Effect.retry` / `Effect.repeat` instead of hand-writing loops and `setT
 import { Schedule, Effect, Duration } from "effect";
 
 const backoff = Schedule.exponential(Duration.seconds(1), 2.0).pipe(
-  Schedule.either(Schedule.spaced(Duration.millis(config.agent.max_retry_backoff_ms))), // cap
-  Schedule.jittered,                                                                     // de-sync
+  Schedule.either(
+    Schedule.spaced(Duration.millis(config.agent.max_retry_backoff_ms)),
+  ), // cap
+  Schedule.jittered, // de-sync
 );
 
 const runWithRetry = runOneAttempt.pipe(
-  Effect.retry({ schedule: backoff, while: (e) => isRetryable(e) }),  // only retryable tags
+  Effect.retry({ schedule: backoff, while: (e) => isRetryable(e) }), // only retryable tags
 );
 
 // The poll loop is just a repeat on a fixed interval:
-const pollLoop = pollOnce.pipe(Effect.repeat(Schedule.spaced(Duration.millis(poll_interval_ms))));
+const pollLoop = pollOnce.pipe(
+  Effect.repeat(Schedule.spaced(Duration.millis(poll_interval_ms))),
+);
 ```
 
 **Why it matters here:** the orchestrator's exponential-backoff retries (`RetryEntry`,
@@ -206,8 +219,8 @@ import { Effect, TestClock, Fiber, Duration } from "effect";
 
 it.effect("poll loop ticks once per interval", () =>
   Effect.gen(function* () {
-    const fiber = yield* pollLoop.pipe(Effect.fork);   // run in the background
-    yield* TestClock.adjust(Duration.millis(30_000));  // jump one interval — instantly
+    const fiber = yield* pollLoop.pipe(Effect.fork); // run in the background
+    yield* TestClock.adjust(Duration.millis(30_000)); // jump one interval — instantly
     // assert exactly one poll happened...
     yield* Fiber.interrupt(fiber);
   }),
@@ -215,7 +228,7 @@ it.effect("poll loop ticks once per interval", () =>
 ```
 
 **Why it matters here:** Sprint 1's backoff and reconciliation logic will be tested in
-*virtual* time — a 5-minute backoff verifies in microseconds, deterministically. Keep the
+_virtual_ time — a 5-minute backoff verifies in microseconds, deterministically. Keep the
 core time-abstract (the `Clock` port + Effect's clock) so these tests stay possible.
 
 **Gotchas:** `@effect/vitest` provides `it.effect` which supplies the `TestContext`
@@ -233,15 +246,16 @@ one flow:
 ```ts
 const runAttempt = (issue: Issue) =>
   Effect.gen(function* () {
-    const tracker = yield* IssueTracker;                 // §2 Layer/Context
-    const runner = yield* AgentRunner;                   //     (ports as tags)
-    const ws = yield* prepareWorkspace(issue);           // §4 may fail WorkspaceError
+    const tracker = yield* IssueTracker; // §2 Layer/Context
+    const runner = yield* AgentRunner; //     (ports as tags)
+    const ws = yield* prepareWorkspace(issue); // §4 may fail WorkspaceError
     const prompt = yield* renderPrompt(template, { issue, attempt: null }); // §1,§3
-    yield* runner.run({ issue, workspacePath: ws.path, prompt, attempt: null })
-      .pipe(Stream.runForEach(handleEvent));             // §3 AgentEvent stream
+    yield* runner
+      .run({ issue, workspacePath: ws.path, prompt, attempt: null })
+      .pipe(Stream.runForEach(handleEvent)); // §3 AgentEvent stream
   }).pipe(
-    Effect.retry({ schedule: backoff, while: isRetryable }),  // §5 Schedule
-    Effect.catchTag("TurnInputRequired", giveUp),             // §4 tagged errors
+    Effect.retry({ schedule: backoff, while: isRetryable }), // §5 Schedule
+    Effect.catchTag("TurnInputRequired", giveUp), // §4 tagged errors
   );
 // ...all tested under TestClock (§6), all services provided by Layers (§2) in main.ts.
 ```

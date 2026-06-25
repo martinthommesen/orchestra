@@ -69,6 +69,7 @@ present anywhere in the persisted `OrchestratorState` schema. That gap is the he
 durability design (§2.2).
 
 Dispatch sites:
+
 - `dispatch` (`loop.ts:207-280`) — computes workspace path, writes `setRunning(clearRetry(...))`
   into the store with a `RunAttempt` (status `PreparingWorkspace`), forks the `workerEffect`
   fiber, records `rec.workerFiber`. For continuation it builds
@@ -155,10 +156,10 @@ re-seeds `initialState(config)` and loses **everything**:
 hardest problem.** Because `claimed` resets empty, the next poll tick re-selects any issue
 still in an active tracker state and **re-dispatches it fresh** — so work is not permanently
 stranded, but it: loses turn/backoff continuity, loses session context, double-counts nothing
-(totals reset), and *could* race a still-alive orphaned subprocess from the previous run.
+(totals reset), and _could_ race a still-alive orphaned subprocess from the previous run.
 **Once we persist `running` (#40), this implicit safety net inverts into a hazard:** on
 restart we will have `running` entries with **no live fiber and no live subprocess** — the
-classic *orphaned running attempt*. Reconciling those safely (§2.4) is the riskiest part of
+classic _orphaned running attempt_. Reconciling those safely (§2.4) is the riskiest part of
 Phase B.
 
 ---
@@ -177,6 +178,7 @@ turn count, failure attempts, retry kind — see §2.2).
 persisted. On boot they start empty.
 
 Justification:
+
 - **Boundary integrity.** Constraint #2 makes these "observability, NOT scheduling state".
   They can never influence dispatch; persisting them would blur a boundary the architecture
   deliberately draws, and would couple three independent services into the durable contract.
@@ -185,7 +187,7 @@ Justification:
   hottest event in the system also the heaviest to persist, defeating debouncing (§2.3) and
   bloating each write by up to ~500 records vs. the typically tiny core state (a handful of
   running/retry entries + counters).
-- **Low value.** Post-restart dashboard *history* is cosmetic. The feed repopulates within
+- **Low value.** Post-restart dashboard _history_ is cosmetic. The feed repopulates within
   one or two ticks of resumed activity; completed IDs (the authoritative list) **are** restored
   via core state, so counts are correct immediately. We lose only a few minutes of scrollback.
 - **Complexity.** Each ring is its own `Ref`/service; persisting them means three more
@@ -200,7 +202,7 @@ one additive case; alternatively append directly via `RecentEvents.append` at bo
 ### 2.2 Schema + versioning
 
 The persisted file is a **superset** of the snapshot: it carries the full `OrchestratorState`
-*plus* a continuity sidecar that the `/api/v1/state` snapshot never exposes (keeping the
+_plus_ a continuity sidecar that the `/api/v1/state` snapshot never exposes (keeping the
 snapshot contract pristine — no v2, no regression to Phase A / Sprint 2 dashboard).
 
 Two ways to carry the continuity fields; we recommend **Option A**.
@@ -218,7 +220,7 @@ with zero new bookkeeping. Additive, backward-safe schema changes:
 
 These are optional/additive: they appear in the snapshot too, but additively (the defensive
 client parser ignores unknown/absent fields — Phase A already proved this). The registry
-becomes a *runtime cache* of what the store now durably owns.
+becomes a _runtime cache_ of what the store now durably owns.
 
 **Option B (alternative) — sidecar map, snapshot untouched.** Keep a `runtime` map in the
 persisted file only, assembled at write time by reading the registry. Lower schema churn but
@@ -250,19 +252,20 @@ const decode = Schema.decodeUnknown(Persisted);         // unknown -> typed | Pa
 **Forward-only migration.** `decodePersisted(raw): Effect<PersistedStateV1, ParseError>`
 first reads the `version` discriminant, then runs the matching decoder and applies a chain of
 pure `migrateV1toV2`, `migrateV2toV3`, … transforms up to the current version. We never write
-an older version. A bump is required whenever a field's *meaning* changes incompatibly; purely
+an older version. A bump is required whenever a field's _meaning_ changes incompatibly; purely
 additive optional fields do **not** require a bump (older files decode, missing optionals stay
 absent).
 
 **Non-serializable / hazardous values:**
+
 - **Fibers** (`workerFiber`, `timerFiber`) — never in any schema; excluded by construction.
 - **Dates** (`RunAttempt.started_at`, `RetryEntry.scheduled_at`, `saved_at`) — `Schema.Date`
   encodes to ISO; decoding validates. Never hand-roll `new Date(...)` on read.
-- **Monotonic `due_at_ms`** — a plain `Number`; it serializes fine but its *value* is invalid
+- **Monotonic `due_at_ms`** — a plain `Number`; it serializes fine but its _value_ is invalid
   after restart. Persist it (harmless) but **§2.5 forbids using it on restore.**
 - **`agent_rate_limits: Unknown`** — vendor JSON passthrough parsed from agent events, so it
   is already JSON-shaped. `Schema.parseJson` will round-trip it; add a defensive guard so a
-  pathological non-JSON value can never fail the *whole* write (fall back to `null` for that
+  pathological non-JSON value can never fail the _whole_ write (fall back to `null` for that
   field, log a warning). Corruption of this one field must never lose the rest of the state.
 
 ### 2.3 Write strategy — atomic + debounced
@@ -275,7 +278,7 @@ A `.orchestra/` dotdir does not collide with the per-issue workspace subdirs tha
 `persistence?: { dir?: string; debounce_ms?: PositiveInt (default 500) }` (additive,
 all-defaults so an unchanged `WORKFLOW.md` still decodes).
 
-**Atomicity (crash-safety mid-write).** Always *write-temp-then-rename*:
+**Atomicity (crash-safety mid-write).** Always _write-temp-then-rename_:
 `fs.writeFile(tmp, json)` → `fs.rename(tmp, state.json)`. `rename(2)` is atomic on a single
 filesystem, so a reader (or a crash) ever sees either the complete old file or the complete
 new file — never a half-written one. Keeping `tmp` in the **same directory** guarantees a
@@ -284,6 +287,7 @@ unnecessary for our durability goal and skippable.) Use `@effect/platform` `File
 (already available via `NodeContext.layer` in `daemon.ts:88`) so it stays inside Effect.
 
 **Debounce (no thrash).** A single long-lived **writer fiber**, forked scoped:
+
 - The store decorator (§2.4) signals "dirty" after each `update`/`modify` — via a
   `Queue.sliding<void>(1)` (coalescing) or a `Ref<boolean>` flag.
 - Writer loop: take the dirty signal → `Effect.sleep(debounce_ms)` → `store.get` → encode →
@@ -296,7 +300,7 @@ unnecessary for our durability goal and skippable.) Use `@effect/platform` `File
 
 **Trigger placement = the store mutator chokepoint, transparently.** Persistence hooks into
 `OrchestratorStore.update`/`modify` (§2.4), **not** sprinkled through `loop.ts`. This keeps
-core-loop surgery minimal: #40 changes only the *layer wiring* in `daemon.ts` and adds new
+core-loop surgery minimal: #40 changes only the _layer wiring_ in `daemon.ts` and adds new
 files; the loop keeps calling the same `store` API.
 
 ### 2.4 Restore + reconcile on boot (#41)
@@ -316,7 +320,7 @@ The durable store is provided by a new `layerDurableOrchestratorStore(config)` t
    `loop.ts` and `snapshot-server.ts` are untouched.
 
 Then, inside `runOrchestrator` **startup** (the one place #41 adds real loop code — additive
-to the block at `loop.ts:682-689`, *before* the first `Tick`):
+to the block at `loop.ts:682-689`, _before_ the first `Tick`):
 
 4. **Rebuild the registry** from the restored store. For each `running[id]` and each
    `retry_attempts[id]`, create an `IssueRuntime` with `workerFiber=null`, `timerFiber=null`,
@@ -332,7 +336,7 @@ to the block at `loop.ts:682-689`, *before* the first `Tick`):
    the daemon was down is `TerminalKill`/`NeitherKill`'d before any re-dispatch wastes work.
 
 **Ordering rationale:** restore (seed + registry) → re-arm/convert (so the issues exist as
-*retrying*, not *running-with-no-fiber*) → first tick reconcile (tracker truth corrects stale
+_retrying_, not _running-with-no-fiber_) → first tick reconcile (tracker truth corrects stale
 state) → dispatch. This guarantees we never re-dispatch an issue that already finished, and we
 never leave a "running" entry with no backing fiber.
 
@@ -341,13 +345,13 @@ never leave a "running" entry with no backing fiber.
 A persisted `running[id]` has, post-restart, **no worker fiber and no live subprocess**.
 Options weighed:
 
-| Policy | Pro | Con |
-|---|---|---|
-| (a) **Resume** via `--resume {session_id}` | preserves agent's in-conversation context, fewer tokens | depends on Copilot session still being alive across downtime (external, **unverified**); may duplicate a turn that half-finished before the crash |
-| (b) **Re-dispatch fresh** (new session, full prompt) | simple, robust | loses agent context; re-reasons the current turn |
-| (c) **Release + requeue** (drop, let next tick re-select) | trivial | loses `turn_count`/`failure_attempts` continuity; resets attempt accounting; matches today's lossy behavior |
+| Policy                                                    | Pro                                                     | Con                                                                                                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (a) **Resume** via `--resume {session_id}`                | preserves agent's in-conversation context, fewer tokens | depends on Copilot session still being alive across downtime (external, **unverified**); may duplicate a turn that half-finished before the crash |
+| (b) **Re-dispatch fresh** (new session, full prompt)      | simple, robust                                          | loses agent context; re-reasons the current turn                                                                                                  |
+| (c) **Release + requeue** (drop, let next tick re-select) | trivial                                                 | loses `turn_count`/`failure_attempts` continuity; resets attempt accounting; matches today's lossy behavior                                       |
 
-**RECOMMENDATION — (b′) re-dispatch as a *continuation*, reusing the persisted workspace,
+**RECOMMENDATION — (b′) re-dispatch as a _continuation_, reusing the persisted workspace,
 with session resume as an optional best-effort optimization.**
 
 The key insight: **the durable, authoritative record of agent progress is the workspace on
@@ -358,7 +362,7 @@ the same workspace recovers the real work without depending on session liveness.
   `clearRunning` it and `setRetry` a **continuation** retry that is **due immediately**
   (`scheduled_at = now`, `delay_ms = 0`, `kind = "continuation"`, `attempt = turn_count + 1`,
   carry `session_id`). Set `rec.pendingKind="continuation"`, `rec.pendingAttempt=turn_count+1`.
-  This makes the orphan a *retrying* issue, which means it automatically gets:
+  This makes the orphan a _retrying_ issue, which means it automatically gets:
   - **reconcile protection** — the first tick's reconcile sees it among `retrying` ids; if the
     tracker says terminal → `TerminalKill` (no re-dispatch), neither/vanished → release,
     active → leave it to fire. No bespoke orphan-dispatch code, no double-dispatch.
@@ -384,9 +388,9 @@ fireInstant = scheduled_at.getTime() + delay_ms      // absolute wall-clock ms (
 remaining   = fireInstant - Date.now()               // wall-clock remaining
 ```
 
-- `remaining <= 0`  → the retry is already due → enqueue `RetryDue` immediately (or fork a
+- `remaining <= 0` → the retry is already due → enqueue `RetryDue` immediately (or fork a
   delay-0 timer). Reconcile still gates it (it's a retrying id).
-- `remaining > 0`   → fork a timer `Effect.sleep(Duration.millis(remaining)) >> RetryDue`,
+- `remaining > 0` → fork a timer `Effect.sleep(Duration.millis(remaining)) >> RetryDue`,
   exactly like `scheduleRetry` but with the **residual** delay. Record it as `rec.timerFiber`.
 - `scheduled_at`/`delay_ms` absent (only possible for a pre-#37 file, which durability will
   never write) → fire immediately (defensive).
@@ -463,18 +467,18 @@ which is the main evidence the design is low-mechanism-risk.
 
 ### Per-issue risk / effort
 
-| Issue | Scope | Effort | Risk | Notes |
-|---|---|---|---|---|
-| **#40** Persistence layer | versioned `Schema` codec, atomic temp+rename, debounced scoped writer, corruption→clean-start, store decorator, optional `persistence` config | **M (~1–1.5d)** | **Low–Med** | Mostly self-contained new files + one `daemon.ts` layer swap; `OrchestratorState` schema already exists. Risks: debounce + final-flush correctness; same-fs rename; `agent_rate_limits:Unknown` guard. No loop surgery. |
-| **#41** Restore + reconcile + re-arm | load→seed→registry rebuild; **orphan→due-continuation-retry**; **wall-clock re-arm**; boot ordering vs first reconcile; idempotency (no double-dispatch); `RestoredAfterRestart` | **H (~2–3d incl. tests)** | **High** | The real core surgery, in `runOrchestrator` startup. Hardest correctness: orphan reconcile + re-arm + ordering. Needs scenario tests (orphan active/terminal/vanished, due/future retry, both kinds). **Riskiest item of Phase B.** |
-| **#42** Session continuity | additive `session_id`/`kind` on `RunAttempt`/`RetryEntry`; thread `session_id` into continuation `resume`; `resume_sessions` flag; best-effort/self-healing resume | **S–M (~0.5–1d)** | **Med (Low if default-off)** | Runner already supports `resume`. Schema part folds into #41. Risk is purely the external Copilot session-liveness unknown — contained by defaulting resume **off** (fresh). |
-| **#43** Tests + docs + handoff | round-trip property test (encode/decode fixed point), restore scenarios, corruption→clean-start, wall-clock re-arm, `done.md`/README/PROJECT_BRIEF | **M (~1–1.5d)** | **Low** | Mechanical given §2.8; high value as the regression guard for #41. |
+| Issue                                | Scope                                                                                                                                                                            | Effort                    | Risk                         | Notes                                                                                                                                                                                                                               |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#40** Persistence layer            | versioned `Schema` codec, atomic temp+rename, debounced scoped writer, corruption→clean-start, store decorator, optional `persistence` config                                    | **M (~1–1.5d)**           | **Low–Med**                  | Mostly self-contained new files + one `daemon.ts` layer swap; `OrchestratorState` schema already exists. Risks: debounce + final-flush correctness; same-fs rename; `agent_rate_limits:Unknown` guard. No loop surgery.             |
+| **#41** Restore + reconcile + re-arm | load→seed→registry rebuild; **orphan→due-continuation-retry**; **wall-clock re-arm**; boot ordering vs first reconcile; idempotency (no double-dispatch); `RestoredAfterRestart` | **H (~2–3d incl. tests)** | **High**                     | The real core surgery, in `runOrchestrator` startup. Hardest correctness: orphan reconcile + re-arm + ordering. Needs scenario tests (orphan active/terminal/vanished, due/future retry, both kinds). **Riskiest item of Phase B.** |
+| **#42** Session continuity           | additive `session_id`/`kind` on `RunAttempt`/`RetryEntry`; thread `session_id` into continuation `resume`; `resume_sessions` flag; best-effort/self-healing resume               | **S–M (~0.5–1d)**         | **Med (Low if default-off)** | Runner already supports `resume`. Schema part folds into #41. Risk is purely the external Copilot session-liveness unknown — contained by defaulting resume **off** (fresh).                                                        |
+| **#43** Tests + docs + handoff       | round-trip property test (encode/decode fixed point), restore scenarios, corruption→clean-start, wall-clock re-arm, `done.md`/README/PROJECT_BRIEF                               | **M (~1–1.5d)**           | **Low**                      | Mechanical given §2.8; high value as the regression guard for #41.                                                                                                                                                                  |
 
 **Total: ~5–7 days of focused core work.**
 
 ### Does Phase B fit the remaining Sprint 3?
 
-**Recommendation: roll the Phase-B *build* (#40–#42) to Sprint 4; close Sprint 3 as
+**Recommendation: roll the Phase-B _build_ (#40–#42) to Sprint 4; close Sprint 3 as
 Phase A + this #39 spike.**
 
 Rationale: Phase A already consumed sprint capacity, and Phase B is ~a full sprint of deep
@@ -485,11 +489,11 @@ the precise failure mode durability exists to prevent. The spike has de-risked t
 (reducing orphans to existing retry/reconcile machinery; resume made optional), but the
 implementation still wants a clean sprint and careful review.
 
-**If the user wants durability value *this* sprint — the safe, high-value slice:**
-ship **#40 + a *minimal* restore** = persist and restore **bookkeeping** (`completed`,
+**If the user wants durability value _this_ sprint — the safe, high-value slice:**
+ship **#40 + a _minimal_ restore** = persist and restore **bookkeeping** (`completed`,
 `agent_totals`, `claimed`, `agent_rate_limits`) and **re-arm retries from wall-clock** (§2.5),
 **but defer orphan resume**: on boot, treat orphaned `running` with policy (c)
-*release-and-requeue* (drop running + unclaim, let the normal tick re-dispatch via the tracker
+_release-and-requeue_ (drop running + unclaim, let the normal tick re-dispatch via the tracker
 — exactly today's behavior, zero new risk). This delivers "history + in-flight retries survive
 a restart" at **Low** risk, and defers the genuinely hard, high-value parts — full
 orphan→continuation reconcile (#41) and session resume (#42) — to Sprint 4 where they get the

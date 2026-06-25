@@ -29,19 +29,19 @@ pnpm dev                           # missing arg → CliUsageError, exit 1
 
 ## What was built (per task)
 
-| # | Task | Deliverable |
-|---|------|-------------|
-| 1 | Scaffold | pnpm workspace, strict `tsconfig`, **Biome** (lint+format+import-sort), `tsup`, `vitest`. `src/`+`test/` per brief §5. |
-| 2 | Effect run-loop | `src/cli/main.ts` (`Effect.gen` program, `Layer` graph seam `AppLive`, logfmt logger via `Logger.logFmt`, `NodeRuntime.runMain`) + `src/cli/args.ts` (testable `parseArgs`). |
-| 3 | Domain `Schema` | `src/core/domain/` — Issue, AgentEvent (tagged union), ServiceConfig/WorkflowDefinition (SPEC §6.4 defaults baked in), Workspace, RunAttempt, LiveSession, RetryEntry, OrchestratorState. Normalization (label lowercasing) encoded as schema transforms. |
-| 4 | Tagged errors | `src/core/errors.ts` — one `Data.TaggedError` per SPEC class (§5.5/§10.6/§11.4) + §9.4/§9.5 workspace-safety errors; unioned into `WorkflowError`/`AgentError`/`TrackerError`/`WorkspaceError`/`OrchestraError`. |
-| 5 | Ports | `src/core/ports/` — `IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock` as `Context.Tag` services, **signatures only**. |
-| 6 | WORKFLOW loader | `src/core/workflow/` — split → YAML → `Schema` decode (defaults) → `$VAR` → path coercion; strict Liquid render (unknown var/filter = tagged error). Pure `parseWorkflow` + IO `loadWorkflow` (FileSystem). `src/core/workspace/safety.ts` encodes §9.5 invariants. |
-| 7 | Copilot spike | `docs/sprint-0/spike-copilot.md` — live one-turn PoC, **subprocess** decision for v1, JSONL→`AgentEvent` mapping table, `Schema` sketch, ACP future path. |
-| 8 | Design system | `src/core/observability/glyphs.ts` (5 status glyphs + ASCII fallbacks, semantic color tokens, NO_COLOR/TTY-aware, truncation helpers, phase→status rollup) + `docs/design-system.md`. |
-| 9 | Effect guide | `docs/effect-guide.md` — 6 concepts (Effect, Layer/Context, Schema, tagged errors, Schedule, TestClock) with Orchestra examples. |
-| 10 | CI | `.github/workflows/ci.yml` — pnpm install → typecheck → lint → test → build on Node 22+24 matrix. Harness proven (vitest + @effect/vitest + fast-check). |
-| 11 | Example workflow | `WORKFLOW.example.md` (GitHub front matter + Liquid body) + `test/example-workflow.test.ts` (loads + strict-renders both attempt states). |
+| #   | Task             | Deliverable                                                                                                                                                                                                                                                         |
+| --- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Scaffold         | pnpm workspace, strict `tsconfig`, **Biome** (lint+format+import-sort), `tsup`, `vitest`. `src/`+`test/` per brief §5.                                                                                                                                              |
+| 2   | Effect run-loop  | `src/cli/main.ts` (`Effect.gen` program, `Layer` graph seam `AppLive`, logfmt logger via `Logger.logFmt`, `NodeRuntime.runMain`) + `src/cli/args.ts` (testable `parseArgs`).                                                                                        |
+| 3   | Domain `Schema`  | `src/core/domain/` — Issue, AgentEvent (tagged union), ServiceConfig/WorkflowDefinition (SPEC §6.4 defaults baked in), Workspace, RunAttempt, LiveSession, RetryEntry, OrchestratorState. Normalization (label lowercasing) encoded as schema transforms.           |
+| 4   | Tagged errors    | `src/core/errors.ts` — one `Data.TaggedError` per SPEC class (§5.5/§10.6/§11.4) + §9.4/§9.5 workspace-safety errors; unioned into `WorkflowError`/`AgentError`/`TrackerError`/`WorkspaceError`/`OrchestraError`.                                                    |
+| 5   | Ports            | `src/core/ports/` — `IssueTracker`, `AgentRunner`, `WorkspaceManager`, `Clock` as `Context.Tag` services, **signatures only**.                                                                                                                                      |
+| 6   | WORKFLOW loader  | `src/core/workflow/` — split → YAML → `Schema` decode (defaults) → `$VAR` → path coercion; strict Liquid render (unknown var/filter = tagged error). Pure `parseWorkflow` + IO `loadWorkflow` (FileSystem). `src/core/workspace/safety.ts` encodes §9.5 invariants. |
+| 7   | Copilot spike    | `docs/sprint-0/spike-copilot.md` — live one-turn PoC, **subprocess** decision for v1, JSONL→`AgentEvent` mapping table, `Schema` sketch, ACP future path.                                                                                                           |
+| 8   | Design system    | `src/core/observability/glyphs.ts` (5 status glyphs + ASCII fallbacks, semantic color tokens, NO_COLOR/TTY-aware, truncation helpers, phase→status rollup) + `docs/design-system.md`.                                                                               |
+| 9   | Effect guide     | `docs/effect-guide.md` — 6 concepts (Effect, Layer/Context, Schema, tagged errors, Schedule, TestClock) with Orchestra examples.                                                                                                                                    |
+| 10  | CI               | `.github/workflows/ci.yml` — pnpm install → typecheck → lint → test → build on Node 22+24 matrix. Harness proven (vitest + @effect/vitest + fast-check).                                                                                                            |
+| 11  | Example workflow | `WORKFLOW.example.md` (GitHub front matter + Liquid body) + `test/example-workflow.test.ts` (loads + strict-renders both attempt states).                                                                                                                           |
 
 ## Decisions (the two the plan asked for)
 
@@ -49,12 +49,12 @@ pnpm dev                           # missing arg → CliUsageError, exit 1
    (`biome.json`); no ESLint+Prettier coordination overhead.
 2. **Copilot integration = subprocess for v1.** Drive the headless `copilot` CLI
    (`copilot -p "<prompt>" --output-format json -C "<abs ws>" --allow-all-tools
-   --no-color --log-level none`); stdout is JSONL, terminal `result` carries `exitCode`
-   + `usage`. Chosen over the in-process `@github/copilot` SDK because the SDK's `./sdk`
-   export was **removed** between `1.0.63` and the installed `1.0.64-3` (instability),
-   and a subprocess gives a killable PID, `cwd` isolation, and a clean JSONL→`AgentEvent`
-   mapping. ACP (`copilot --acp`) noted as the future in-process upgrade. Both stay
-   behind the `AgentRunner` port. Full write-up: `docs/sprint-0/spike-copilot.md`.
+--no-color --log-level none`); stdout is JSONL, terminal `result` carries `exitCode`
+   - `usage`. Chosen over the in-process `@github/copilot` SDK because the SDK's `./sdk`
+     export was **removed** between `1.0.63` and the installed `1.0.64-3` (instability),
+     and a subprocess gives a killable PID, `cwd` isolation, and a clean JSONL→`AgentEvent`
+     mapping. ACP (`copilot --acp`) noted as the future in-process upgrade. Both stay
+     behind the `AgentRunner` port. Full write-up: `docs/sprint-0/spike-copilot.md`.
 
 Spec→Orchestra adaptations (recorded in `progress.md`): GitHub tracker (not Linear) —
 `tracker.kind: github`, `project_slug`→`repo`, env `GITHUB_TOKEN`; Copilot agent (not
@@ -64,7 +64,7 @@ Codex) — `codex` block→`copilot`, `codex_*`→`agent_*`, `linear_*`/`codex_*
 ## What's NOT done (out of scope — Sprint 1+)
 
 - **Orchestrator loop** (poll/claim/dispatch/concurrency/retry/reconcile state machine).
-  The single state-owning fiber is *designed for* (ports + `OrchestratorState` + tagged
+  The single state-owning fiber is _designed for_ (ports + `OrchestratorState` + tagged
   errors) but not built.
 - **Real adapters:** GitHub Issues (Octokit) `IssueTracker` and the Copilot
   `AgentRunner` are ports only — no network/subprocess calls yet. The spike pins how the
@@ -92,14 +92,14 @@ Codex) — `codex` block→`copilot`, `codex_*`→`agent_*`, `linear_*`/`codex_*
 - The throwaway spike sandbox (`.spike-copilot/`, ~665 MB of extracted tarballs + PoC
   workspace) was **deleted**. Its `.gitignore` entry is kept as a guard for future
   spikes. Everything learned is in `docs/sprint-0/spike-copilot.md`.
-- Actual file layout differs slightly from the brief §5 *planned* table — see the
+- Actual file layout differs slightly from the brief §5 _planned_ table — see the
   updated §5. Notably: the front-matter `Schema` lives in `core/domain/workflow.ts`
   (not `core/workflow/`), and a small `core/util/` was added. Updated in the brief.
 - **Supply-chain hygiene / build scripts:** third-party install scripts are denied via
   `pnpm-workspace.yaml` → `allowBuilds: { '@parcel/watcher': false, esbuild: false,
-  msgpackr-extract: false }`. This is pnpm 11.8's real decision key — `false` means "do not
+msgpackr-extract: false }`. This is pnpm 11.8's real decision key — `false` means "do not
   run this build script." `pnpm install --frozen-lockfile` exits **0** with no notice.
-  (Note: `ignoredBuiltDependencies` is **not** honored in pnpm 11.8 and an *undecided*
+  (Note: `ignoredBuiltDependencies` is **not** honored in pnpm 11.8 and an _undecided_
   `allowBuilds` entry makes install exit 1 — see progress.md Bug #1. pnpm is pinned to
   11.8.0 via `package.json` `packageManager` so local == CI.)
 

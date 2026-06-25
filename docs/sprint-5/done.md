@@ -15,16 +15,16 @@ this close-out. The snapshot contract stayed **strictly additive** (no `/api/v2`
 
 ## What shipped
 
-| # | Issue | Outcome |
-|---|-------|---------|
-| #53 | Budget guardrails | Additive optional `budget.max_total_tokens` config (`Schema.optionalWith`, all-defaults). New pure `evaluateBudget`/`BudgetStatus` (`src/core/orchestrator/budget.ts`) — no IO, no state. In `handleTick`, a pre-`planDispatch` guard: `const toDispatch = budget.paused ? [] : planDispatch(...)`, pausing **new** dispatch at the token ceiling while in-flight workers, retries, and reconcile are provably untouched. A runtime `budgetPaused` latch emits `BudgetExceeded` once per transition (rendered in feed + logfmt). Strictly-additive snapshot `budget` block (present only when configured) + dashboard `BUDGET` panel. (`9d429ea`) |
-| #54 | Durability/restore visibility | Promoted #41's one-shot `RestoredAfterRestart` fact to a durable, display-only signal. New set-once `RestoreStatus` context service (`src/core/observability/restore-status.ts`, same family as `LiveActivity`/`RecentCompletions`) holding an immutable `RestoreSummary`, written **once** by the loop at boot on the same path that emits `RestoredAfterRestart` (cold start → never recorded → field omitted). Strictly-additive snapshot `restore` block + dashboard `RESTORED` indicator (`⟳ restored after restart · n running · n retrying · n completed · restored Xs ago`). No scheduling change — #41's restore stays byte-identical. (`baf2549`) |
+| #   | Issue                           | Outcome                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #53 | Budget guardrails               | Additive optional `budget.max_total_tokens` config (`Schema.optionalWith`, all-defaults). New pure `evaluateBudget`/`BudgetStatus` (`src/core/orchestrator/budget.ts`) — no IO, no state. In `handleTick`, a pre-`planDispatch` guard: `const toDispatch = budget.paused ? [] : planDispatch(...)`, pausing **new** dispatch at the token ceiling while in-flight workers, retries, and reconcile are provably untouched. A runtime `budgetPaused` latch emits `BudgetExceeded` once per transition (rendered in feed + logfmt). Strictly-additive snapshot `budget` block (present only when configured) + dashboard `BUDGET` panel. (`9d429ea`)                                                     |
+| #54 | Durability/restore visibility   | Promoted #41's one-shot `RestoredAfterRestart` fact to a durable, display-only signal. New set-once `RestoreStatus` context service (`src/core/observability/restore-status.ts`, same family as `LiveActivity`/`RecentCompletions`) holding an immutable `RestoreSummary`, written **once** by the loop at boot on the same path that emits `RestoredAfterRestart` (cold start → never recorded → field omitted). Strictly-additive snapshot `restore` block + dashboard `RESTORED` indicator (`⟳ restored after restart · n running · n retrying · n completed · restored Xs ago`). No scheduling change — #41's restore stays byte-identical. (`baf2549`)                                           |
 | #55 | Humanized agent-event summaries | New pure `humanizeAgentEvent` (`src/core/observability/humanize.ts`) — total, never-blank, mapping each `AgentEvent` tag to a friendly one-liner via a `Record<AgentEventTag, string>` table (a new union variant trips a **compile** error; unknown tags fall back to the raw label). Wired at the two surfaces where agent events appear: the logfmt line (`live-observer.ts`) and per-session `LiveActivity.message` (`observer-tee.ts`), which flows onto `running[].last_activity` and is preferred over the raw tag in the dashboard. Maps by tag only — never echoes agent payload text. Deliberately **not** pushed into `recent_events` (per-turn chatter would flood the feed). (`785ad04`) |
-| #56 | Tests + docs + handoff | Cross-feature coverage audit/fill (3 genuinely new co-occurrence cases, see below), README (`budget` config + operator-visibility section), this close-out, `progress.md` close record, `PROJECT_BRIEF.md` §7/§8. |
+| #56 | Tests + docs + handoff          | Cross-feature coverage audit/fill (3 genuinely new co-occurrence cases, see below), README (`budget` config + operator-visibility section), this close-out, `progress.md` close record, `PROJECT_BRIEF.md` §7/§8.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## Key design decisions (so a future sprint doesn't regress them)
 
-- **The budget gate is a pure pre-`planDispatch` read (#53).** The *only* behavioral change
+- **The budget gate is a pure pre-`planDispatch` read (#53).** The _only_ behavioral change
   is one line withholding the fresh-dispatch list when paused. It does **not** modify
   concurrency/retry math or reconcile, and it gates only `handleTick`'s fresh dispatch loop
   — retries/continuations re-dispatch through the **separate** `handleRetryDue` path the
@@ -34,7 +34,7 @@ this close-out. The snapshot contract stayed **strictly additive** (no `/api/v2`
   applicable** and absent otherwise, so a pre-Sprint-5 dashboard renders identically — no
   `/api/v2`. The cross-feature test pins that a cold start carries **none** of them.
 - **Set-once `RestoreStatus` context service (#54).** The boot-time restore fact is
-  *runtime data computed after the snapshot fiber starts*, so it must be a shared Ref-backed
+  _runtime data computed after the snapshot fiber starts_, so it must be a shared Ref-backed
   context service (not a closed-over value like the static budget config). `record` is
   set-once (`prev ?? summary`) so the first boot capture is immutable.
 - **Compile-checked humanizer table (#55).** Typing the summary map as
@@ -88,16 +88,17 @@ Per-feature contributions to the count: +17 #53 (312), +13 #54 (325), +8 #55 (33
 restore capture), `src/core/orchestrator/observer.ts` (`BudgetExceeded`),
 `src/core/observability/{recent-events,live-observer,observer-tee,live-activity,snapshot-server}.ts`,
 `src/core/domain/workflow.ts` (`BudgetConfig`), `src/cli/daemon.ts` (snapshot-server budget arg
-+ `RestoreStatusLive`).
-**Dashboard:** `src/cli/dashboard/{snapshot-client,view-model,components.tsx}` (budget/restore
-parse + VM + panels; humanized last-activity preference).
-**Tests:** `test/budget-{pure,gate}.test.ts`, `test/restore-pure.test.ts`,
-`test/humanize.test.ts`, `test/cross-feature.test.ts` (new); additions to
-`test/{live-observer,recent-events,restore-reconcile,snapshot-server}.test.ts` and
-`test/dashboard/{snapshot-client,view-model,render}.test.ts`; `test/fakes/harness.ts`
-(`budgetMaxTotalTokens` knob + `RestoreStatusLive`).
-**Docs:** `docs/sprint-5/{progress,done}.md`, `README.md` (Budget guardrails + Operator
-visibility sections + `budget` config table), `PROJECT_BRIEF.md` §7/§8.
+
+- `RestoreStatusLive`).
+  **Dashboard:** `src/cli/dashboard/{snapshot-client,view-model,components.tsx}` (budget/restore
+  parse + VM + panels; humanized last-activity preference).
+  **Tests:** `test/budget-{pure,gate}.test.ts`, `test/restore-pure.test.ts`,
+  `test/humanize.test.ts`, `test/cross-feature.test.ts` (new); additions to
+  `test/{live-observer,recent-events,restore-reconcile,snapshot-server}.test.ts` and
+  `test/dashboard/{snapshot-client,view-model,render}.test.ts`; `test/fakes/harness.ts`
+  (`budgetMaxTotalTokens` knob + `RestoreStatusLive`).
+  **Docs:** `docs/sprint-5/{progress,done}.md`, `README.md` (Budget guardrails + Operator
+  visibility sections + `budget` config table), `PROJECT_BRIEF.md` §7/§8.
 
 ## How to run / verify
 
@@ -131,7 +132,7 @@ pnpm dev ./WORKFLOW.md --port 4317
   `persistence.resume_sessions` is default-off and self-healing; enabling it for real
   workloads still needs an integration validation that Copilot honors `--resume` across
   daemon downtime (today only the fake-agent self-heal path is tested). Restore visibility
-  (#54) surfaces *that* a restore happened — it does not validate session resume itself.
+  (#54) surfaces _that_ a restore happened — it does not validate session resume itself.
 - **Schema migration is still V1-only** (the `migrateToCurrent` seam awaits its first real
   bump), and the snapshot/dashboard remain **read-only** — no control plane, auth, or metrics
   export.

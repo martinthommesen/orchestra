@@ -20,7 +20,7 @@ Same Effect core, but two bold bets up front:
 
 - Maximum delight and demo value — matches Symphony's polished LiveView reference.
 - Structured SDK events remove the brittlest part of the subprocess approach.
-- Strong DX: a developer *sees* the ensemble working, not a log scroll.
+- Strong DX: a developer _sees_ the ensemble working, not a log scroll.
 
 ## Cons
 

@@ -25,12 +25,12 @@ Sprint 3 close-out.
 
 ## Gates (clean run on the merged tree)
 
-| Gate | Command | Result | Evidence |
-|------|---------|--------|----------|
-| Typecheck | `pnpm typecheck` (`tsc --noEmit`) | ✅ PASS | exit **0** |
-| Lint | `pnpm lint` (`biome check .`) | ✅ PASS | "Checked **95 files** … No fixes applied", exit **0** |
-| Test | `pnpm test` (`vitest run`) | ✅ PASS | **263 passed / 263**, **23 files**, exit **0** (matches progress.md "263 (+17)") |
-| Build | `pnpm build` (`tsup`) | ✅ PASS | `dist/cli/main.js` 109.12 KB + `dist/cli/dashboard.js` 30.47 KB, exit **0** |
+| Gate      | Command                           | Result  | Evidence                                                                         |
+| --------- | --------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| Typecheck | `pnpm typecheck` (`tsc --noEmit`) | ✅ PASS | exit **0**                                                                       |
+| Lint      | `pnpm lint` (`biome check .`)     | ✅ PASS | "Checked **95 files** … No fixes applied", exit **0**                            |
+| Test      | `pnpm test` (`vitest run`)        | ✅ PASS | **263 passed / 263**, **23 files**, exit **0** (matches progress.md "263 (+17)") |
+| Build     | `pnpm build` (`tsup`)             | ✅ PASS | `dist/cli/main.js` 109.12 KB + `dist/cli/dashboard.js` 30.47 KB, exit **0**      |
 
 New/affected test files all green: `recent-events.test.ts` (8), `live-activity.test.ts` (4),
 `snapshot-enrichment.test.ts` (5), `dashboard/view-model.test.ts` (29),
@@ -44,31 +44,32 @@ I ran the **built** `dist/cli/dashboard.js` against a loopback HTTP fake serving
 `/api/v1/state` bodies (the same defensive-fake approach as prior smokes), capturing the
 rendered Ink frames. Findings against the Phase-A acceptance points:
 
-| # | Check | Result | What I saw |
-|---|-------|--------|------------|
-| 1 | EVENTS feed newest-first, glyph+colour by level/kind | ✅ PASS | Wire is newest-last → rendered newest-first. `started ▶` cyan, `completed ✓` green, `killed ✗` red, `retry_scheduled ⏳` yellow, unknown-kind/info `·` muted, warn fallback `⚠`. Identifier prefix + truncated message present. |
-| 2 | Per-running `↳` last-activity line, omitted when absent | ✅ PASS | Running row **with** `last_activity` showed `↳ TurnCompleted · 3s ago`; a sibling running row **without** activity cleanly omitted the line (no fake "0s", no `undefined`). |
-| 3 | RECENTLY FINISHED rich list, distinct from IDs-only COMPLETED | ✅ PASS | `RECENTLY FINISHED` shows `identifier + outcome(coloured) + relative finished-at`, newest-first; the authoritative `COMPLETED (n)` IDs-only summary (`i-004 i-003 …`) is unchanged and still present. |
-| 4 | Retry HONEST wall-clock due time, no monotonic leak | ✅ PASS | Retry row showed `due HH:MM:SSZ` computed from `scheduled_at + delay_ms` (UTC). **Not** a live countdown; the monotonic `due_at_ms: 99999` never appeared. Older-daemon retry (no `scheduled_at`/`delay_ms`) correctly omits the due cell. |
-| 5 | `--ascii` glyph swap | ✅ PASS | `▶→>`, `↳→-`, `⏳→~`, `✓→+`, `✗→x`. |
-| 6 | `NO_COLOR` / non-TTY → plain (no ANSI colour) | ✅ PASS | Non-TTY (piped) render emitted no colour. `shouldUseColor` (glyphs.ts:76) checks `NO_COLOR` **first** → `NO_COLOR=1` always yields plain; unit-tested in `glyphs.test.ts`. |
-| 7 | **Backward-safety:** older-daemon snapshot renders like Sprint 2 | ✅ PASS | A snapshot omitting all new fields rendered exactly the Sprint 2 layout — EVENTS, RECENTLY FINISHED, `↳`, and the retry due cell all **absent**; no crash, no `undefined`. `optArray`/optional parsers default cleanly. |
-| 8 | Resilience: malformed / empty / non-JSON / HTTP 500 / refused | ✅ PASS | Each surfaced a typed error banner under `status connecting`, panels empty, **no crash**, clean SIGTERM exit: `malformed snapshot: expected string at "workspace_path"`, `Unexpected end of JSON input`, invalid-JSON token error, `snapshot API returned HTTP 500`, `fetch failed` (refused). |
-| 9 | CLI dispatch + arg validation | ✅ PASS | `orchestra dashboard --help` (via `main.js`) and standalone `dashboard.js --help` print usage, exit **0**; `--port 0` → `--port must be an integer in 1..65535` exit **1**; `--wat` → `unknown option` exit **1**. |
-| 10 | No regression to Sprint 2 dashboard / snapshot contract | ✅ PASS | Existing fields byte-compatible; `completed` stays IDs-only; the older-daemon render is identical to Sprint 2. Full suite green. |
+| #   | Check                                                            | Result  | What I saw                                                                                                                                                                                                                                                                                     |
+| --- | ---------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | EVENTS feed newest-first, glyph+colour by level/kind             | ✅ PASS | Wire is newest-last → rendered newest-first. `started ▶` cyan, `completed ✓` green, `killed ✗` red, `retry_scheduled ⏳` yellow, unknown-kind/info `·` muted, warn fallback `⚠`. Identifier prefix + truncated message present.                                                                |
+| 2   | Per-running `↳` last-activity line, omitted when absent          | ✅ PASS | Running row **with** `last_activity` showed `↳ TurnCompleted · 3s ago`; a sibling running row **without** activity cleanly omitted the line (no fake "0s", no `undefined`).                                                                                                                    |
+| 3   | RECENTLY FINISHED rich list, distinct from IDs-only COMPLETED    | ✅ PASS | `RECENTLY FINISHED` shows `identifier + outcome(coloured) + relative finished-at`, newest-first; the authoritative `COMPLETED (n)` IDs-only summary (`i-004 i-003 …`) is unchanged and still present.                                                                                          |
+| 4   | Retry HONEST wall-clock due time, no monotonic leak              | ✅ PASS | Retry row showed `due HH:MM:SSZ` computed from `scheduled_at + delay_ms` (UTC). **Not** a live countdown; the monotonic `due_at_ms: 99999` never appeared. Older-daemon retry (no `scheduled_at`/`delay_ms`) correctly omits the due cell.                                                     |
+| 5   | `--ascii` glyph swap                                             | ✅ PASS | `▶→>`, `↳→-`, `⏳→~`, `✓→+`, `✗→x`.                                                                                                                                                                                                                                                            |
+| 6   | `NO_COLOR` / non-TTY → plain (no ANSI colour)                    | ✅ PASS | Non-TTY (piped) render emitted no colour. `shouldUseColor` (glyphs.ts:76) checks `NO_COLOR` **first** → `NO_COLOR=1` always yields plain; unit-tested in `glyphs.test.ts`.                                                                                                                     |
+| 7   | **Backward-safety:** older-daemon snapshot renders like Sprint 2 | ✅ PASS | A snapshot omitting all new fields rendered exactly the Sprint 2 layout — EVENTS, RECENTLY FINISHED, `↳`, and the retry due cell all **absent**; no crash, no `undefined`. `optArray`/optional parsers default cleanly.                                                                        |
+| 8   | Resilience: malformed / empty / non-JSON / HTTP 500 / refused    | ✅ PASS | Each surfaced a typed error banner under `status connecting`, panels empty, **no crash**, clean SIGTERM exit: `malformed snapshot: expected string at "workspace_path"`, `Unexpected end of JSON input`, invalid-JSON token error, `snapshot API returned HTTP 500`, `fetch failed` (refused). |
+| 9   | CLI dispatch + arg validation                                    | ✅ PASS | `orchestra dashboard --help` (via `main.js`) and standalone `dashboard.js --help` print usage, exit **0**; `--port 0` → `--port must be an integer in 1..65535` exit **1**; `--wat` → `unknown option` exit **1**.                                                                             |
+| 10  | No regression to Sprint 2 dashboard / snapshot contract          | ✅ PASS | Existing fields byte-compatible; `completed` stays IDs-only; the older-daemon render is identical to Sprint 2. Full suite green.                                                                                                                                                               |
 
 ---
 
 ## Issues filed
 
-| # | Severity | Area | Title |
-|---|----------|------|-------|
+| #                                                             | Severity  | Area          | Title                                                                                                                  |
+| ------------------------------------------------------------- | --------- | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | [#45](https://github.com/martinthommesen/orchestra/issues/45) | **minor** | observability | EVENTS feed relative-time column (`width={9}`) wraps `"Xm YYs ago"` (10 chars) onto a second line for events ≥ 60s old |
 
 No `severity:*` labels exist on the repo (as in Sprint 1); severity is encoded in the
 title/body, with `bug` + `area:observability` applied.
 
 ### #45 detail (minor, cosmetic)
+
 `EventRow` (`components.tsx:~169`) renders the relative time in `<Box width={9}>`, but
 `toViewModel` can emit up to `"Xm YYs ago"` = 10 chars once an event ages past one minute,
 so Ink wraps `ago` to its own indented line. Data is correct and honest; only the layout

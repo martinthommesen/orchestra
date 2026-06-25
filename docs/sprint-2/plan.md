@@ -27,7 +27,7 @@ telemetry/event subsystem and we will not turn it into one this sprint.
 3. **Render the snapshot honestly** (see "Snapshot contract" — don't promise data
    the API doesn't carry).
 4. All prior 187 tests stay green; new tests are added. Gates green on Node 22+24
-   + CodeQL + Socket (react/ink supply-chain).
+   - CodeQL + Socket (react/ink supply-chain).
 
 ## Snapshot contract (what we can honestly render)
 
@@ -51,15 +51,17 @@ telemetry/event subsystem and we will not turn it into one this sprint.
 
 ## Tasks (priority order)
 
-### #29 — Ink toolchain spike & gate  **(BLOCKING — do first)**
+### #29 — Ink toolchain spike & gate **(BLOCKING — do first)**
+
 Stand up React 19 + Ink 7 in this strict ESM/Effect repo and prove the toolchain
 end-to-end with a throwaway component before any UI is written.
+
 - Add **dependencies**: `ink@^7`, `react@^19.2`, `react-devtools-core` (ink peer).
   Add **devDependencies**: `@types/react@^19.2`, `ink-testing-library@^4`.
   (`skipNodeModulesBundle:true` ⇒ runtime deps must be real `dependencies`.)
 - `tsconfig.json`: add `"jsx": "react-jsx"`; add `"react"` to `types` only if the
   spike proves it's needed. Keep `verbatimModuleSyntax`/`isolatedModules`/
-  `exactOptionalPropertyTypes` — work *with* them (type-only imports; no bare
+  `exactOptionalPropertyTypes` — work _with_ them (type-only imports; no bare
   `import React`; conditional prop spreads instead of `prop={maybeUndefined}`).
 - `vitest.config.ts`: widen `include` to `test/**/*.test.{ts,tsx}` (today it's
   `*.test.ts`, so `.test.tsx` would be silently skipped).
@@ -73,7 +75,9 @@ end-to-end with a throwaway component before any UI is written.
   sprint** (fall back to a non-Ink render or defer) rather than fighting it.
 
 ### #30 — CLI dispatcher + `dashboard` subcommand
+
 Make `orchestra dashboard` real without overloading the daemon's arg parser.
+
 - Extract the daemon entry as `runDaemon(argv)`; add `runDashboard(argv)`.
 - Thin top-level dispatcher: `argv[0] === "dashboard"` → dashboard; otherwise the
   existing `orchestra <WORKFLOW.md> [--port N]` daemon path (unchanged behavior &
@@ -81,21 +85,24 @@ Make `orchestra dashboard` real without overloading the daemon's arg parser.
 - Dashboard args parsed **separately** (don't mutate `parseArgs` into a
   "sometimes workflow / sometimes subcommand" parser):
   `orchestra dashboard [--port 4317] [--host 127.0.0.1] [--interval-ms 1000]
-  [--ascii]`, plus `--help`.
+[--ascii]`, plus `--help`.
 - Core orchestrator loop untouched.
 
 ### #31 — Snapshot client + polling hook
+
 The read-only data layer, fully injectable for tests.
+
 - Typed `fetchSnapshot(baseUrl, signal)` → GET `/api/v1/state` with
   `AbortSignal.timeout(...)`; parse/validate into a `Snapshot` view type.
-- Polling that **never overlaps** (schedule the next poll *after* the previous
+- Polling that **never overlaps** (schedule the next poll _after_ the previous
   completes, or guard in-flight) — no raw `setInterval(async …)`.
 - On error: **keep the last good snapshot** and surface a `connecting | live |
-  stale` connection state — never blank the UI on a single failed poll.
+stale` connection state — never blank the UI on a single failed poll.
 - Plain React hook with an **injected** fetcher (do NOT bridge an Effect runtime
   into Ink's lifecycle — keep the UI island simple and testable).
 
 ### #32 — Dashboard view-model + Ink rendering
+
 - Pure `toViewModel(snapshot, now, opts)` → header (poll interval, cap,
   connection state), running rows (identifier, status badge via `glyphs.ts`,
   elapsed, workspace, attempt), retrying rows (identifier, attempt, error — no
@@ -108,6 +115,7 @@ The read-only data layer, fully injectable for tests.
   timer (no leaked handles).
 
 ### #33 — Test suite (Ivy shape — meaningful, non-flaky)
+
 - **View-model unit tests** for every state: empty, running, retrying,
   completed-IDs-only, totals populated, `rate_limits: null`, `rate_limits`
   unknown-shape.
@@ -119,21 +127,24 @@ The read-only data layer, fully injectable for tests.
   they get brittle).
 
 ### #34 — Apache-2.0 license + dashboard docs + handoff
+
 - Add `LICENSE` (full Apache-2.0 text) + `NOTICE`; set `package.json`
   `"license": "Apache-2.0"`; README license section/badge. (Symphony is
   Apache-2.0; this resolves the open License question in the backlog.)
 - README "Dashboard" section: run the daemon with `--port`, then
   `orchestra dashboard` in a second terminal; document `--host/--interval-ms/
-  --ascii`.
+--ascii`.
 - `docs/sprint-2/done.md` handoff; update `PROJECT_BRIEF.md` §5/§7/§8 and resolve
   the License item in `docs/ideas-backlog.md`.
 
 ## Dependencies
+
 - #29 blocks #30, #31, #32, #33.
 - #32 depends on #31. #33 depends on #31 + #32. #30 independent after #29.
 - #34 (license) independent; its docs portion depends on #32.
 
 ## Success criteria
+
 1. `orchestra dashboard --port 4317` renders a live fleet view whose counts match
    `curl 127.0.0.1:4317/api/v1/state`, refreshing on an interval **without
    overlapping requests**.
@@ -149,5 +160,6 @@ The read-only data layer, fully injectable for tests.
    `pnpm build` exit 0; CI green on Node 22+24 + CodeQL + Socket.
 
 ## Deferred to backlog (explicitly NOT this sprint)
+
 Recent-events feed, Observer-backed ring buffer, in-process `--tui` renderer, log
 tailing/forensic timeline, snapshot enrichment.

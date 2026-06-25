@@ -5,14 +5,16 @@ controllable and the daemon's behavior legible at a glance. Three independent, m
 features plus a close-out.
 
 ## Goal
+
 Let an operator **manage the work** with confidence: cap agent spend before it runs away, see a
 post-restart resume at a glance, and read what agents are doing in plain language — without
 touching the core dispatch/retry semantics any more than a single additive guard requires.
 
 ## Constraints (carried forward)
+
 1. **Snapshot stays strictly additive** on `/api/v1/state` — no `/api/v2`; older dashboards keep
    working, absent fields → panel omitted.
-2. **Never kill in-flight work for a budget.** A budget pauses *new* dispatch only; running
+2. **Never kill in-flight work for a budget.** A budget pauses _new_ dispatch only; running
    workers finish and reconcile normally.
 3. **Display-only stays display-only.** Restore visibility and humanized summaries change no
    dispatch/retry/persistence behavior.
@@ -38,13 +40,16 @@ touching the core dispatch/retry semantics any more than a single additive guard
   §7/§8. _Effort M · Risk Low._
 
 ## Dependencies
+
 `#53`, `#54`, `#55` are independent of each other. `#56 → all`.
 
 ## Build order
+
 #53 first (the headline, the only one touching the dispatch path — gate it for review), then #54
 and #55 (low-risk, additive), then #56 close-out. Total ~4–6 days.
 
 ## Success criteria
+
 - A configured budget pauses new dispatch at the ceiling without killing running work, and the
   pause is visible on the snapshot + dashboard; clearing/raising the budget resumes dispatch.
 - A restart shows a restore indicator on the dashboard; a cold start shows nothing.
@@ -52,6 +57,7 @@ and #55 (low-risk, additive), then #56 close-out. Total ~4–6 days.
 - `/api/v1/state` stays strictly additive; all gates 0; no regression in the existing suite.
 
 ## Risk note
+
 Only #53 touches the dispatch decision, and only as an additive pre-`planDispatch` guard — no new
 kill paths, no change to concurrency/retry math. Keep the budget check pure and out of the
 worker/reconcile paths.

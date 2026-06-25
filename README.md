@@ -69,15 +69,15 @@ pnpm dev:cockpit                     # Vite dev server (UI hot-reload, /api prox
 
 ### Endpoints
 
-| Method & path | Auth | Purpose |
-|---------------|------|---------|
-| `GET /api/v1/state` | none (loopback) | Live fleet snapshot |
-| `GET /api/v1/settings` | none (loopback) | Editable settings (whitelisted, secret-free) |
-| `POST /api/v1/control/pause` | bearer + loopback | Pause new dispatch |
-| `POST /api/v1/control/resume` | bearer + loopback | Resume dispatch |
-| `POST /api/v1/issues/:id/retry` | bearer + loopback | Retry a backing-off issue now |
-| `POST /api/v1/issues/:id/cancel` | bearer + loopback | Cancel one running session |
-| `PUT /api/v1/settings` | bearer + loopback | Persist a settings patch (hot-reloaded) |
+| Method & path                    | Auth              | Purpose                                      |
+| -------------------------------- | ----------------- | -------------------------------------------- |
+| `GET /api/v1/state`              | none (loopback)   | Live fleet snapshot                          |
+| `GET /api/v1/settings`           | none (loopback)   | Editable settings (whitelisted, secret-free) |
+| `POST /api/v1/control/pause`     | bearer + loopback | Pause new dispatch                           |
+| `POST /api/v1/control/resume`    | bearer + loopback | Resume dispatch                              |
+| `POST /api/v1/issues/:id/retry`  | bearer + loopback | Retry a backing-off issue now                |
+| `POST /api/v1/issues/:id/cancel` | bearer + loopback | Cancel one running session                   |
+| `PUT /api/v1/settings`           | bearer + loopback | Persist a settings patch (hot-reloaded)      |
 
 ### Auth model
 
@@ -125,8 +125,8 @@ On restart the checkpoint is restored and reconciled:
 - **Corruption or a missing file → a clean start, never a crash.** A bad checkpoint is renamed
   aside (`state.json.corrupt-<ts>`) for diagnosis and the daemon boots fresh.
 - The observability rings are **not** persisted (post-restart history is cosmetic; the
-  authoritative counts/totals *are* restored). On boot the daemon emits one synthetic
-  *restored after restart* event so the gap in the feed is honest.
+  authoritative counts/totals _are_ restored). On boot the daemon emits one synthetic
+  _restored after restart_ event so the gap in the feed is honest.
 
 Agent **session resume** across a restart is **opt-in** (`persistence.resume_sessions`, default
 **off**): the workspace on disk is the true record of progress, so a restored continuation runs
@@ -137,11 +137,11 @@ it can only help, never strand.
 The optional `persistence` block in `WORKFLOW.md` (all-defaults, so an unchanged config still
 decodes):
 
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `dir` | `<workspace.root>/.orchestra` | State directory (relative paths resolve against the workspace root) |
-| `debounce_ms` | `500` | Write-coalescing window in milliseconds |
-| `resume_sessions` | `false` | Opt-in best-effort agent session resume on restart |
+| Key               | Default                       | Meaning                                                             |
+| ----------------- | ----------------------------- | ------------------------------------------------------------------- |
+| `dir`             | `<workspace.root>/.orchestra` | State directory (relative paths resolve against the workspace root) |
+| `debounce_ms`     | `500`                         | Write-coalescing window in milliseconds                             |
+| `resume_sessions` | `false`                       | Opt-in best-effort agent session resume on restart                  |
 
 ## Budget guardrails
 
@@ -150,7 +150,7 @@ cumulative token ceiling; when the running total of agent tokens
 (`totals.total_tokens`) reaches it, the orchestrator **pauses new dispatch** and the
 snapshot/cockpit show the pause. The guard is deliberately narrow:
 
-- **In-flight work always completes.** A budget pauses *new* dispatch only — running
+- **In-flight work always completes.** A budget pauses _new_ dispatch only — running
   workers stream to the end and reconcile normally; nothing is killed or interrupted.
 - **Retries still dispatch.** Continuations and retry backoffs ride a separate path the
   guard never touches, so a paused budget never strands an issue mid-flight.
@@ -164,8 +164,8 @@ A pause/resume emits one lifecycle event on the transition (no per-tick spam).
 The optional `budget` block in `WORKFLOW.md` (all-defaults, so an unchanged config still
 decodes):
 
-| Key | Default | Meaning |
-|-----|---------|---------|
+| Key                | Default               | Meaning                                                                                          |
+| ------------------ | --------------------- | ------------------------------------------------------------------------------------------------ |
 | `max_total_tokens` | _(unset → unlimited)_ | Positive integer token ceiling; new dispatch pauses once cumulative agent token spend reaches it |
 
 ## Operator visibility
@@ -181,7 +181,7 @@ dispatch/retry/persistence behavior changes) and **strictly additive** on
   cold start); carries the wall-clock `at` plus the counts of orphaned-running
   continuations, re-armed retries, and restored completions. The cockpit renders a
   `RESTORED` indicator (`⟳ restored after restart · n running · n retrying · n completed ·
-  restored Xs ago`).
+restored Xs ago`).
 - **Humanized event summaries** — agent events are rendered as plain-language one-liners in
   the logfmt line and on each running issue's last-activity line in the cockpit (e.g.
   `finished turn`, `waiting for input`). Unknown event tags fall back to the raw label, so
@@ -207,17 +207,17 @@ pnpm build       # tsup → dist/
 
 Symphony spawns agents to play the score. Orchestra is the ensemble and the
 conductor: the orchestrator coordinates many autonomous Copilot agents so a team
-can *manage the work* instead of babysitting the agents.
+can _manage the work_ instead of babysitting the agents.
 
 ## Project artifacts
 
-| Path | Purpose |
-|------|---------|
-| `PROJECT_BRIEF.md` | Single source of truth across all team chats |
-| `docs/brainstorm/` | Team design debate that set the architecture |
-| `docs/sprint-N/` | Per-sprint `plan.md`, `progress.md`, `done.md` |
-| `docs/qa/` | QA sign-off reports |
-| `docs/ideas-backlog.md` | Deferred feature ideas |
+| Path                    | Purpose                                        |
+| ----------------------- | ---------------------------------------------- |
+| `PROJECT_BRIEF.md`      | Single source of truth across all team chats   |
+| `docs/brainstorm/`      | Team design debate that set the architecture   |
+| `docs/sprint-N/`        | Per-sprint `plan.md`, `progress.md`, `done.md` |
+| `docs/qa/`              | QA sign-off reports                            |
+| `docs/ideas-backlog.md` | Deferred feature ideas                         |
 
 ## Reference
 
