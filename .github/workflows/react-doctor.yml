@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - id: react-doctor
-        uses: millionco/react-doctor@v2
+        uses: millionco/react-doctor@0b4f4f4bd248a154e64eb508a48347f71154b3f3
         with:
           blocking: warning
           scope: full
