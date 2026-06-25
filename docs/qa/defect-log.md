@@ -140,9 +140,12 @@ each fix ships with a regression test that fails on the old code and passes on t
   defense-in-depth).
 - **Fix:** A blank repo now fails with `MissingTrackerRepo`; a present-but-malformed repo keeps
   `TrackerUnknownPayload`.
-- **Tests:** Verified by inspection; `parseRepo` is unexported and the live tracker port has no
-  existing unit harness, so a dedicated test would be disproportionate for a preflight-gated
-  classification fix.
+- **Tests:** `test/tracker-github.test.ts` — "a blank repo fails with MissingTrackerRepo
+  (DEF-008), not TrackerUnknownPayload" and "a malformed slug (no '/') fails with
+  TrackerUnknownPayload", driven through the real tracker layer (`fetchCandidateIssues` parses
+  the repo before any Octokit call, so `parseRepo` short-circuits with the typed error and no
+  network is touched). Added in the Phase 2 gap-closure (ORC-F004-S6/S7); this supersedes the
+  initial "verified by inspection" note.
 
 ---
 
