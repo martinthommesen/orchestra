@@ -329,6 +329,80 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
         expect(leftovers.some((e) => e.includes(".orchestra.tmp"))).toBe(false);
       }).pipe(Effect.provide(NodeContext.layer)),
   );
+
+  it.scoped("clearing an already-absent budget ceiling is a clean no-op, not a 500 (DEF-003)", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+      const path = `${dir}/WORKFLOW.md`;
+      // The shipped default WORKFLOW.example.md has NO `budget:` block, yet the cockpit
+      // settings form still submits a blank ceiling → `{ budget: { max_total_tokens: null } }`.
+      // Before the fix yaml's `deleteIn` threw "Expected YAML collection at budget" → uncaught
+      // die → HTTP 500. It must instead be an idempotent no-op that leaves the file untouched.
+      const noBudget = [
+        "---",
+        "tracker:",
+        "  kind: github",
+        "  repo: acme/widgets",
+        `  api_key: $${CRED_ENV_VAR}`,
+        "agent:",
+        "  max_turns: 20",
+        "---",
+        BODY,
+        "",
+      ].join("\n");
+      yield* fs.writeFileString(path, noBudget);
+
+      const outcome = yield* Effect.gen(function* () {
+        const wf = yield* WorkflowFile;
+        return yield* wf
+          .applyPatch({ budget: { max_total_tokens: null } }, () => Effect.void)
+          .pipe(Effect.match({ onFailure: (e) => `failed:${String(e)}`, onSuccess: () => "ok" }));
+      }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+      expect(outcome).toBe("ok");
+      const after = yield* fs.readFileString(path);
+      expect(after).toBe(noBudget); // byte-identical: there was nothing to clear.
+    }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped(
+    "a patch onto a malformed scalar intermediate is rejected (400), not a 500 (DEF-004)",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+        const path = `${dir}/WORKFLOW.md`;
+        // A hand-malformed `agent:` as a scalar (not a map). yaml's `setIn` throws synchronously
+        // ("Expected YAML collection at agent"); the fix maps that to a typed `SettingsRejected`
+        // (→ 400) rather than an uncaught die (→ 500), and nothing is written.
+        const malformed = [
+          "---",
+          "tracker:",
+          "  kind: github",
+          "  repo: acme/widgets",
+          `  api_key: $${CRED_ENV_VAR}`,
+          "agent: 5",
+          "---",
+          BODY,
+          "",
+        ].join("\n");
+        yield* fs.writeFileString(path, malformed);
+
+        const outcome = yield* Effect.gen(function* () {
+          const wf = yield* WorkflowFile;
+          return yield* wf
+            .applyPatch({ agent: { max_turns: 7 } }, () => Effect.void)
+            .pipe(Effect.match({ onFailure: (e) => e, onSuccess: () => "wrote" as const }));
+        }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+        // A typed, recoverable failure (SettingsRejected) — NOT a die. The handler maps it to 400.
+        expect(outcome).not.toBe("wrote");
+        expect((outcome as { _tag?: string })._tag).toBe("SettingsRejected");
+        const after = yield* fs.readFileString(path);
+        expect(after).toBe(malformed); // byte-identical — nothing was written.
+      }).pipe(Effect.provide(NodeContext.layer)),
+  );
 });
 
 const isDispatched =

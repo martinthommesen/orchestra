@@ -263,7 +263,15 @@ export const WorkflowFileLive = (
             // `keepSourceTokens` links each node to its CST token so we can rewrite a single
             // scalar's bytes without re-serializing its neighbours.
             const doc = parseDocument(frontMatter, { keepSourceTokens: true });
-            const { sets, deletes } = collectEdits(patch);
+            const { sets, deletes: requestedDeletes } = collectEdits(patch);
+
+            // Clearing a key that is already absent (e.g. `budget.max_total_tokens: null` when
+            // WORKFLOW.md has no `budget:` block — the default shipped state) is a clean no-op,
+            // NOT an error. yaml's `deleteIn` throws "Expected YAML collection" when an
+            // ancestor is missing, which would surface as an uncaught defect (HTTP 500). Drop
+            // already-absent deletes up front: an empty `deletes` keeps the byte-verbatim path,
+            // so an absent-clear leaves the file byte-identical.
+            const deletes = requestedDeletes.filter((path) => doc.hasIn([...path]));
 
             // Prefer the byte-verbatim path: it applies iff every edit is a scalar value
             // landing on a key that already exists as a scalar, and nothing structural
@@ -291,18 +299,29 @@ export const WorkflowFileLive = (
               // Structural edits (delete / map / absent key) — best-effort: re-serialize via
               // the Document model with flow padding off so `[orchestra]` arrays don't gain
               // `[ orchestra ]` padding. Untouched comment alignment may normalize here.
-              for (const edit of sets) doc.setIn([...edit.path], edit.value);
-              for (const path of deletes) {
-                doc.deleteIn([...path]);
-                // Drop a now-empty parent map so a cleared ceiling leaves no dangling
-                // `budget: {}`, not the whole block re-indented.
-                if (path.length > 1) {
-                  const parentPath = path.slice(0, -1);
-                  const parent = doc.getIn([...parentPath], true);
-                  if (isMap(parent) && parent.items.length === 0) doc.deleteIn([...parentPath]);
-                }
-              }
-              newFrontMatter = doc.toString({ flowCollectionPadding: false });
+              // yaml's `setIn`/`deleteIn` throw synchronously when an intermediate key is the
+              // wrong shape (e.g. a hand-edited `agent: 5` scalar where a map is expected);
+              // catch that as a typed rejection (→ 400) instead of an uncaught defect (→ 500).
+              newFrontMatter = yield* Effect.try({
+                try: () => {
+                  for (const edit of sets) doc.setIn([...edit.path], edit.value);
+                  for (const path of deletes) {
+                    doc.deleteIn([...path]);
+                    // Drop a now-empty parent map so a cleared ceiling leaves no dangling
+                    // `budget: {}`, not the whole block re-indented.
+                    if (path.length > 1) {
+                      const parentPath = path.slice(0, -1);
+                      const parent = doc.getIn([...parentPath], true);
+                      if (isMap(parent) && parent.items.length === 0) doc.deleteIn([...parentPath]);
+                    }
+                  }
+                  return doc.toString({ flowCollectionPadding: false });
+                },
+                catch: (e) =>
+                  new SettingsRejected({
+                    message: `cannot apply settings patch to WORKFLOW.md: ${errorMessage(e)}`,
+                  }),
+              });
             }
 
             newFrontMatter = newFrontMatter

@@ -55,6 +55,12 @@ describe("derivePriority", () => {
   it("takes the first priority label encountered", () => {
     expect(derivePriority(["p3", "priority:1"])).toBe(3);
   });
+  it("returns null for a priority that overflows the safe-integer range (DEF-005)", () => {
+    // An author-controlled label like `p99999999999999999999` parses to 1e20, which the
+    // Issue schema's `Schema.Int` rejects — degrade to null rather than letting `Issue.make`
+    // throw an uncaught defect that crashes the poll tick.
+    expect(derivePriority(["p99999999999999999999"])).toBeNull();
+  });
 });
 
 describe("deriveBlockedBy", () => {
@@ -139,6 +145,22 @@ describe("toIssue", () => {
     expect(issue.blocked_by).toEqual([]);
     expect(issue.created_at).toBeNull();
     expect(issue.updated_at).toBeNull();
+  });
+
+  it("degrades a non-parseable timestamp to null instead of dying (DEF-005)", () => {
+    // A garbage timestamp makes Schema.Date reject and Issue.make die (an uncaught defect
+    // Effect.either does NOT catch), crashing the poll tick. It must map to null instead.
+    const issue = toIssue(
+      payload({ created_at: "garbage-date", updated_at: "also-not-a-date" }),
+      config(),
+    );
+    expect(issue.created_at).toBeNull();
+    expect(issue.updated_at).toBeNull();
+  });
+
+  it("degrades an out-of-range priority label to null instead of dying (DEF-005)", () => {
+    const issue = toIssue(payload({ labels: ["p99999999999999999999"] }), config());
+    expect(issue.priority).toBeNull();
   });
 });
 

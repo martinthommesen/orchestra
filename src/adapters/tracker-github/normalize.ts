@@ -67,7 +67,12 @@ export const derivePriority = (labels: ReadonlyArray<string>): number | null => 
   for (const label of labels) {
     const m = PRIORITY_LABEL.exec(label.trim());
     if (m?.[1] !== undefined) {
-      return Number.parseInt(m[1], 10);
+      const n = Number.parseInt(m[1], 10);
+      // An author-controlled label like `p99999999999999999999` overflows the safe-integer
+      // range; the `Issue` schema's `Schema.Int` rejects it, which would turn `Issue.make`
+      // into an uncaught defect (Die) that crashes the whole poll tick. Treat an
+      // out-of-range priority as absent so one malformed issue degrades gracefully.
+      return Number.isSafeInteger(n) ? n : null;
     }
   }
   return null;
@@ -140,8 +145,17 @@ export const deriveState = (p: GitHubIssuePayload, config: ServiceConfig): strin
   return config.tracker.active_states[0] ?? "Todo";
 };
 
-const toDate = (iso: string | null | undefined): Date | null =>
-  iso === null || iso === undefined ? null : new Date(iso);
+const toDate = (iso: string | null | undefined): Date | null => {
+  if (iso === null || iso === undefined) {
+    return null;
+  }
+  // A non-parseable timestamp yields an `Invalid Date`, which the `Issue` schema's
+  // `Schema.Date` rejects — turning `Issue.make` into an uncaught defect (Die) that would
+  // crash the poll tick instead of degrading. Map an unparseable date to `null` (the field
+  // is already `NullOr(Date)`), so one malformed payload can't take down polling.
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
 
 /** Normalize a full GitHub issue payload into the domain {@link Issue}. */
 export const toIssue = (p: GitHubIssuePayload, config: ServiceConfig): Issue => {
