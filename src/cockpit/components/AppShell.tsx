@@ -3,22 +3,14 @@ import { ROUTE_KEY, ROUTE_LABELS, ROUTES, type Route, routeHref } from "../route
 
 /**
  * App shell (#68) — the persistent nav frame around every view. Renders the four nav targets
- * (Fleet · Kanban · Events · Settings) as real `<a href="#/route">` links (so copy-link, open-in-
- * new-tab, and modified clicks behave natively), marks the active one, exposes each link's
- * `g`-prefixed keyboard shortcut (`aria-keyshortcuts` + `title`), and slots the active view into
- * `<main>`. Presentational only: route state is owned above (in `App` via `useRoute`). A plain
- * left-click is intercepted to drive `onNavigate` (instant SPA update); modified/middle clicks
- * fall through to the browser.
+ * (Fleet · Kanban · Events · Settings) as real `<a href="#/route">` hash links, so navigation,
+ * copy-link, open-in-new-tab and middle-click all behave natively: a click updates `location.hash`,
+ * which `useRoute`'s `hashchange` listener turns into the new route (no JS click handler needed).
+ * Marks the active link and exposes each one's `g`-prefixed keyboard shortcut (`aria-keyshortcuts` +
+ * `title`), then slots the active view into `<main>`. Presentational only: route state is owned
+ * above (in `App` via `useRoute`).
  */
-export const AppShell = ({
-  route,
-  onNavigate,
-  children,
-}: {
-  route: Route;
-  onNavigate: (route: Route) => void;
-  children: ReactNode;
-}) => (
+export const AppShell = ({ route, children }: { route: Route; children: ReactNode }) => (
   <div className="app-shell">
     <header className="app-shell__bar">
       <div className="app-shell__brand">
@@ -37,20 +29,6 @@ export const AppShell = ({
             aria-current={r === route ? "page" : undefined}
             aria-keyshortcuts={`g ${ROUTE_KEY[r]}`}
             title={`${ROUTE_LABELS[r]} — press g then ${ROUTE_KEY[r]}`}
-            onClick={(e) => {
-              if (
-                e.defaultPrevented ||
-                e.button !== 0 ||
-                e.metaKey ||
-                e.ctrlKey ||
-                e.shiftKey ||
-                e.altKey
-              ) {
-                return;
-              }
-              e.preventDefault();
-              onNavigate(r);
-            }}
           >
             {ROUTE_LABELS[r]}
           </a>

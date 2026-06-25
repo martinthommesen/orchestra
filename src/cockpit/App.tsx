@@ -29,9 +29,5 @@ const viewFor = (route: Route) => {
 export const App = () => {
   const { route, navigate } = useRoute();
   useKeyboardShortcuts(navigate);
-  return (
-    <AppShell route={route} onNavigate={navigate}>
-      {viewFor(route)}
-    </AppShell>
-  );
+  return <AppShell route={route}>{viewFor(route)}</AppShell>;
 };
