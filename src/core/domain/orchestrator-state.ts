@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { RetryEntry } from "./retry-entry";
 import { RunAttempt } from "./run-attempt";
+import { PositiveInt } from "./workflow";
 
 /** Aggregate token + runtime accounting (spec `codex_totals`, renamed). */
 export const AgentTotals = Schema.Struct({
@@ -16,8 +17,8 @@ export const AbandonedIssue = Schema.Struct({
   issue_id: Schema.String,
   /** Best-effort human ID for status surfaces/logs. */
   identifier: Schema.String,
-  /** Failure count that crossed `agent.max_failure_retries`. */
-  attempts: Schema.Int,
+  /** Failure count that crossed `agent.max_failure_retries` (always ≥ 1: `max + 1`). */
+  attempts: PositiveInt,
   /** Wall-clock instant the issue was parked. */
   abandoned_at: Schema.Date,
   /** Last failure/stall reason that exhausted the retry budget. */
@@ -31,6 +32,15 @@ export type AbandonedIssue = typeof AbandonedIssue.Type;
  * outside this serializable view; sets are modeled as string arrays.
  *
  * Orchestra renames the spec's `codex_*` aggregate fields to `agent_*`.
+ *
+ * Invariant: `running`, `retry_attempts`, and `abandoned` are mutually exclusive —
+ * an issue is in at most one of them at a time, and every key in any of the three is
+ * also present in `claimed` (it holds a concurrency slot). `completed` is disjoint
+ * bookkeeping. The `state.ts` transitions are the only mutators and each preserves
+ * this: dispatch/retry/abandon move the issue between the three maps while keeping the
+ * claim; `markCompleted`/`release` clear all three plus the claim. This is what keeps a
+ * parked (abandoned) issue from being re-dispatched: it stays claimed, so selection
+ * skips it, until tracker reconciliation reaps it.
  */
 export const OrchestratorState = Schema.Struct({
   /** Current effective poll interval (reloadable). */

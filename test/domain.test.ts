@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import type { AbandonedIssueWire } from "../src/cockpit/api/types";
 import {
   AgentEvent,
   Issue,
@@ -8,6 +9,7 @@ import {
   RunAttempt,
   ServiceConfig,
 } from "../src/core/domain";
+import { AbandonedIssue, OrchestratorState } from "../src/core/domain/orchestrator-state";
 
 describe("Issue schema", () => {
   it("decodes a wire issue and normalizes labels to lowercase", () => {
@@ -181,5 +183,63 @@ describe("session_id continuity field (#42 — additive, opt-in resume)", () => 
       error: "boom",
     });
     expect(legacy.session_id).toBeUndefined();
+  });
+});
+
+describe("abandoned-issue parking (failure-retry park)", () => {
+  const baseState = {
+    poll_interval_ms: 30_000,
+    max_concurrent_agents: 4,
+    running: {},
+    claimed: [] as ReadonlyArray<string>,
+    retry_attempts: {},
+    completed: [] as ReadonlyArray<string>,
+    agent_totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, runtime_seconds: 0 },
+    agent_rate_limits: null,
+  };
+
+  it("decodes a pre-upgrade checkpoint with `abandoned` ABSENT → defaults to {}", () => {
+    const decoded = Schema.decodeUnknownSync(OrchestratorState)(baseState);
+    expect(decoded.abandoned).toEqual({});
+  });
+
+  it("decodes and round-trips an abandoned entry (Date ↔ ISO string)", () => {
+    const decoded = Schema.decodeUnknownSync(OrchestratorState)({
+      ...baseState,
+      claimed: ["i1"],
+      abandoned: {
+        i1: {
+          issue_id: "i1",
+          identifier: "ORC-1",
+          attempts: 4,
+          abandoned_at: "2026-06-24T10:00:00.000Z",
+          reason: "boom",
+        },
+      },
+    });
+    expect(decoded.abandoned.i1?.attempts).toBe(4);
+    expect(decoded.abandoned.i1?.abandoned_at).toBeInstanceOf(Date);
+    const encoded = Schema.encodeSync(OrchestratorState)(decoded);
+    expect(encoded.abandoned?.i1?.abandoned_at).toBe("2026-06-24T10:00:00.000Z");
+  });
+
+  it("rejects a non-positive `attempts` (always ≥ 1 = max_failure_retries + 1)", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(AbandonedIssue)({
+        issue_id: "i1",
+        identifier: "ORC-1",
+        attempts: 0,
+        abandoned_at: "2026-06-24T10:00:00.000Z",
+        reason: "boom",
+      }),
+    ).toThrow();
+  });
+
+  it("AbandonedIssueWire mirrors the AbandonedIssue ENCODED shape (compile-time bridge)", () => {
+    // The browser wire mirror is hand-kept and Effect-free on purpose; this assignment stops
+    // compiling if it drifts structurally from the schema's JSON-over-HTTP shape.
+    type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+    const bridge: Exact<AbandonedIssueWire, typeof AbandonedIssue.Encoded> = true;
+    expect(bridge).toBe(true);
   });
 });

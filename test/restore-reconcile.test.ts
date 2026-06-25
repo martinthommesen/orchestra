@@ -16,6 +16,7 @@ import { CommandBusLive } from "../src/core/orchestrator/command";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";
 import {
+  abandon,
   initialState,
   OrchestratorStore,
   setRetry,
@@ -322,6 +323,93 @@ describe("restore + reconcile + retry re-arm on boot (#41)", () => {
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));
     }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
+  it.scoped(
+    "restored ACTIVE parked issue → stays claimed, NOT dispatched; reaped when terminal",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-restore-" });
+        const def = buildDurableDef(dir);
+
+        // Checkpoint: i1 was parked (failure-retry cap hit) and is still claimed/active.
+        const seeded: OrchestratorState = abandon(initialState(def.config), {
+          issue_id: "i1",
+          identifier: "ORC-1",
+          attempts: 4,
+          abandoned_at: new Date(0),
+          reason: "exhausted retries",
+        });
+        yield* seedCheckpoint(def.config, seeded);
+
+        const tracker = yield* makeFakeTracker({
+          candidates: [],
+          states: [makeStateRef("i1", "In Progress")], // still active → reconcile leaves it parked.
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(dir);
+        const obs = yield* makeRecordingObserver();
+
+        const env = Layer.mergeAll(
+          tracker.layer,
+          runner.layer,
+          wsm.layer,
+          obs.layer,
+          ClockLive,
+          layerDurableOrchestratorStore(def.config),
+          RecentCompletionsLive,
+          RestoreStatusLive,
+          ControlStatusLive,
+          LiveBudgetLive(def.config.budget),
+          CommandBusLive,
+        );
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          const store = yield* OrchestratorStore;
+
+          // Restore must NOT count the parked issue as an orphan or a re-armed retry.
+          const restored = yield* waitFor(obs.queue, (o) => o._tag === "RestoredAfterRestart");
+          if (restored._tag === "RestoredAfterRestart") {
+            expect(restored.orphanedRunningConverted).toBe(0);
+            expect(restored.reArmedRetries).toBe(0);
+          }
+
+          // First tick: the parked issue is active, so reconcile leaves it — no dispatch.
+          const firstTick = yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+          if (firstTick._tag === "TickEnd") {
+            expect(firstTick.dispatched).not.toContain("i1");
+          }
+          yield* TestClock.adjust(Duration.millis(5));
+          const parked = yield* store.get;
+          expect(parked.abandoned.i1?.attempts).toBe(4);
+          expect(parked.claimed).toContain("i1");
+          expect(parked.completed).not.toContain("i1");
+
+          // The tracker flips terminal → next tick reaps the parked issue exactly once.
+          yield* tracker.control.setStateOf("i1", "Done");
+          yield* TestClock.adjust(Duration.millis(30_000));
+          const killed = yield* waitFor(
+            obs.queue,
+            (o) => o._tag === "WorkerKilled" && o.issueId === "i1",
+          );
+          if (killed._tag === "WorkerKilled") {
+            expect(killed.reason).toBe("terminal");
+          }
+
+          const reaped = yield* store.get;
+          expect(reaped.completed).toContain("i1");
+          expect(reaped.abandoned.i1).toBeUndefined();
+          expect(reaped.claimed).not.toContain("i1");
+
+          // The parked issue is inert: the agent runner was never invoked for it.
+          const runs = yield* runner.control.runs;
+          expect(runs.filter((r) => r.issueId === "i1")).toHaveLength(0);
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }).pipe(Effect.provide(NodeContext.layer)),
   );
 
   it.scoped("pending retry already past-due → re-armed from WALL-CLOCK, fires immediately", () =>

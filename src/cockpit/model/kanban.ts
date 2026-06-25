@@ -5,7 +5,7 @@ import { badgeForPhase, badgeOf, type StatusBadgeVM } from "./fleet";
 import { attemptLabel, formatDueAt, formatElapsed, formatRelative } from "./format";
 
 /**
- * Sprint 6 / #70 — the pure Kanban derivation. Projects a `SnapshotWire` into four ordered
+ * Sprint 6 / #70 — the pure Kanban derivation. Projects a `SnapshotWire` into five ordered
  * columns (Claimed → Running → Retrying → Abandoned → Completed) of render-ready cards. Pure +
  * unit-tested so the React board stays presentational and never touches the snapshot shape directly.
  *

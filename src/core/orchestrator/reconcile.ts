@@ -66,6 +66,32 @@ export interface ReconcileInput {
   readonly terminalStates: ReadonlySet<string>;
 }
 
+/**
+ * Tracker-only reconciliation for a slot-holding issue that has no worker and no stall clock
+ * (a retry/continuation backoff window, or a parked/abandoned issue): terminal → kill + clean,
+ * vanished/other → release. Active returns `null` (no action) so the pending retry fires as
+ * planned or the exhausted issue stays parked/claimed.
+ */
+const classifyTrackerOnly = (
+  issueId: string,
+  refreshed: ReadonlyMap<string, IssueStateRef>,
+  activeStates: ReadonlySet<string>,
+  terminalStates: ReadonlySet<string>,
+): ReconcileAction | null => {
+  const ref = refreshed.get(issueId);
+  if (ref === undefined) {
+    return { _tag: "NeitherKill", issueId };
+  }
+  const state = normalizeState(ref.state);
+  if (terminalStates.has(state)) {
+    return { _tag: "TerminalKill", issueId };
+  }
+  if (!activeStates.has(state)) {
+    return { _tag: "NeitherKill", issueId };
+  }
+  return null;
+};
+
 /** Decide the reconciliation actions for one tick (SPEC §8.5). */
 export const planReconciliation = (input: ReconcileInput): ReadonlyArray<ReconcileAction> => {
   const actions: ReconcileAction[] = [];
@@ -93,37 +119,20 @@ export const planReconciliation = (input: ReconcileInput): ReadonlyArray<Reconci
       actions.push({ _tag: "NeitherKill", issueId: worker.issueId });
     }
   }
-  // (C) Retrying issues: tracker-state only (no stall, no UpdateActive — the pending
-  // retry is left untouched while the issue stays active). A refresh failure leaves them
-  // alone so the backoff can still fire.
+  // (C) Slot-holding issues with no worker — retry/continuation backoff windows and parked
+  // (abandoned) issues — reconcile by tracker state only (see classifyTrackerOnly). A refresh
+  // failure leaves them all untouched so a pending backoff can still fire (bug #17).
   if (input.refreshed !== null) {
-    for (const retrying of input.retrying ?? []) {
-      const ref = input.refreshed.get(retrying.issueId);
-      if (ref === undefined) {
-        actions.push({ _tag: "NeitherKill", issueId: retrying.issueId });
-        continue;
+    for (const view of [...(input.retrying ?? []), ...(input.abandoned ?? [])]) {
+      const action = classifyTrackerOnly(
+        view.issueId,
+        input.refreshed,
+        input.activeStates,
+        input.terminalStates,
+      );
+      if (action !== null) {
+        actions.push(action);
       }
-      const state = normalizeState(ref.state);
-      if (input.terminalStates.has(state)) {
-        actions.push({ _tag: "TerminalKill", issueId: retrying.issueId });
-      } else if (!input.activeStates.has(state)) {
-        actions.push({ _tag: "NeitherKill", issueId: retrying.issueId });
-      }
-      // active → no action: let the scheduled retry/continuation fire as planned.
-    }
-    for (const abandoned of input.abandoned ?? []) {
-      const ref = input.refreshed.get(abandoned.issueId);
-      if (ref === undefined) {
-        actions.push({ _tag: "NeitherKill", issueId: abandoned.issueId });
-        continue;
-      }
-      const state = normalizeState(ref.state);
-      if (input.terminalStates.has(state)) {
-        actions.push({ _tag: "TerminalKill", issueId: abandoned.issueId });
-      } else if (!input.activeStates.has(state)) {
-        actions.push({ _tag: "NeitherKill", issueId: abandoned.issueId });
-      }
-      // active → no action: keep the exhausted issue parked/claimed.
     }
   }
   return actions;
