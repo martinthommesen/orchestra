@@ -122,6 +122,37 @@ describe("cockpit API client (#67)", () => {
     });
   });
 
+  it("preserves a server error body that is JSON without a `message` field (DEF-007)", async () => {
+    // Before the fix, valid JSON lacking a string `message` (e.g. `{"error":"..."}`) silently
+    // fell through to the generic "request failed with status 400", dropping the server's
+    // actual diagnostic. The raw body must be surfaced instead.
+    const { fetch } = fakeFetch(() =>
+      errorResponse(400, JSON.stringify({ error: "the real reason" })),
+    );
+    const client = createClient({ token: "t", fetch });
+
+    await expect(client.resume()).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+      code: "bad_request",
+      message: '{"error":"the real reason"}',
+    });
+  });
+
+  it("maps 404 to not_found and parses an empty 2xx body as undefined (ORC-F026)", async () => {
+    const notFound = fakeFetch(() => errorResponse(404, ""));
+    const c1 = createClient({ token: "t", fetch: notFound.fetch });
+    await expect(c1.resume()).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      code: "not_found",
+    });
+
+    const empty = fakeFetch(() => ({ ok: true, status: 200, text: () => Promise.resolve("") }));
+    const c2 = createClient({ token: "t", fetch: empty.fetch });
+    await expect(c2.getState()).resolves.toBeUndefined();
+  });
+
   it("surfaces a network failure as an ApiError(0, network)", async () => {
     const fetch: FetchLike = () => Promise.reject(new Error("connection refused"));
     const client = createClient({ token: "t", fetch });

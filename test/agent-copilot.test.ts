@@ -74,6 +74,36 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
     }
   });
 
+  it("treats a present-but-non-numeric exitCode as a failure, not success (DEF-006)", () => {
+    // A `result` whose exitCode is the STRING "5" must NOT be coerced to a clean turn — that
+    // would mask a failed turn and the runner's sawCompleted latch would then also swallow
+    // the process's own non-zero exit.
+    const r = mapCopilotLine(JSON.stringify({ type: "result", exitCode: "5" }), NOW);
+    expect(r.terminal?._tag).toBe("failed");
+    if (r.terminal?._tag === "failed") {
+      expect(r.terminal.error._tag).toBe("AgentProcessExit");
+    }
+  });
+
+  it("keeps the completed default for a result with no exitCode field", () => {
+    const r = mapCopilotLine(JSON.stringify({ type: "result", usage: { outputTokens: 1 } }), NOW);
+    expect(r.terminal?._tag).toBe("completed");
+  });
+
+  it("drops an overflowing duration parsed from a raw result line (DEF-002)", () => {
+    // JSON.parse turns an overflowing literal (1e400) into Infinity; left in usage it would
+    // make runtime_seconds non-finite and corrupt the durable checkpoint on the next boot.
+    const r = mapCopilotLine(
+      '{"type":"result","exitCode":0,"usage":{"totalApiDurationMs":1e400,"outputTokens":4}}',
+      NOW,
+    );
+    expect(r.terminal?._tag).toBe("completed");
+    if (r.terminal?._tag === "completed") {
+      expect(r.terminal.usage?.total_api_duration_ms).toBeUndefined();
+      expect(r.terminal.usage?.output_tokens).toBe(4);
+    }
+  });
+
   it("maps session.error to TurnFailed + failed terminal", () => {
     const r = mapCopilotLine(
       JSON.stringify({ type: "session.error", data: { message: "boom" } }),
@@ -122,6 +152,23 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
       });
     }
   });
+
+  it("falls back to the injected `now` for a missing or invalid timestamp (never throws)", () => {
+    const missing = mapCopilotLine(
+      JSON.stringify({ type: "assistant.message", data: { content: "hi" } }),
+      NOW,
+    );
+    expect(missing.events[0]?.timestamp).toEqual(NOW);
+    const invalid = mapCopilotLine(
+      JSON.stringify({
+        type: "assistant.message",
+        timestamp: "not-a-date",
+        data: { content: "hi" },
+      }),
+      NOW,
+    );
+    expect(invalid.events[0]?.timestamp).toEqual(NOW);
+  });
 });
 
 describe("mapUsage", () => {
@@ -145,6 +192,17 @@ describe("mapUsage", () => {
   it("returns undefined when nothing usable is present", () => {
     expect(mapUsage({})).toBeUndefined();
     expect(mapUsage(null)).toBeUndefined();
+  });
+  it("drops non-finite numeric fields so they can't corrupt the durable checkpoint (DEF-002)", () => {
+    // A non-finite measurement (Infinity/NaN) is meaningless and, if it reached
+    // agent_totals.runtime_seconds, JSON.stringify would emit `null` and the next-boot
+    // re-decode would discard the whole state file. Drop it like any non-number.
+    const u = mapUsage({
+      totalApiDurationMs: Number.POSITIVE_INFINITY,
+      outputTokens: Number.NaN,
+      totalTokens: 7,
+    });
+    expect(u).toEqual({ total_tokens: 7 });
   });
 });
 

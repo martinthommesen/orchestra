@@ -3,6 +3,7 @@ import { Effect, Layer, Option } from "effect";
 import type { Issue, IssueStateRef } from "../../core/domain/issue";
 import type { ServiceConfig } from "../../core/domain/workflow";
 import {
+  MissingTrackerRepo,
   TrackerApiRequest,
   TrackerApiStatus,
   type TrackerError,
@@ -21,6 +22,13 @@ import { type GitHubIssuePayload, isPullRequest, toIssue, toStateRef } from "./n
 
 /** Parse `owner/name` from `tracker.repo`. */
 const parseRepo = (repo: string): Effect.Effect<{ owner: string; repo: string }, TrackerError> => {
+  // An absent/blank repo (call sites pass `config.tracker.repo ?? ""`) is specifically the
+  // "missing required slug" condition — report it as such rather than as a malformed payload.
+  if (repo.trim() === "") {
+    return Effect.fail(
+      new MissingTrackerRepo({ message: "tracker.repo is required (owner/name)" }),
+    );
+  }
   const parts = repo.split("/");
   if (parts.length !== 2 || parts[0] === "" || parts[1] === "") {
     return Effect.fail(new TrackerUnknownPayload({ message: "tracker.repo must be 'owner/name'" }));
