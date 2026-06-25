@@ -130,4 +130,14 @@ describe("toFleetView", () => {
     expect(vm.totals.runtimeLabel).toBe("1m 05s");
     expect(vm.totals.totalTokens).toBe(30);
   });
+
+  it("summarizes an unserializable rate_limits payload without throwing", () => {
+    // A cyclic (non-JSON-serializable) rate_limits object must degrade to a present marker,
+    // never crash the Fleet derivation (the summarizeRateLimits catch branch).
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const vm = toFleetView(baseSnapshot({ rate_limits: cyclic }), NOW);
+    expect(vm.rateLimits.available).toBe(true);
+    expect(vm.rateLimits.summary).toContain("unserializable");
+  });
 });

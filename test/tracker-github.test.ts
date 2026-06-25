@@ -1,6 +1,10 @@
-import { Schema } from "effect";
+import { Effect, Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeOctokit, silentOctokitLog } from "../src/adapters/tracker-github/github-tracker";
+import {
+  layerGitHubTracker,
+  makeOctokit,
+  silentOctokitLog,
+} from "../src/adapters/tracker-github/github-tracker";
 import {
   deriveBlockedBy,
   derivePriority,
@@ -12,6 +16,7 @@ import {
   toStateRef,
 } from "../src/adapters/tracker-github/normalize";
 import { ServiceConfig } from "../src/core/domain/workflow";
+import { IssueTracker } from "../src/core/ports/issue-tracker";
 
 const config = (tracker: Record<string, unknown> = {}): ServiceConfig =>
   Schema.decodeUnknownSync(ServiceConfig)({
@@ -180,6 +185,30 @@ describe("toStateRef", () => {
       config(),
     );
     expect(ref.state).toBe("Closed");
+  });
+});
+
+describe("parseRepo error classification (via the tracker layer, no network)", () => {
+  // fetchCandidateIssues parses tracker.repo BEFORE any Octokit call, so a bad repo fails with a
+  // typed TrackerError without touching the network. This pins the DEF-008 classification.
+  const run = (repo: string) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const t = yield* IssueTracker;
+        return yield* Effect.either(t.fetchCandidateIssues());
+      }).pipe(Effect.provide(layerGitHubTracker(config({ repo })))),
+    );
+
+  it("a blank repo fails with MissingTrackerRepo (DEF-008), not TrackerUnknownPayload", async () => {
+    const e = await run("   ");
+    expect(Either.isLeft(e)).toBe(true);
+    if (Either.isLeft(e)) expect(e.left._tag).toBe("MissingTrackerRepo");
+  });
+
+  it("a malformed slug (no '/') fails with TrackerUnknownPayload", async () => {
+    const e = await run("not-a-slug");
+    expect(Either.isLeft(e)).toBe(true);
+    if (Either.isLeft(e)) expect(e.left._tag).toBe("TrackerUnknownPayload");
   });
 });
 

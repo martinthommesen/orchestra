@@ -139,6 +139,20 @@ describe("cockpit API client (#67)", () => {
     });
   });
 
+  it("maps 404 to not_found and parses an empty 2xx body as undefined (ORC-F026)", async () => {
+    const notFound = fakeFetch(() => errorResponse(404, ""));
+    const c1 = createClient({ token: "t", fetch: notFound.fetch });
+    await expect(c1.resume()).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      code: "not_found",
+    });
+
+    const empty = fakeFetch(() => ({ ok: true, status: 200, text: () => Promise.resolve("") }));
+    const c2 = createClient({ token: "t", fetch: empty.fetch });
+    await expect(c2.getState()).resolves.toBeUndefined();
+  });
+
   it("surfaces a network failure as an ApiError(0, network)", async () => {
     const fetch: FetchLike = () => Promise.reject(new Error("connection refused"));
     const client = createClient({ token: "t", fetch });

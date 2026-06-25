@@ -152,6 +152,23 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
       });
     }
   });
+
+  it("falls back to the injected `now` for a missing or invalid timestamp (never throws)", () => {
+    const missing = mapCopilotLine(
+      JSON.stringify({ type: "assistant.message", data: { content: "hi" } }),
+      NOW,
+    );
+    expect(missing.events[0]?.timestamp).toEqual(NOW);
+    const invalid = mapCopilotLine(
+      JSON.stringify({
+        type: "assistant.message",
+        timestamp: "not-a-date",
+        data: { content: "hi" },
+      }),
+      NOW,
+    );
+    expect(invalid.events[0]?.timestamp).toEqual(NOW);
+  });
 });
 
 describe("mapUsage", () => {

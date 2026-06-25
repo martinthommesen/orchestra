@@ -103,4 +103,37 @@ describe("Poller (non-overlapping, last-good-on-error)", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(calls).toBe(after);
   });
+
+  it("ignores an in-flight result that settles after stop() (no onChange, no schedule)", async () => {
+    // A fetch is in flight when stop() is called; its late resolution must not emit a state
+    // change or schedule another poll (clean teardown — the stopped guard in applySuccess).
+    const { states, onChange } = collect<number>();
+    const poller = new Poller<number>({
+      fetch: () => new Promise<number>((resolve) => setTimeout(() => resolve(99), 50)),
+      intervalMs: 100,
+      onChange,
+    });
+    poller.start();
+    poller.stop(); // stop while the first fetch is still pending
+    await vi.advanceTimersByTimeAsync(50); // let the in-flight fetch resolve
+    expect(states).toHaveLength(0); // late result ignored — UI never updated post-stop
+    expect(poller.getState().connection).toBe("connecting");
+  });
+
+  it("start() is idempotent: a second start() does not launch a second poll loop", async () => {
+    let calls = 0;
+    const poller = new Poller<number>({
+      fetch: () => {
+        calls += 1;
+        return Promise.resolve(1);
+      },
+      intervalMs: 100,
+      onChange: () => {},
+    });
+    poller.start();
+    poller.start(); // second start must be a no-op (started guard)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1); // exactly one poll loop running
+    poller.stop();
+  });
 });
