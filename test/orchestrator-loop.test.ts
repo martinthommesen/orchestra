@@ -236,12 +236,13 @@ describe("orchestrator loop (fakes + TestClock)", () => {
         );
         yield* TestClock.adjust(Duration.millis(10_000));
         yield* waitFor(obs.queue, isDispatched("i1"));
+        // Cleanup is now awaited before parking, so WorkspaceCleaned precedes WorkerAbandoned.
+        yield* waitFor(obs.queue, (o) => o._tag === "WorkspaceCleaned" && o.issueId === "i1");
         const abandoned = yield* waitFor(
           obs.queue,
           (o) => o._tag === "WorkerAbandoned" && o.issueId === "i1",
         );
         expect(abandoned._tag === "WorkerAbandoned" && abandoned.attempts).toBe(2);
-        yield* waitFor(obs.queue, (o) => o._tag === "WorkspaceCleaned" && o.issueId === "i1");
 
         const parked = yield* store.get;
         expect(parked.running.i1).toBeUndefined();
@@ -257,6 +258,59 @@ describe("orchestrator loop (fakes + TestClock)", () => {
         yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
         const runs = yield* runner.control.runs;
         expect(runs).toHaveLength(2);
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
+  );
+
+  it.scoped("max_failure_retries=0 parks on the FIRST failure (fail-fast, no retry)", () =>
+    Effect.gen(function* () {
+      const issue = makeIssue({ id: "i1", identifier: "ORC-1", state: "Todo" });
+      const tracker = yield* makeFakeTracker({
+        candidates: [issue],
+        states: [makeStateRef("i1", "Todo")],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+      const obs = yield* makeRecordingObserver();
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s1"),
+        { _tag: "fail", error: new TurnFailed({ message: "boom-1" }) },
+      ]);
+      // If the cap were not fail-fast, a retry would dispatch this second script.
+      yield* runner.control.pushScript("i1", [Ev.sessionStarted("s2"), { _tag: "complete" }]);
+
+      const def = buildDef({ maxTurns: 1, maxFailureRetries: 0, intervalMs: 5_000 });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obs.layer,
+      });
+
+      yield* Effect.gen(function* () {
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+        const store = yield* OrchestratorStore;
+
+        yield* waitFor(obs.queue, isDispatched("i1"));
+        const abandoned = yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "WorkerAbandoned" && o.issueId === "i1",
+        );
+        // First (and only) failure: attempts crosses max=0 immediately.
+        expect(abandoned._tag === "WorkerAbandoned" && abandoned.attempts).toBe(1);
+
+        const parked = yield* store.get;
+        expect(parked.abandoned.i1?.reason).toContain("boom-1");
+        expect(parked.claimed).toContain("i1");
+
+        // No retry was ever scheduled, and the second script never runs.
+        yield* drain(obs.queue);
+        yield* TestClock.adjust(Duration.millis(30_000));
+        yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+        const runs = yield* runner.control.runs;
+        expect(runs).toHaveLength(1);
 
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));

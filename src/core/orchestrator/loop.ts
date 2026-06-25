@@ -418,7 +418,12 @@ export const runOrchestrator = (
           const ws = rec.workspace;
           if (ws !== null) {
             rec.workspace = null;
-            yield* cleanupWorkspace(issueId, rec.issue.identifier, ws);
+            // Await the removal BEFORE persisting the parked state. The issue stays claimed
+            // and active, and `AbandonedIssue` carries no workspace_path, so a forked `rm`
+            // that loses the race against the next checkpoint would leak the dir forever
+            // (startup cleanup only reaps terminal issues). Best-effort: a failure logs and
+            // continues — we still park the issue.
+            yield* cleanupWorkspaceEffect(issueId, rec.issue.identifier, ws);
           }
           const wall = yield* clock.currentTimeMillis;
           yield* store.update((s) =>
@@ -481,18 +486,21 @@ export const runOrchestrator = (
         return n;
       };
 
-      const cleanupWorkspace = (issueId: string, identifier: string, ws: Workspace) =>
-        Effect.forkScoped(
-          wsm.removeWorkspace(ws).pipe(
-            Effect.matchCauseEffect({
-              onSuccess: () => observer.emit({ _tag: "WorkspaceCleaned", issueId, identifier }),
-              onFailure: (cause) =>
-                Effect.logWarning(`workspace cleanup failed: ${causeToMessage(cause)}`).pipe(
-                  Effect.annotateLogs({ issue_id: issueId, issue_identifier: identifier }),
-                ),
-            }),
-          ),
+      const cleanupWorkspaceEffect = (issueId: string, identifier: string, ws: Workspace) =>
+        wsm.removeWorkspace(ws).pipe(
+          Effect.matchCauseEffect({
+            onSuccess: () => observer.emit({ _tag: "WorkspaceCleaned", issueId, identifier }),
+            onFailure: (cause) =>
+              Effect.logWarning(`workspace cleanup failed: ${causeToMessage(cause)}`).pipe(
+                Effect.annotateLogs({ issue_id: issueId, issue_identifier: identifier }),
+              ),
+          }),
         );
+
+      /** Fork the removal — terminal/neither reconcile reaps a completed issue, so the tick
+       *  need not block on the `rm`; the issue is already off every map. */
+      const cleanupWorkspace = (issueId: string, identifier: string, ws: Workspace) =>
+        Effect.forkScoped(cleanupWorkspaceEffect(issueId, identifier, ws));
 
       const applyReconcileAction = (
         action: ReconcileAction,
