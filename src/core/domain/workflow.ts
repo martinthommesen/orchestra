@@ -20,6 +20,7 @@ import { Schema } from "effect";
  */
 
 export const PositiveInt = Schema.Int.pipe(Schema.positive());
+export const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 
 /** `tracker` block (SPEC §5.3.1), GitHub-flavored. */
 const TrackerConfig = Schema.Struct({
@@ -76,6 +77,11 @@ export type HooksConfig = typeof HooksConfig.Type;
 const AgentConfig = Schema.Struct({
   max_concurrent_agents: Schema.optionalWith(PositiveInt, { default: () => 10 }),
   max_turns: Schema.optionalWith(PositiveInt, { default: () => 20 }),
+  /**
+   * Failure retries after the initial run. `0` means fail-fast/park immediately; the default
+   * allows a few transient failures without unbounded spend on permanently failing issues.
+   */
+  max_failure_retries: Schema.optionalWith(NonNegativeInt, { default: () => 3 }),
   max_retry_backoff_ms: Schema.optionalWith(PositiveInt, {
     default: () => 300_000,
   }),

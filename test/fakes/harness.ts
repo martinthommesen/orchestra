@@ -31,6 +31,7 @@ export interface DefOptions {
   readonly intervalMs?: number;
   readonly maxConcurrent?: number;
   readonly maxTurns?: number;
+  readonly maxFailureRetries?: number;
   readonly maxRetryBackoffMs?: number;
   readonly perState?: Record<string, number>;
   readonly stallTimeoutMs?: number;
@@ -55,6 +56,7 @@ export const buildDef = (opts: DefOptions = {}): WorkflowDefinition => {
     agent: {
       max_concurrent_agents: opts.maxConcurrent ?? 10,
       max_turns: opts.maxTurns ?? 1,
+      max_failure_retries: opts.maxFailureRetries ?? 3,
       max_retry_backoff_ms: opts.maxRetryBackoffMs ?? 300_000,
       max_concurrent_agents_by_state: opts.perState ?? {},
     },

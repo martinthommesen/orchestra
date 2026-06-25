@@ -4,26 +4,39 @@ import { type ColumnId, type KanbanColumn, toKanban } from "../src/cockpit/model
 
 const NOW = Date.parse("2026-01-01T00:01:00.000Z");
 
-const snap = (over: Partial<SnapshotWire> = {}): SnapshotWire => ({
-  poll_interval_ms: 1000,
-  max_concurrent_agents: 3,
-  counts: { running: 0, retrying: 0, completed: 0, claimed: 0 },
-  running: [],
-  retrying: [],
-  completed: [],
-  recent_completed: [],
-  recent_events: [],
-  totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, runtime_seconds: 0 },
-  rate_limits: null,
-  ...over,
-});
+type SnapshotOverride = Omit<Partial<SnapshotWire>, "counts"> & {
+  readonly counts?: Partial<SnapshotWire["counts"]>;
+};
+
+const snap = (over: SnapshotOverride = {}): SnapshotWire => {
+  const base: SnapshotWire = {
+    poll_interval_ms: 1000,
+    max_concurrent_agents: 3,
+    counts: { running: 0, retrying: 0, abandoned: 0, completed: 0, claimed: 0 },
+    running: [],
+    retrying: [],
+    abandoned: [],
+    completed: [],
+    recent_completed: [],
+    recent_events: [],
+    totals: { input_tokens: 0, output_tokens: 0, total_tokens: 0, runtime_seconds: 0 },
+    rate_limits: null,
+  };
+  return { ...base, ...over, counts: { ...base.counts, ...over.counts } };
+};
 
 const col = (cols: ReadonlyArray<KanbanColumn>, id: ColumnId) => cols.find((c) => c.id === id);
 
 describe("toKanban", () => {
   it("produces the four columns in order", () => {
     const cols = toKanban(snap(), NOW);
-    expect(cols.map((c) => c.id)).toEqual(["claimed", "running", "retrying", "completed"]);
+    expect(cols.map((c) => c.id)).toEqual([
+      "claimed",
+      "running",
+      "retrying",
+      "abandoned",
+      "completed",
+    ]);
   });
 
   it("running cards carry a cancel action with elapsed + attempt detail", () => {
@@ -109,6 +122,29 @@ describe("toKanban", () => {
     expect(completed?.cards[0]?.action).toBeNull();
   });
 
+  it("abandoned cards show exhausted retry attempts without an action", () => {
+    const cols = toKanban(
+      snap({
+        counts: { abandoned: 1, claimed: 1 },
+        abandoned: [
+          {
+            issue_id: "i9",
+            identifier: "ORC-9",
+            attempts: 4,
+            abandoned_at: "2026-01-01T00:00:30.000Z",
+            reason: "permanent failure",
+          },
+        ],
+      }),
+      NOW,
+    );
+    const abandoned = col(cols, "abandoned");
+    const card = abandoned?.cards[0];
+    expect(card?.action).toBeNull();
+    expect(card?.badge.label).toBe("blocked");
+    expect(card?.detail).toBe("#4 · parked 30s ago · permanent failure");
+  });
+
   it("falls back to IDs-only completed when no rich block is sent", () => {
     const cols = toKanban(
       snap({
@@ -122,10 +158,10 @@ describe("toKanban", () => {
     expect(completed?.cards[0]?.detail).toBe("completed");
   });
 
-  it("claimed column is count-only (pending = claimed - running - retrying, clamped ≥ 0)", () => {
+  it("claimed column is count-only (pending = claimed - running - retrying - abandoned)", () => {
     const cols = toKanban(
       snap({
-        counts: { running: 1, retrying: 1, completed: 0, claimed: 4 },
+        counts: { running: 1, retrying: 1, abandoned: 1, completed: 0, claimed: 4 },
         running: [
           {
             issue_id: "i1",
@@ -137,13 +173,22 @@ describe("toKanban", () => {
           },
         ],
         retrying: [{ issue_id: "i2", identifier: "ORC-2", attempt: 1, due_at_ms: 1, error: null }],
+        abandoned: [
+          {
+            issue_id: "i3",
+            identifier: "ORC-3",
+            attempts: 2,
+            abandoned_at: "2026-01-01T00:00:00.000Z",
+            reason: "boom",
+          },
+        ],
       }),
       NOW,
     );
     const claimed = col(cols, "claimed");
     expect(claimed?.countOnly).toBe(true);
     expect(claimed?.cards).toHaveLength(0);
-    expect(claimed?.count).toBe(2); // 4 - 1 - 1
+    expect(claimed?.count).toBe(1); // 4 - 1 - 1 - 1
   });
 
   it("clamps pending-claimed at zero against transient count drift", () => {

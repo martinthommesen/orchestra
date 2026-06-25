@@ -156,6 +156,7 @@ export const makePersistence = (
           completed: String(restored.state.completed.length),
           running: String(Object.keys(restored.state.running).length),
           retrying: String(Object.keys(restored.state.retry_attempts).length),
+          abandoned: String(Object.keys(restored.state.abandoned).length),
         }),
       );
       return Option.some(restored);

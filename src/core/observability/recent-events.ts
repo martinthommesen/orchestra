@@ -104,6 +104,14 @@ export const toEventDraft = (obs: Observation): EventDraft | null => {
         identifier: obs.identifier,
         message: `failed ${obs.identifier}: ${obs.message}`,
       };
+    case "WorkerAbandoned":
+      return {
+        level: "warn",
+        kind: "abandoned",
+        issue_id: obs.issueId,
+        identifier: obs.identifier,
+        message: `parked ${obs.identifier} after ${obs.attempts} failure(s): ${obs.reason}`,
+      };
     case "WorkerKilled":
       return {
         level: "warn",

@@ -96,7 +96,7 @@ work**:
 
 `polling.interval_ms`, `agent.max_concurrent_agents`,
 `agent.max_concurrent_agents_by_state`, `agent.max_turns`,
-`agent.max_retry_backoff_ms`, `budget.max_total_tokens`.
+`agent.max_failure_retries`, `agent.max_retry_backoff_ms`, `budget.max_total_tokens`.
 
 Everything else is rejected. Secrets (`$VAR` indirection, `tracker.api_key`) are
 **never** read, returned, or serialized — the write operates on the raw front matter

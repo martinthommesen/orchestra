@@ -11,6 +11,20 @@ export const AgentTotals = Schema.Struct({
 }).annotations({ identifier: "AgentTotals" });
 export type AgentTotals = typeof AgentTotals.Type;
 
+/** An active issue parked after exhausting failure retries. */
+export const AbandonedIssue = Schema.Struct({
+  issue_id: Schema.String,
+  /** Best-effort human ID for status surfaces/logs. */
+  identifier: Schema.String,
+  /** Failure count that crossed `agent.max_failure_retries`. */
+  attempts: Schema.Int,
+  /** Wall-clock instant the issue was parked. */
+  abandoned_at: Schema.Date,
+  /** Last failure/stall reason that exhausted the retry budget. */
+  reason: Schema.String,
+}).annotations({ identifier: "AbandonedIssue" });
+export type AbandonedIssue = typeof AbandonedIssue.Type;
+
 /**
  * The single authoritative in-memory state owned by the orchestrator fiber
  * (SPEC §4.1.8). Runtime-only handles (worker fibers, retry timer handles) live
@@ -29,6 +43,14 @@ export const OrchestratorState = Schema.Struct({
   claimed: Schema.Array(Schema.String),
   /** `issue_id -> RetryEntry`. */
   retry_attempts: Schema.Record({ key: Schema.String, value: RetryEntry }),
+  /**
+   * `issue_id -> AbandonedIssue`. Exhausted failures stay claimed here so a still-active
+   * tracker issue cannot be picked every poll and burn infinite retries. Optional default
+   * keeps existing checkpoints decodable.
+   */
+  abandoned: Schema.optionalWith(Schema.Record({ key: Schema.String, value: AbandonedIssue }), {
+    default: () => ({}),
+  }),
   /** Issue IDs completed (bookkeeping only — does NOT gate dispatch). */
   completed: Schema.Array(Schema.String),
   agent_totals: AgentTotals,

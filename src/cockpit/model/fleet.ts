@@ -94,6 +94,7 @@ export interface FleetViewModel {
   readonly counts: {
     readonly running: number;
     readonly retrying: number;
+    readonly abandoned: number;
     readonly completed: number;
     readonly claimed: number;
   };

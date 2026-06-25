@@ -16,9 +16,10 @@ const ev = (over: Partial<EventEnvelopeWire>): EventEnvelopeWire => ({
 const snap = (events: ReadonlyArray<EventEnvelopeWire>): SnapshotWire => ({
   poll_interval_ms: 1000,
   max_concurrent_agents: 1,
-  counts: { running: 0, retrying: 0, completed: 0, claimed: 0 },
+  counts: { running: 0, retrying: 0, abandoned: 0, completed: 0, claimed: 0 },
   running: [],
   retrying: [],
+  abandoned: [],
   completed: [],
   recent_completed: [],
   recent_events: events,

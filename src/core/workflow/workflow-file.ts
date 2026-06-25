@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { FileSystem } from "@effect/platform";
 import { Context, Effect, Layer, Schema } from "effect";
 import { CST, isMap, isScalar, parseDocument } from "yaml";
-import { PositiveInt, ServiceConfig } from "../domain/workflow";
+import { NonNegativeInt, PositiveInt, ServiceConfig } from "../domain/workflow";
 import { type LoadWorkflowError, SettingsRejected } from "../errors";
 import { errorMessage } from "../util/error";
 import { loadWorkflow } from "./loader";
@@ -15,8 +15,9 @@ import { loadWorkflow } from "./loader";
  * `ServiceConfig`) is never read for, sent to, or written by this path.
  *
  * **Surgical-edit guarantee (#73).** The dominant case — changing a scalar value on a key that
- * already exists (`interval_ms`, `max_concurrent_agents`, `max_turns`, `max_retry_backoff_ms`,
- * `budget.max_total_tokens`) — is **fully byte-verbatim**: only the bytes of the edited value
+ * already exists (`interval_ms`, `max_concurrent_agents`, `max_turns`, `max_failure_retries`,
+ * `max_retry_backoff_ms`, `budget.max_total_tokens`) — is **fully byte-verbatim**: only the
+ * bytes of the edited value
  * move. We rewrite just that scalar's CST source token (`CST.setScalarValue`) and re-emit the
  * concrete syntax tree (`CST.stringify`), so trailing-comment alignment, flow-vs-block style,
  * key order, blank lines, and every untouched line are preserved exactly. The rarer
@@ -45,6 +46,7 @@ export const EditableSettings = Schema.Struct({
     max_concurrent_agents: PositiveInt,
     max_concurrent_agents_by_state: Schema.Record({ key: Schema.String, value: PositiveInt }),
     max_turns: PositiveInt,
+    max_failure_retries: NonNegativeInt,
     max_retry_backoff_ms: PositiveInt,
   }),
   budget: Schema.Struct({ max_total_tokens: Schema.NullOr(PositiveInt) }),
@@ -66,6 +68,7 @@ export const SettingsPatch = Schema.Struct({
         Schema.Record({ key: Schema.String, value: PositiveInt }),
       ),
       max_turns: Schema.optional(PositiveInt),
+      max_failure_retries: Schema.optional(NonNegativeInt),
       max_retry_backoff_ms: Schema.optional(PositiveInt),
     }),
   ),
@@ -110,6 +113,7 @@ const project = (c: ServiceConfig): EditableSettings => ({
     max_concurrent_agents: c.agent.max_concurrent_agents,
     max_concurrent_agents_by_state: { ...c.agent.max_concurrent_agents_by_state },
     max_turns: c.agent.max_turns,
+    max_failure_retries: c.agent.max_failure_retries,
     max_retry_backoff_ms: c.agent.max_retry_backoff_ms,
   },
   budget: { max_total_tokens: c.budget.max_total_tokens ?? null },
@@ -168,6 +172,12 @@ const collectEdits = (patch: SettingsPatch): { sets: Edit[]; deletes: ReadonlyAr
   }
   if (patch.agent?.max_turns !== undefined) {
     sets.push({ path: ["agent", "max_turns"], value: patch.agent.max_turns });
+  }
+  if (patch.agent?.max_failure_retries !== undefined) {
+    sets.push({
+      path: ["agent", "max_failure_retries"],
+      value: patch.agent.max_failure_retries,
+    });
   }
   if (patch.agent?.max_retry_backoff_ms !== undefined) {
     sets.push({ path: ["agent", "max_retry_backoff_ms"], value: patch.agent.max_retry_backoff_ms });

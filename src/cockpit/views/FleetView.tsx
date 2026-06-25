@@ -54,6 +54,7 @@ export const FleetView = () => {
       <div className="metric-row">
         <Metric label="Running" value={vm.counts.running} />
         <Metric label="Retrying" value={vm.counts.retrying} />
+        <Metric label="Abandoned" value={vm.counts.abandoned} />
         <Metric label="Completed" value={vm.counts.completed} />
         <Metric label="Claimed" value={vm.counts.claimed} />
         <Metric label="Max agents" value={vm.maxConcurrentAgents} />

@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Ref } from "effect";
 import type { Usage } from "../domain/agent-event";
-import { AgentTotals, OrchestratorState } from "../domain/orchestrator-state";
+import { type AbandonedIssue, AgentTotals, OrchestratorState } from "../domain/orchestrator-state";
 import type { RetryEntry } from "../domain/retry-entry";
 import type { RunAttempt } from "../domain/run-attempt";
 import type { ServiceConfig } from "../domain/workflow";
@@ -32,6 +32,7 @@ export const initialState = (config: ServiceConfig): OrchestratorState =>
     running: {},
     claimed: [],
     retry_attempts: {},
+    abandoned: {},
     completed: [],
     agent_totals: zeroTotals(),
     agent_rate_limits: null,
@@ -67,6 +68,7 @@ export const unclaim = (s: OrchestratorState, id: string): OrchestratorState => 
 export const setRunning = (s: OrchestratorState, attempt: RunAttempt): OrchestratorState => ({
   ...s,
   running: { ...s.running, [attempt.issue_id]: attempt },
+  abandoned: omitKey(s.abandoned, attempt.issue_id),
   claimed: withClaim(s.claimed, attempt.issue_id),
 });
 
@@ -80,6 +82,7 @@ export const clearRunning = (s: OrchestratorState, id: string): OrchestratorStat
 export const setRetry = (s: OrchestratorState, entry: RetryEntry): OrchestratorState => ({
   ...s,
   retry_attempts: { ...s.retry_attempts, [entry.issue_id]: entry },
+  abandoned: omitKey(s.abandoned, entry.issue_id),
   claimed: withClaim(s.claimed, entry.issue_id),
 });
 
@@ -87,6 +90,15 @@ export const setRetry = (s: OrchestratorState, entry: RetryEntry): OrchestratorS
 export const clearRetry = (s: OrchestratorState, id: string): OrchestratorState => ({
   ...s,
   retry_attempts: omitKey(s.retry_attempts, id),
+});
+
+/** Park an issue after exhausting failure retries; it remains claimed until tracker state changes. */
+export const abandon = (s: OrchestratorState, entry: AbandonedIssue): OrchestratorState => ({
+  ...s,
+  running: omitKey(s.running, entry.issue_id),
+  retry_attempts: omitKey(s.retry_attempts, entry.issue_id),
+  abandoned: { ...s.abandoned, [entry.issue_id]: entry },
+  claimed: withClaim(s.claimed, entry.issue_id),
 });
 
 /**
@@ -98,6 +110,7 @@ export const markCompleted = (s: OrchestratorState, id: string): OrchestratorSta
   completed: s.completed.includes(id) ? s.completed : [...s.completed, id],
   running: omitKey(s.running, id),
   retry_attempts: omitKey(s.retry_attempts, id),
+  abandoned: omitKey(s.abandoned, id),
   claimed: withoutItem(s.claimed, id),
 });
 
@@ -106,6 +119,7 @@ export const release = (s: OrchestratorState, id: string): OrchestratorState => 
   ...s,
   running: omitKey(s.running, id),
   retry_attempts: omitKey(s.retry_attempts, id),
+  abandoned: omitKey(s.abandoned, id),
   claimed: withoutItem(s.claimed, id),
 });
 

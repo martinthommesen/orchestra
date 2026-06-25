@@ -10,7 +10,15 @@ import * as Ev from "./fakes/events";
 import { makeFakeAgentRunner } from "./fakes/fake-agent-runner";
 import { makeFakeTracker } from "./fakes/fake-tracker";
 import { makeFakeWorkspaceManager } from "./fakes/fake-workspace-manager";
-import { buildDef, loopLayer, makeIssue, makeStateRef, TEST_ROOT, waitFor } from "./fakes/harness";
+import {
+  buildDef,
+  drain,
+  loopLayer,
+  makeIssue,
+  makeStateRef,
+  TEST_ROOT,
+  waitFor,
+} from "./fakes/harness";
 import { makeRecordingObserver } from "./fakes/recording-observer";
 
 /**
@@ -178,6 +186,77 @@ describe("orchestrator loop (fakes + TestClock)", () => {
         expect(runs).toHaveLength(2);
         expect(runs[1]?.attempt).toBe(1);
         expect(runs[1]?.resumeSessionId).toBeNull();
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
+  );
+
+  it.scoped("failure retry cap parks the issue and prevents re-dispatch burn", () =>
+    Effect.gen(function* () {
+      const issue = makeIssue({ id: "i1", identifier: "ORC-1", state: "Todo" });
+      const tracker = yield* makeFakeTracker({
+        candidates: [issue],
+        states: [makeStateRef("i1", "Todo")],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+      const obs = yield* makeRecordingObserver();
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s1"),
+        { _tag: "fail", error: new TurnFailed({ message: "boom-1" }) },
+      ]);
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s2"),
+        { _tag: "fail", error: new TurnFailed({ message: "boom-2" }) },
+      ]);
+      // If the issue is incorrectly released after the cap, this third script will run.
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s3"),
+        Ev.turnCompleted(),
+        { _tag: "complete" },
+      ]);
+
+      const def = buildDef({ maxTurns: 1, maxFailureRetries: 1, intervalMs: 5_000 });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obs.layer,
+      });
+
+      yield* Effect.gen(function* () {
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+        const store = yield* OrchestratorStore;
+
+        yield* waitFor(obs.queue, isDispatched("i1"));
+        yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "RetryScheduled" && o.issueId === "i1" && o.kind === "failure",
+        );
+        yield* TestClock.adjust(Duration.millis(10_000));
+        yield* waitFor(obs.queue, isDispatched("i1"));
+        const abandoned = yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "WorkerAbandoned" && o.issueId === "i1",
+        );
+        expect(abandoned._tag === "WorkerAbandoned" && abandoned.attempts).toBe(2);
+        yield* waitFor(obs.queue, (o) => o._tag === "WorkspaceCleaned" && o.issueId === "i1");
+
+        const parked = yield* store.get;
+        expect(parked.running.i1).toBeUndefined();
+        expect(parked.retry_attempts.i1).toBeUndefined();
+        expect(parked.abandoned.i1?.reason).toContain("boom-2");
+        expect(parked.claimed).toContain("i1");
+        expect(yield* wsm.control.removed).toContain("ORC-1");
+
+        // The tracker still reports the issue active. A later poll must keep it parked
+        // instead of dispatching the third queued script.
+        yield* drain(obs.queue);
+        yield* TestClock.adjust(Duration.millis(30_000));
+        yield* waitFor(obs.queue, (o) => o._tag === "TickEnd");
+        const runs = yield* runner.control.runs;
+        expect(runs).toHaveLength(2);
 
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(env));

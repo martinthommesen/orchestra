@@ -57,6 +57,7 @@ describe("ServiceConfig schema (front matter defaults, SPEC §6.4)", () => {
     expect(cfg.hooks.timeout_ms).toBe(60_000);
     expect(cfg.agent.max_concurrent_agents).toBe(10);
     expect(cfg.agent.max_turns).toBe(20);
+    expect(cfg.agent.max_failure_retries).toBe(3);
     expect(cfg.agent.max_retry_backoff_ms).toBe(300_000);
     expect(cfg.copilot.command).toBe("copilot");
     expect(cfg.copilot.turn_timeout_ms).toBe(3_600_000);
@@ -77,10 +78,11 @@ describe("ServiceConfig schema (front matter defaults, SPEC §6.4)", () => {
   it("overrides defaults when provided", () => {
     const cfg = Schema.decodeUnknownSync(ServiceConfig)({
       polling: { interval_ms: 5000 },
-      agent: { max_turns: 3 },
+      agent: { max_turns: 3, max_failure_retries: 0 },
     });
     expect(cfg.polling.interval_ms).toBe(5000);
     expect(cfg.agent.max_turns).toBe(3);
+    expect(cfg.agent.max_failure_retries).toBe(0);
   });
 
   it("rejects a non-positive max_turns (SPEC: invalid values fail validation)", () => {

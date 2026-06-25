@@ -6,12 +6,12 @@ import { attemptLabel, formatDueAt, formatElapsed, formatRelative } from "./form
 
 /**
  * Sprint 6 / #70 — the pure Kanban derivation. Projects a `SnapshotWire` into four ordered
- * columns (Claimed → Running → Retrying → Completed) of render-ready cards. Pure + unit-tested so
- * the React board stays presentational and never touches the snapshot shape directly.
+ * columns (Claimed → Running → Retrying → Abandoned → Completed) of render-ready cards. Pure +
+ * unit-tested so the React board stays presentational and never touches the snapshot shape directly.
  *
  * Wire reality: the snapshot does NOT carry the claimed issue IDs (only `counts.claimed`, which is
- * the reserved∪running∪retrying superset). So the Claimed column is count-only — the *pending*
- * (reserved-but-not-yet-running) count, clamped ≥ 0 — while Running/Retrying/Completed carry real
+ * the reserved∪running∪retrying∪abandoned superset). So the Claimed column is count-only — the
+ * *pending* (reserved-but-not-yet-running) count, clamped ≥ 0 — while the other columns carry real
  * per-issue cards. Only Running cards (Cancel) and Retrying cards (Retry-now) are actionable.
  */
 
@@ -19,7 +19,7 @@ const ERROR_MAX = 120;
 
 export type CardAction = "cancel" | "retry";
 
-export type ColumnId = "claimed" | "running" | "retrying" | "completed";
+export type ColumnId = "claimed" | "running" | "retrying" | "abandoned" | "completed";
 
 export interface KanbanCard {
   readonly issueId: string;
@@ -86,6 +86,21 @@ export const toKanban = (s: SnapshotWire, now: number): ReadonlyArray<KanbanColu
     };
   });
 
+  const abandoned: ReadonlyArray<KanbanCard> = s.abandoned.map((a) => ({
+    issueId: a.issue_id,
+    instanceKey: `${a.issue_id}:${a.abandoned_at}`,
+    identifier: a.identifier,
+    badge: badgeOf("blocked"),
+    detail: [
+      `#${a.attempts}`,
+      `parked ${formatRelative(now, a.abandoned_at)}`,
+      truncateOneLine(a.reason, ERROR_MAX),
+    ]
+      .filter((x) => x !== "")
+      .join(" · "),
+    action: null,
+  }));
+
   // Rich completions ride newest-last on the wire — newest-first here. Falls back to the IDs-only
   // `completed` list when the daemon doesn't send the rich block.
   const completed: ReadonlyArray<KanbanCard> =
@@ -107,9 +122,12 @@ export const toKanban = (s: SnapshotWire, now: number): ReadonlyArray<KanbanColu
           action: null,
         }));
 
-  // Claimed superset = reserved ∪ running ∪ retrying; the pending (not-yet-running) count is the
-  // remainder, clamped ≥ 0 against any transient count drift.
-  const pendingClaimed = Math.max(0, s.counts.claimed - s.counts.running - s.counts.retrying);
+  // Claimed superset = reserved ∪ running ∪ retrying ∪ abandoned; the pending
+  // (not-yet-running) count is the remainder, clamped ≥ 0 against transient count drift.
+  const pendingClaimed = Math.max(
+    0,
+    s.counts.claimed - s.counts.running - s.counts.retrying - s.counts.abandoned,
+  );
 
   return [
     { id: "claimed", title: "Claimed", count: pendingClaimed, cards: [], countOnly: true },
@@ -119,6 +137,13 @@ export const toKanban = (s: SnapshotWire, now: number): ReadonlyArray<KanbanColu
       title: "Retrying",
       count: retrying.length,
       cards: retrying,
+      countOnly: false,
+    },
+    {
+      id: "abandoned",
+      title: "Abandoned",
+      count: abandoned.length,
+      cards: abandoned,
       countOnly: false,
     },
     {

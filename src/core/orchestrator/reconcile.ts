@@ -26,6 +26,11 @@ export interface RetryingView {
   readonly issueId: string;
 }
 
+/** A claimed issue parked after exhausting failure retries. */
+export interface AbandonedView {
+  readonly issueId: string;
+}
+
 export type ReconcileAction =
   /** Stall: kill the worker and schedule a failure-backoff retry (SPEC §8.5 A). */
   | { readonly _tag: "StallKill"; readonly issueId: string }
@@ -46,6 +51,12 @@ export interface ReconcileInput {
    * terminal mid-backoff would still fire one more (wasted) dispatch (bug #17).
    */
   readonly retrying?: ReadonlyArray<RetryingView>;
+  /**
+   * Issues parked after exhausting failure retries. They remain claimed while active so the
+   * dispatcher cannot pick them again every poll, but they must still reconcile terminal or
+   * vanished tracker state.
+   */
+  readonly abandoned?: ReadonlyArray<AbandonedView>;
   /** Refreshed tracker states keyed by issue id; `null` means the refresh failed. */
   readonly refreshed: ReadonlyMap<string, IssueStateRef> | null;
   /** Current monotonic-clock ms. */
@@ -99,6 +110,20 @@ export const planReconciliation = (input: ReconcileInput): ReadonlyArray<Reconci
         actions.push({ _tag: "NeitherKill", issueId: retrying.issueId });
       }
       // active → no action: let the scheduled retry/continuation fire as planned.
+    }
+    for (const abandoned of input.abandoned ?? []) {
+      const ref = input.refreshed.get(abandoned.issueId);
+      if (ref === undefined) {
+        actions.push({ _tag: "NeitherKill", issueId: abandoned.issueId });
+        continue;
+      }
+      const state = normalizeState(ref.state);
+      if (input.terminalStates.has(state)) {
+        actions.push({ _tag: "TerminalKill", issueId: abandoned.issueId });
+      } else if (!input.activeStates.has(state)) {
+        actions.push({ _tag: "NeitherKill", issueId: abandoned.issueId });
+      }
+      // active → no action: keep the exhausted issue parked/claimed.
     }
   }
   return actions;

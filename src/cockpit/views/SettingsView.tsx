@@ -138,6 +138,14 @@ export const SettingsView = () => {
               onChange={(v) => patch({ maxTurns: v })}
             />
             <NumberField
+              id="maxFailureRetries"
+              label="Max failure retries"
+              hint="Failed attempts are parked after this many retries; set 0 to fail fast."
+              value={form.maxFailureRetries}
+              error={validation.errors.maxFailureRetries}
+              onChange={(v) => patch({ maxFailureRetries: v })}
+            />
+            <NumberField
               id="maxRetryBackoffMs"
               label="Max retry backoff (ms)"
               hint="Upper bound on the exponential wait between retries of a failed attempt."

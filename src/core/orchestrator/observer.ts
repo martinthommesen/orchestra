@@ -63,6 +63,14 @@ export type Observation =
       readonly identifier: string;
       readonly message: string;
     }
+  | {
+      readonly _tag: "WorkerAbandoned";
+      readonly issueId: string;
+      readonly identifier: string;
+      readonly attempts: number;
+      readonly maxRetries: number;
+      readonly reason: string;
+    }
   | { readonly _tag: "WorkerKilled"; readonly issueId: string; readonly reason: string }
   | { readonly _tag: "WorkspaceCleaned"; readonly issueId: string; readonly identifier: string }
   | {

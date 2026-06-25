@@ -124,7 +124,7 @@ describe("cross-feature: the cockpit view-model resolves a fully-loaded snapshot
     const wire: SnapshotWire = {
       poll_interval_ms: 1000,
       max_concurrent_agents: 4,
-      counts: { running: 1, retrying: 1, completed: 3, claimed: 0 },
+      counts: { running: 1, retrying: 1, abandoned: 0, completed: 3, claimed: 0 },
       running: [
         {
           issue_id: "i1",
@@ -143,6 +143,7 @@ describe("cross-feature: the cockpit view-model resolves a fully-loaded snapshot
       retrying: [
         { issue_id: "i2", identifier: "ORC-2", attempt: 2, due_at_ms: 123456, error: "boom" },
       ],
+      abandoned: [],
       completed: ["a", "b", "c"],
       recent_events: [],
       recent_completed: [],

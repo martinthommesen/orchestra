@@ -46,6 +46,7 @@ const sampleState = (): OrchestratorState => {
     running: {},
     claimed: [],
     retry_attempts: {},
+    abandoned: {},
     completed: ["done-1", "done-2"],
     agent_totals: AgentTotals.make({
       input_tokens: 11,

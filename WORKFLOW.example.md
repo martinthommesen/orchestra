@@ -44,6 +44,7 @@ hooks:
 agent:
   max_concurrent_agents: 3 # global cap on simultaneous Copilot sessions
   max_turns: 10 # max agent turns per issue
+  max_failure_retries: 3 # max retries after failed attempts before parking the issue
   max_retry_backoff_ms: 300000 # cap on exponential retry backoff (5 min)
   # max_concurrent_agents_by_state:   # optional per-state caps (keys are lowercased)
   #   in progress: 2

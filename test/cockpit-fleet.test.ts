@@ -4,19 +4,26 @@ import { badgeForPhase, toFleetView } from "../src/cockpit/model/fleet";
 
 const NOW = Date.parse("2026-01-01T00:01:00.000Z");
 
-const baseSnapshot = (over: Partial<SnapshotWire> = {}): SnapshotWire => ({
-  poll_interval_ms: 1000,
-  max_concurrent_agents: 3,
-  counts: { running: 0, retrying: 0, completed: 0, claimed: 0 },
-  running: [],
-  retrying: [],
-  completed: [],
-  recent_completed: [],
-  recent_events: [],
-  totals: { input_tokens: 10, output_tokens: 20, total_tokens: 30, runtime_seconds: 65 },
-  rate_limits: null,
-  ...over,
-});
+type SnapshotOverride = Omit<Partial<SnapshotWire>, "counts"> & {
+  readonly counts?: Partial<SnapshotWire["counts"]>;
+};
+
+const baseSnapshot = (over: SnapshotOverride = {}): SnapshotWire => {
+  const base: SnapshotWire = {
+    poll_interval_ms: 1000,
+    max_concurrent_agents: 3,
+    counts: { running: 0, retrying: 0, abandoned: 0, completed: 0, claimed: 0 },
+    running: [],
+    retrying: [],
+    abandoned: [],
+    completed: [],
+    recent_completed: [],
+    recent_events: [],
+    totals: { input_tokens: 10, output_tokens: 20, total_tokens: 30, runtime_seconds: 65 },
+    rate_limits: null,
+  };
+  return { ...base, ...over, counts: { ...base.counts, ...over.counts } };
+};
 
 describe("badgeForPhase", () => {
   it("maps known phases via the design-system status vocabulary", () => {
