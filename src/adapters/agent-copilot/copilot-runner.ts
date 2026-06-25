@@ -28,9 +28,11 @@ import { mapCopilotLine } from "./map";
  *   orchestrator interrupts the worker (stall kill, reconciliation, shutdown) the scope
  *   finalizer SIGTERM's the PID. A `turn_timeout_ms` guard fails the stream if the turn
  *   outlives the deadline.
- * - **Secrets:** the child gets a scrubbed environment: runtime basics are preserved,
- *   inherited non-runtime variables are blanked, and only the resolved GitHub token is
- *   intentionally handed over via `GITHUB_TOKEN`/`COPILOT_GITHUB_TOKEN`/`GH_TOKEN`.
+ * - **Secrets:** the child gets a scrubbed environment: runtime + connectivity basics are
+ *   preserved, inherited non-runtime variables are blanked, and only the resolved GitHub
+ *   token is intentionally handed over via `GITHUB_TOKEN`/`COPILOT_GITHUB_TOKEN`/`GH_TOKEN`.
+ *   Non-secret network settings (proxy + custom-CA trust) pass through so the CLI can still
+ *   reach GitHub in proxied / private-CA deployments.
  * - **Continuation:** first turn pins a generated `--session-id`; a resumed turn passes
  *   `--resume <sessionId>`. Either way a `SessionStarted` carrying that id is emitted
  *   first so the orchestrator can resume the thread.
@@ -53,6 +55,19 @@ const CHILD_ENV_PASSTHROUGH = new Set([
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
+  // Non-secret connectivity settings: blanking these breaks the CLI's GitHub access in
+  // proxied / private-CA deployments. Both casings — *nix tooling reads either.
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
 ]);
 
 const childEnv = (base: NodeJS.ProcessEnv, ghAuth: string | undefined): Record<string, string> => {
