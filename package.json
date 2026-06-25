@@ -17,12 +17,14 @@
     "dev:cockpit": "vite",
     "build": "tsup && vite build",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.cockpit.json",
-    "lint": "biome check .",
-    "lint:fix": "biome check --write .",
-    "format": "biome format --write .",
+    "lint": "biome check . && prettier --check \"**/*.{md,yml,yaml,html}\" --ignore-path .gitignore",
+    "lint:fix": "biome check --write . && prettier --write \"**/*.{md,yml,yaml,html}\" --ignore-path .gitignore",
+    "format": "pnpm lint:fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm typecheck && pnpm lint && pnpm test"
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm doctor:score",
+    "doctor": "react-doctor --blocking warning",
+    "doctor:score": "node scripts/check-react-doctor.mjs"
   },
   "dependencies": {
     "@effect/platform": "^0.96.2",
@@ -42,6 +44,8 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "fast-check": "^4.8.0",
+    "prettier": "3.8.4",
+    "react-doctor": "0.5.8",
     "tsup": "^8.5.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",

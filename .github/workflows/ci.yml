@@ -56,5 +56,8 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: React Doctor
+        run: pnpm doctor:score
+
       - name: Build
         run: pnpm build
