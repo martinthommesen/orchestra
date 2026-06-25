@@ -29,6 +29,16 @@ local.settings.json
 # Sprint 0 Copilot spike throwaway PoC (never committed)
 /.spike-copilot/
 
+# deepsec generated output
+.deepsec/.env*.local
+.deepsec/data/*/files/
+.deepsec/data/*/runs/
+.deepsec/data/*/reports/
+.deepsec/data/*/project.json
+.deepsec/data/*/tech.json
+.deepsec/findings/
+.deepsec/findings.json
+
 # Editor / OS
 .DS_Store
 .idea/

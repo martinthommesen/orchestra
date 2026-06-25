@@ -1,0 +1,19 @@
+{
+  "name": "deepsec-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "deepsec scanning workspace",
+  "type": "module",
+  "workspaces": [],
+  "packageManager": "pnpm@11.8.0",
+  "scripts": {
+    "scan": "deepsec scan",
+    "status": "deepsec status",
+    "process": "deepsec process --limit 50",
+    "revalidate": "deepsec revalidate --min-severity HIGH",
+    "export": "deepsec export --format md-dir --out ./findings"
+  },
+  "dependencies": {
+    "deepsec": "^2.1.2"
+  }
+}
