@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 
 /**
@@ -29,8 +30,9 @@ const TOKEN_GLOBAL = "__ORCHESTRA_COCKPIT_TOKEN__"; // gitleaks:allow — JS glo
 const devPort = resolveDevPort(process.env.ORCHESTRA_PORT);
 
 /** Inject the operator token into the dev-served index (parity with the daemon's injection). */
-const tokenDevInject = () => ({
+const tokenDevInject = (): Plugin => ({
   name: "orchestra-token-dev-inject",
+  apply: "serve",
   transformIndexHtml(html: string) {
     // Trim for parity with the daemon's `resolveToken`, so a whitespace-padded (or
     // whitespace-only) env value matches the daemon's trimmed token instead of 401ing in dev.
