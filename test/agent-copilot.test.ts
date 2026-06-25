@@ -216,6 +216,13 @@ printf '{"type":"result","exitCode":0,"usage":{"outputTokens":4}}'
 exit 0
 `;
 
+const ENV_SCRUB = `#!/bin/sh
+printf "%s" "$ORCHESTRA_COCKPIT_TOKEN" > cockpit-token.txt
+printf "%s" "$GITHUB_TOKEN" > github-token.txt
+echo '{"type":"result","exitCode":0}'
+exit 0
+`;
+
 // Replaces the shell image with sleep so the spawned PID is exactly the one the run scope
 // must SIGTERM on interrupt — no lingering grandchild to leak (#22).
 const HANG = `#!/bin/sh
@@ -284,6 +291,35 @@ describe("CopilotRunner (subprocess)", () => {
       expect(tags).toContain("TurnCompleted");
       expect(tags.at(-1)).toBe("TurnCompleted");
     }),
+  );
+
+  it.scopedLive("scrubs daemon-only environment variables from the child process", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          const previous = process.env.ORCHESTRA_COCKPIT_TOKEN;
+          process.env.ORCHESTRA_COCKPIT_TOKEN = "daemon-token-must-not-leak"; // gitleaks:allow — fake fixture token
+          return previous;
+        }),
+        (previous) =>
+          Effect.sync(() => {
+            if (previous === undefined) {
+              delete process.env.ORCHESTRA_COCKPIT_TOKEN;
+            } else {
+              process.env.ORCHESTRA_COCKPIT_TOKEN = previous;
+            }
+          }),
+      );
+
+      const ws = yield* runFakeCopilot(ENV_SCRUB, (events, exit) => {
+        expect(exit._tag).toBe("Success");
+        expect(events.map((e) => e._tag)).toContain("TurnCompleted");
+      });
+
+      expect(yield* fs.readFileString(`${ws}/cockpit-token.txt`)).toBe("");
+      expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("t");
+    }).pipe(Effect.provide(platform)),
   );
 
   it.scopedLive("interrupting a worker SIGTERMs the subprocess (no orphan) (#22)", () =>
