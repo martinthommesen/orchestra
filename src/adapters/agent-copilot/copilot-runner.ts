@@ -37,7 +37,7 @@ import { mapCopilotLine } from "./map";
  *   terminal `result` (or process exit) is the success/failure signal — exit 0 with a
  *   `result` ⇒ `TurnCompleted`, otherwise `AgentProcessExit`.
  */
-export const makeCopilotRunner = (
+const makeCopilotRunner = (
   config: ServiceConfig,
 ): Effect.Effect<typeof AgentRunner.Service, never, CommandExecutor.CommandExecutor> =>
   Effect.gen(function* () {

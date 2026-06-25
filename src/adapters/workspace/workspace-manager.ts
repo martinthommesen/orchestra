@@ -40,7 +40,7 @@ import { computeWorkspacePath } from "../../core/workspace/safety";
  * (gated by `created_now`) and is fatal for the issue; `before_remove` is best-effort so
  * teardown still removes the directory.
  */
-export const makeWorkspaceManager = (
+const makeWorkspaceManager = (
   config: ServiceConfig,
 ): Effect.Effect<
   typeof WorkspaceManager.Service,

@@ -120,12 +120,6 @@ export const addUsage = (s: OrchestratorState, usage: Usage): OrchestratorState 
   }),
 });
 
-/** Replace the latest rate-limit snapshot (vendor-shaped passthrough). */
-export const setRateLimits = (s: OrchestratorState, rateLimits: unknown): OrchestratorState => ({
-  ...s,
-  agent_rate_limits: rateLimits,
-});
-
 // ───────────────────────────────── The service ─────────────────────────────────────
 
 /**

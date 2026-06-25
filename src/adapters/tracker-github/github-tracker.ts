@@ -70,7 +70,7 @@ export const makeOctokit = (config: ServiceConfig): Octokit =>
   });
 
 /** Build the {@link IssueTracker} service backed by Octokit for the given config. */
-export const makeGitHubTracker = (
+const makeGitHubTracker = (
   config: ServiceConfig,
 ): Effect.Effect<typeof IssueTracker.Service, never> =>
   Effect.sync(() => {
@@ -102,11 +102,16 @@ export const makeGitHubTracker = (
     ): Effect.Effect<ReadonlyArray<Issue>, TrackerError> => {
       const wanted = new Set(stateNames.map((s) => s.trim().toLowerCase()));
       return list("closed").pipe(
-        Effect.map((payloads) =>
-          payloads
-            .map((p) => toIssue(p, config))
-            .filter((i) => wanted.has(i.state.trim().toLowerCase())),
-        ),
+        Effect.map((payloads) => {
+          const issues: Issue[] = [];
+          for (const payload of payloads) {
+            const issue = toIssue(payload, config);
+            if (wanted.has(issue.state.trim().toLowerCase())) {
+              issues.push(issue);
+            }
+          }
+          return issues;
+        }),
       );
     };
 

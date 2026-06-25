@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, type Effect } from "effect";
 import type { ReconcileAction } from "./reconcile";
 
 /**
@@ -137,8 +137,3 @@ export class Observer extends Context.Tag("orchestra/Observer")<
     readonly emit: (obs: Observation) => Effect.Effect<void>;
   }
 >() {}
-
-/** A no-op observer (useful as a default and in micro-tests). */
-export const ObserverNoop: Layer.Layer<Observer> = Layer.succeed(Observer, {
-  emit: () => Effect.void,
-});

@@ -29,7 +29,7 @@ export class ControlStatus extends Context.Tag("orchestra/ControlStatus")<
 >() {}
 
 /** Build a control-status holder seeded un-paused. */
-export const makeControlStatus = (): Effect.Effect<Context.Tag.Service<ControlStatus>> =>
+const makeControlStatus = (): Effect.Effect<Context.Tag.Service<ControlStatus>> =>
   Effect.gen(function* () {
     const ref = yield* Ref.make(false);
     return {

@@ -1,7 +1,7 @@
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
-import { Duration, Effect, Fiber, TestClock } from "effect";
+import { Duration, Effect, Fiber, Schema, TestClock } from "effect";
 import { describe, expect } from "vitest";
 import { LiveBudget } from "../src/core/observability/live-budget";
 import { toSnapshot } from "../src/core/observability/snapshot";
@@ -10,7 +10,7 @@ import { CommandBus } from "../src/core/orchestrator/command";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";
 import { OrchestratorStore } from "../src/core/orchestrator/state";
-import { WorkflowFile, WorkflowFileLive } from "../src/core/workflow/workflow-file";
+import { SettingsPatch, WorkflowFile, WorkflowFileLive } from "../src/core/workflow/workflow-file";
 import * as Ev from "./fakes/events";
 import { makeFakeAgentRunner } from "./fakes/fake-agent-runner";
 import { makeFakeTracker } from "./fakes/fake-tracker";
@@ -237,9 +237,10 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
       // is never reached and the file is left exactly as it was.
       const result = yield* Effect.gen(function* () {
         const wf = yield* WorkflowFile;
-        // biome-ignore lint/suspicious/noExplicitAny: deliberately bypass the type to feed a bad value.
-        return yield* wf
-          .applyPatch({ agent: { max_concurrent_agents: -1 } } as any, () => Effect.void)
+        return yield* Schema.decodeUnknown(SettingsPatch)({
+          agent: { max_concurrent_agents: -1 },
+        })
+          .pipe(Effect.flatMap((patch) => wf.applyPatch(patch, () => Effect.void)))
           .pipe(
             Effect.match({
               onFailure: () => "rejected" as const,

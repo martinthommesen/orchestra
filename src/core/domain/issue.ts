@@ -11,7 +11,7 @@ import { Schema } from "effect";
  * as a schema transform means *any* decoded {@link Issue} is guaranteed to carry
  * normalized labels — the invariant lives in the type, not in adapter discipline.
  */
-export const NormalizedLabel = Schema.transform(Schema.String, Schema.String, {
+const NormalizedLabel = Schema.transform(Schema.String, Schema.String, {
   strict: true,
   decode: (raw) => raw.trim().toLowerCase(),
   encode: (normalized) => normalized,

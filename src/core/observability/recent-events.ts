@@ -21,7 +21,7 @@ import { truncateOneLine } from "./glyphs";
  */
 
 /** Max envelopes retained in the ring (oldest dropped past this). */
-export const RECENT_EVENTS_CAP = 200;
+const RECENT_EVENTS_CAP = 200;
 
 /** Per-message ingestion budget (chars) — keeps one event on one line, bounds size. */
 export const EVENT_MESSAGE_MAX = 160;

@@ -93,7 +93,8 @@ describe("cross-feature: budget + restore + last_activity coexist on one snapsho
     expect(row.last_activity?.event_tag).toBe("TurnCompleted");
 
     // The whole thing must JSON round-trip (the wire is the cockpit's only input).
-    const json = JSON.parse(JSON.stringify(snap));
+    const encoded = JSON.stringify(snap);
+    const json = JSON.parse(encoded);
     expect(json.budget.paused).toBe(true);
     expect(json.restore.at).toBe("2026-06-24T10:00:00.000Z");
     expect(json.running[0].last_activity.message).toBe("finished turn");

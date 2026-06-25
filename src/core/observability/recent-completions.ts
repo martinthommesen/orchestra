@@ -12,7 +12,7 @@ import { Context, Effect, Clock as EffectClock, Layer, Ref } from "effect";
  */
 
 /** Max completions retained (oldest dropped past this). */
-export const RECENT_COMPLETIONS_CAP = 50;
+const RECENT_COMPLETIONS_CAP = 50;
 
 /** A finished issue with rich context (the snapshot's `recent_completed[]` shape). */
 export interface RecentCompletion {
@@ -42,7 +42,7 @@ export class RecentCompletions extends Context.Tag("orchestra/RecentCompletions"
 >() {}
 
 /** Build a recent-completions ring bounded to `cap`. */
-export const makeRecentCompletions = (
+const makeRecentCompletions = (
   cap: number = RECENT_COMPLETIONS_CAP,
 ): Effect.Effect<Context.Tag.Service<RecentCompletions>> =>
   Effect.gen(function* () {

@@ -72,7 +72,7 @@ export interface FetchInitLike {
 export type FetchLike = (input: string, init?: FetchInitLike) => Promise<FetchResponseLike>;
 
 /** Read the token the daemon injected into `index.html`, if present (DOM-free access). */
-export const readInjectedToken = (): string | undefined =>
+const readInjectedToken = (): string | undefined =>
   (globalThis as { __ORCHESTRA_COCKPIT_TOKEN__?: string }).__ORCHESTRA_COCKPIT_TOKEN__;
 
 export interface ClientOptions {

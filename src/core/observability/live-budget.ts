@@ -29,9 +29,7 @@ export class LiveBudget extends Context.Tag("orchestra/LiveBudget")<
 >() {}
 
 /** Build a live-budget holder seeded with the startup budget. */
-export const makeLiveBudget = (
-  seed: BudgetConfig,
-): Effect.Effect<Context.Tag.Service<LiveBudget>> =>
+const makeLiveBudget = (seed: BudgetConfig): Effect.Effect<Context.Tag.Service<LiveBudget>> =>
   Effect.gen(function* () {
     const ref = yield* Ref.make(seed);
     return {

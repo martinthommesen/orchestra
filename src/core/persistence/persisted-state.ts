@@ -14,7 +14,7 @@ import { OrchestratorState } from "../domain/orchestrator-state";
  */
 
 /** The schema version the running daemon writes. Bump only on incompatible changes. */
-export const CURRENT_VERSION = 1 as const;
+const CURRENT_VERSION = 1 as const;
 
 /** V1 — the only version today: `{ version, saved_at, state }`. */
 export const PersistedStateV1 = Schema.Struct({

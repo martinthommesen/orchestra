@@ -17,7 +17,7 @@ import { RecentEvents, RecentEventsLive, toEventDraft } from "./recent-events";
  *      (per-session "what is this worker doing now?", #37).
  * All appends are non-failing and cheap; logging is unaffected.
  */
-export const observerTee: Layer.Layer<Observer, never, RecentEvents | LiveActivity> = Layer.effect(
+const observerTee: Layer.Layer<Observer, never, RecentEvents | LiveActivity> = Layer.effect(
   Observer,
   Effect.gen(function* () {
     const events = yield* RecentEvents;
