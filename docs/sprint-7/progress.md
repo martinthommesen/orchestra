@@ -114,3 +114,21 @@ status-labels → state): a workflow should hand off by applying a label that th
 `terminal_states` (or a dedicated non-active state), so dispatch stops the moment the PR is up —
 without waiting for merge. **Action:** document this in the runbook + WORKFLOW guidance; consider
 a first-class "handoff label" convention. Not a code defect; a real ergonomics/spec-mapping gap.
+
+## Deferrals & follow-ups — filed as GitHub issues
+
+Per the plan (open issues for the deferrals + one per real drift finding so nothing is lost):
+
+- **F1** — agent/tracker credential conflation: **fixed in-tree** (commit `d05fe58`), not an
+  open issue. The token model is documented for operators in `WORKFLOW.example.md` + the runbook.
+- [#77](https://github.com/martinthommesen/orchestra/issues/77) — **budget ceiling can't bind on
+  Copilot** (the F2 token-accounting finding: no `input_tokens`/`total_tokens` emitted) **+ the
+  deferred USD ceiling** (was #8), which is downstream of the same accounting gap.
+- [#78](https://github.com/martinthommesen/orchestra/issues/78) — **§56 live gated integration
+  suite** (deferred): the runbook is its spec; the captured fixtures make it cheap. Carries the
+  tool-use-capture gap from the F2 caveat.
+- [#79](https://github.com/martinthommesen/orchestra/issues/79) — **F3 handoff-label** ergonomics
+  gap.
+
+Still open in-sprint (need a live daemon, per the runbook): **M2** session-resume (#6) verdict,
+**M3** sandbox/approval posture (#9) + README trust-posture section.

@@ -79,23 +79,38 @@ agent:
 copilot:
   command: copilot
   stall_timeout_ms: 300000
+  # github_token: $GITHUB_TOKEN
+  #   The credential the AGENT runs as (Copilot model auth + its git/PR tooling) — see F1.
+  #   On a workstation with `copilot /login` already done, LEAVE THIS UNSET: the agent uses
+  #   that ambient login (which carries the `Copilot Requests` entitlement). Set it only when
+  #   running headless (no `/login`), to an entitled fine-grained PAT.
 ```
 
-> The example body already tells the agent to open a PR and move the issue to a human-review
-> state **using its own tools** — that's the reader-not-writer boundary. Whether it succeeds
-> is the **observed (not gated)** outcome.
+> **Token model (post-F1, commit d05fe58).** Two _separate_ credentials:
 >
-> Workspace population is implementation-defined (spec §7). The `after_create` clone above is
-> the simplest real bootstrap; swap for your auth pattern (SSH/`gh`) as needed. If the clone
-> needs the token, the agent's `GITHUB_TOKEN` env is already exported below.
+> - **`tracker.api_key` / `$GITHUB_TOKEN`** — the daemon's reader credential (Octokit polling)
+>   **and** what the `after_create` clone hook reads (hooks inherit the daemon's ambient env via
+>   `sh -lc`, so `$GITHUB_TOKEN` expands there).
+> - **`copilot.github_token`** — what the **agent subprocess** authenticates with. It is **no
+>   longer** inherited from the daemon's `GITHUB_TOKEN` (that conflation _was_ F1). Unset → the
+>   agent falls back to `copilot /login`. On a dev box with a stored login, that login is what
+>   makes the agent work — so the smoke runs fine with this key unset.
+>
+> The example body already tells the agent to open a PR and move the issue to a human-review
+> state **using its own tools** — the reader-not-writer boundary. Whether it succeeds is the
+> **observed (not gated)** outcome. Workspace population is implementation-defined (spec §7);
+> the `after_create` clone is the simplest real bootstrap (swap for SSH/`gh` as needed).
 
 ---
 
 ## 3. Run the daemon with the cockpit
 
 ```bash
-export GITHUB_TOKEN=...                      # the least-privilege repo token
+export GITHUB_TOKEN=...                      # daemon tracker reads + the clone hook (NOT the agent)
 export ORCHESTRA_COCKPIT_TOKEN=$(openssl rand -hex 16)   # or let the daemon log a CSPRNG one
+# Headless only (no `copilot /login` on this host): also point the agent at an entitled PAT and
+# set `copilot.github_token: $COPILOT_PAT` in WORKFLOW.md. On a dev box, skip this — /login wins.
+# export COPILOT_PAT=...
 pnpm dev ./WORKFLOW.md --port 4317
 ```
 
@@ -124,8 +139,17 @@ Record what happened — it feeds Milestone 3.
 
 ## 5. Capture raw JSONL + reconcile `map.ts` (the point of the smoke)
 
-`map.ts` is pinned to the **Sprint 0 spike's assumed** shape (`type:"result"` + `exitCode`,
-camelCase `usage`, `assistant.message`/`data.content`). First contact will likely break it.
+> **DONE for the happy path (commit 9dca4b1).** `map.ts` has been reconciled to observed output
+> and pinned to `test/fixtures/copilot-jsonl/standalone-result.jsonl`; the Sprint 0 §8 mapping
+> table is superseded. Drift found: `result.usage` carries **no token counts** (only
+> `assistant.message.outputTokens` does); `assistant.message.role` doesn't exist. See
+> `docs/sprint-7/progress.md` F2.
+>
+> **STILL TODO:** capture a **tool-using** run (the trivial "Print DONE" / README turns use no
+> tools). The `permission.*`, `toolRequests`, multi-message, and error-terminal paths remain on
+> spike assumptions — re-run the capture below on a task that forces tool use, then re-reconcile
+> and add fixtures. This is the gap [#78](https://github.com/martinthommesen/orchestra/issues/78)
+> (live suite) depends on.
 
 **Capture ground-truth lines** by running the CLI standalone with the **daemon's exact
 flags** (mirrors `copilot-runner.ts`), teed to a file:
@@ -185,5 +209,12 @@ posture is **fully-trusted, auto-approve**. Confirm and document, don't assume:
 ## 8. Wrap-up
 
 - Record outcomes in `docs/sprint-7/progress.md`; final write-up in `done.md`.
-- File issues for any drift bugs found, plus the two deferrals (USD ceiling, §56 live gated
-  suite). Update PROJECT_BRIEF §7–§8 at sprint close.
+- Issues filed (deferrals + drift findings):
+  [#77](https://github.com/martinthommesen/orchestra/issues/77) budget ceiling can't bind on
+  Copilot + USD ceiling, [#78](https://github.com/martinthommesen/orchestra/issues/78) §56 live
+  gated suite, [#79](https://github.com/martinthommesen/orchestra/issues/79) handoff-label gap
+  (F3). F1 is **fixed in-tree** (commit d05fe58), not deferred.
+- After M2 (§6): record the `persistence.resume_sessions` verdict (enable-safe **or**
+  stays-off-with-evidence) in `progress.md`.
+- After M3 (§7): write the README trust-posture section.
+- Update PROJECT_BRIEF §7–§8 at sprint close.
