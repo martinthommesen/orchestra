@@ -256,7 +256,10 @@ describe("mapCopilotLine pinned to the live standalone capture", () => {
 // *robust* to all of it: every unrecognized family falls through to the forward-compat drop, so
 // the stream maps with ZERO Malformed and no functional map.ts change was needed for tool use.
 describe("mapCopilotLine pinned to a tool-using capture (#78)", () => {
-  const lines = readFileSync(new URL("./fixtures/copilot-jsonl/tool-use.jsonl", import.meta.url), "utf8")
+  const lines = readFileSync(
+    new URL("./fixtures/copilot-jsonl/tool-use.jsonl", import.meta.url),
+    "utf8",
+  )
     .split("\n")
     .filter((l) => l.trim() !== "");
 

@@ -146,10 +146,7 @@ describe("deriveState (§11.3)", () => {
       active_states: ["Todo", "In Progress"],
       terminal_states: ["Done", "Closed", "Human Review"],
     });
-    const issue = toIssue(
-      payload({ state: "open", labels: ["In Progress", "Human Review"] }),
-      cfg,
-    );
+    const issue = toIssue(payload({ state: "open", labels: ["In Progress", "Human Review"] }), cfg);
     expect(issue.state).toBe("Human Review");
     const ctx = selectionContext({
       activeStates: cfg.tracker.active_states,
