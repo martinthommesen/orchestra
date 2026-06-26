@@ -43,42 +43,32 @@ export const useToast = (): ToastApi => {
 };
 
 /**
- * Auto-dismiss EACH toast `TTL_MS` after it first appears — one independent timer per id, so a
- * burst of actions dismisses every toast on its own schedule (not just the latest) and the queue
- * can't grow without bound. Timers for toasts dismissed early are dropped; all are cleared on unmount.
+ * One toast row. It owns its own auto-dismiss timer: armed `TTL_MS` after it mounts and cleared on
+ * unmount (whether it expired or the operator closed it early). Because each row is keyed by id and
+ * mounts independently, a burst of actions dismisses every toast on its own schedule — and there is
+ * no shared timer map to leak.
  */
-export const useToastAutoDismiss = (
-  toasts: ReadonlyArray<Toast>,
-  dismiss: (id: number) => void,
-) => {
-  const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+const ToastItem = ({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) => {
   useEffect(() => {
-    const live = timers.current;
-    // Arm a timer for every toast that doesn't already have one.
-    for (const t of toasts) {
-      if (!live.has(t.id)) {
-        live.set(
-          t.id,
-          setTimeout(() => dismiss(t.id), TTL_MS),
-        );
-      }
-    }
-    // Reap timers for toasts already gone (dismissed early or auto-dismissed) so the map can't leak.
-    for (const [id, handle] of live) {
-      if (!toasts.some((t) => t.id === id)) {
-        clearTimeout(handle);
-        live.delete(id);
-      }
-    }
-  }, [toasts, dismiss]);
-
-  useEffect(() => {
-    const live = timers.current;
-    return () => {
-      for (const handle of live.values()) clearTimeout(handle);
-      live.clear();
-    };
-  }, []);
+    const timer = setTimeout(() => onDismiss(toast.id), TTL_MS);
+    return () => clearTimeout(timer);
+  }, [toast.id, onDismiss]);
+  return (
+    <output className={`toast toast--${toast.tone}`}>
+      <span className="toast__icon" aria-hidden="true">
+        {toast.tone === "danger" ? <XIcon /> : <CheckIcon />}
+      </span>
+      <span className="toast__msg">{toast.message}</span>
+      <button
+        type="button"
+        className="toast__close"
+        aria-label="Dismiss"
+        onClick={() => onDismiss(toast.id)}
+      >
+        <XIcon />
+      </button>
+    </output>
+  );
 };
 
 export const ToastRegion = ({
@@ -90,20 +80,7 @@ export const ToastRegion = ({
 }) => (
   <section className="toast-region" aria-label="Notifications" aria-live="polite">
     {toasts.map((t) => (
-      <output key={t.id} className={`toast toast--${t.tone}`}>
-        <span className="toast__icon" aria-hidden="true">
-          {t.tone === "danger" ? <XIcon /> : <CheckIcon />}
-        </span>
-        <span className="toast__msg">{t.message}</span>
-        <button
-          type="button"
-          className="toast__close"
-          aria-label="Dismiss"
-          onClick={() => onDismiss(t.id)}
-        >
-          <XIcon />
-        </button>
-      </output>
+      <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
     ))}
   </section>
 );

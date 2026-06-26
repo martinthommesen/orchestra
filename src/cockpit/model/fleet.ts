@@ -82,7 +82,11 @@ export interface RunningRowVM {
 export type SortKey = "issue" | "elapsed" | "attempt" | "status";
 export type SortDir = "asc" | "desc";
 
-/** Pure, stable sort over running rows. Unknown/null values sort last in either direction. */
+/**
+ * Pure, stable sort over running rows. For the numeric keys (`elapsed`, `attempt`) an
+ * unknown/null value sinks last in either direction; `issue` and `status` are always-present
+ * strings and compare directly (a `status` of `unknown` sorts by its label, not specially).
+ */
 export const sortRunning = (
   rows: ReadonlyArray<RunningRowVM>,
   key: SortKey,

@@ -4,7 +4,7 @@ import { COCKPIT_POLL_MS, client } from "../api/instance";
 import { ConnectionBanner } from "../components/ConnectionBanner";
 import { SkeletonCards } from "../components/Skeleton";
 import { StatusChip } from "../components/StatusChip";
-import { ToastRegion, useToast, useToastAutoDismiss } from "../components/Toast";
+import { ToastRegion, useToast } from "../components/Toast";
 import { type CardAction, type ColumnId, type KanbanCard, toKanban } from "../model/kanban";
 import { usePolling } from "../usePolling";
 
@@ -41,7 +41,6 @@ const COLUMN_ACCENT: Record<ColumnId, string> = {
 export const KanbanView = () => {
   const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
   const toast = useToast();
-  useToastAutoDismiss(toast.toasts, toast.dismiss);
   const [actions, setActions] = useState<Record<string, ActionState>>({});
   const now = Date.now();
 

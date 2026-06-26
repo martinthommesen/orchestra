@@ -6,7 +6,7 @@ import { ConnectionBanner } from "../components/ConnectionBanner";
 import { DispatchControl } from "../components/DispatchControl";
 import { Panel } from "../components/Panel";
 import { SkeletonForm } from "../components/Skeleton";
-import { ToastRegion, useToast, useToastAutoDismiss } from "../components/Toast";
+import { ToastRegion, useToast } from "../components/Toast";
 import {
   type FieldId,
   isDirty,
@@ -37,7 +37,6 @@ export const SettingsView = () => {
   const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
   const control = poll.data?.control ?? null;
   const toast = useToast();
-  useToastAutoDismiss(toast.toasts, toast.dismiss);
 
   const [form, setForm] = useState<SettingsFormModel | null>(null);
   // The originally-loaded settings, retained so a save can send a SPARSE patch (only the

@@ -8,7 +8,7 @@ import { Metric } from "../components/Metric";
 import { Panel } from "../components/Panel";
 import { SkeletonTable } from "../components/Skeleton";
 import { StatusChip } from "../components/StatusChip";
-import { ToastRegion, useToast, useToastAutoDismiss } from "../components/Toast";
+import { ToastRegion, useToast } from "../components/Toast";
 import { type SortDir, type SortKey, sortRunning, toFleetView } from "../model/fleet";
 import { formatDuration } from "../model/format";
 import { usePolling } from "../usePolling";
@@ -23,7 +23,6 @@ import { usePolling } from "../usePolling";
 export const FleetView = () => {
   const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
   const toast = useToast();
-  useToastAutoDismiss(toast.toasts, toast.dismiss);
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "elapsed", dir: "desc" });
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const now = Date.now();
