@@ -183,3 +183,28 @@ export const validateSettings = (
 
   return { ok: true, errors: {}, patch };
 };
+
+/**
+ * Whether the form differs from the loaded baseline — drives the unsaved-changes indicator and
+ * gates the Save button independently of validation (you can have dirty-but-invalid input). Pure
+ * so it is unit-tested alongside `validateSettings`. Mirrors the diff keys above without re-running
+ * the parse, so a half-typed (invalid) value still registers as dirty.
+ */
+export const isDirty = (form: SettingsFormModel, baseline: EditableSettingsWire): boolean => {
+  if (form.intervalMs.trim() !== String(baseline.polling.interval_ms)) return true;
+  if (form.maxConcurrentAgents.trim() !== String(baseline.agent.max_concurrent_agents)) return true;
+  if (form.maxTurns.trim() !== String(baseline.agent.max_turns)) return true;
+  if (form.maxFailureRetries.trim() !== String(baseline.agent.max_failure_retries)) return true;
+  if (form.maxRetryBackoffMs.trim() !== String(baseline.agent.max_retry_backoff_ms)) return true;
+  const baseCeiling = baseline.budget.max_total_tokens;
+  if (form.maxTotalTokens.trim() !== (baseCeiling === null ? "" : String(baseCeiling))) return true;
+
+  const baseByState = baseline.agent.max_concurrent_agents_by_state;
+  const baseKeys = Object.keys(baseByState);
+  const formKeys = form.byState.map((r) => r.state);
+  if (baseKeys.length !== formKeys.length) return true;
+  for (const row of form.byState) {
+    if (row.value.trim() !== String(baseByState[row.state] ?? "")) return true;
+  }
+  return false;
+};

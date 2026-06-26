@@ -1,10 +1,15 @@
 /*
- * Sprint 6 / #68 — cockpit design tokens (CSS custom properties).
+ * Cockpit design tokens (CSS custom properties).
  *
  * The five `--status-*` colors are the web rendering of the semantic color tokens in
  * `src/core/observability/glyphs.ts` (info=cyan, warn=yellow, muted=gray, success=green,
  * danger=red). `design/tokens.ts` is the single TS source mapping a status → one of these vars,
  * so glyph + color parity with the CLI is structural, not duplicated.
+ *
+ * Two themes: **dark** (default) and **light**. With no `data-theme` attribute the theme follows
+ * `prefers-color-scheme`; `data-theme="dark"`/`"light"` (set by `useTheme`) overrides it and is
+ * persisted to localStorage. Status-tint backgrounds/borders use `color-mix` over the theme-aware
+ * `--status-*` vars, so a tint is defined once and adapts to both themes.
  *
  * Accessibility posture mirrors the CLI's NO_COLOR / --ascii spirit: color is never the only
  * signal (chips always carry glyph + label), motion is removed under prefers-reduced-motion, and
@@ -21,10 +26,18 @@
   --status-success: #4ade80; /* green / done */
   --status-danger: #f87171; /* red   / failed, error text */
 
+  /* Status tint backgrounds/borders — derived from the status color, theme-agnostic. */
+  --status-info-bg: color-mix(in srgb, var(--status-info) 16%, transparent);
+  --status-warn-bg: color-mix(in srgb, var(--status-warn) 16%, transparent);
+  --status-muted-bg: color-mix(in srgb, var(--status-muted) 16%, transparent);
+  --status-success-bg: color-mix(in srgb, var(--status-success) 16%, transparent);
+  --status-danger-bg: color-mix(in srgb, var(--status-danger) 16%, transparent);
+
   /* Surfaces & text. */
   --bg: #0b0f14;
   --bg-panel: #131a22;
   --bg-elevated: #1b242e;
+  --bg-sunken: #060a0e;
   /* Decorative separators (panel/table/card outlines): ~2:1, calm but clearly visible. */
   --border: #445463;
   /* Interactive boundaries (inputs, buttons, active nav): ≥3:1 per WCAG SC 1.4.11. */
@@ -33,6 +46,9 @@
   --text-muted: #94a3b8; /* ≥6:1 on every surface */
   --text-faint: #8693a6; /* ≥5:1 on every surface — secondary text still meets AA 4.5:1 */
   --accent: var(--status-info);
+  --accent-weak: color-mix(in srgb, var(--accent) 18%, transparent);
+  /* Text color that reads on a filled --accent background. */
+  --on-accent: #04141d;
 
   /* Typography. */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -55,10 +71,69 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.45);
   --motion-fast: 120ms;
   --motion-med: 220ms;
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Light theme ────────────────────────────────────────────────────────────
+ * Applied when the OS asks for light AND the operator hasn't pinned dark, or when
+ * `data-theme="light"` is set explicitly. `:not([data-theme="dark"])` on the media query keeps
+ * an explicit dark choice authoritative over the OS preference. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --status-info: #0969da; /* blue  / running — AA on light surfaces */
+  --status-warn: #9a6700; /* amber / retrying */
+  --status-muted: #6e7781; /* gray  / blocked */
+  --status-success: #1a7f37; /* green / done */
+  --status-danger: #cf222e; /* red   / failed */
+
+  --bg: #f6f8fa;
+  --bg-panel: #ffffff;
+  --bg-elevated: #eaeef2;
+  --bg-sunken: #e1e7ed;
+  --border: #d0d7de;
+  --border-strong: #818b98;
+  --text: #1f2328;
+  --text-muted: #57606a;
+  --text-faint: #6e7781;
+  --on-accent: #ffffff;
+
+  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.08);
+  --shadow: 0 1px 3px rgba(31, 35, 40, 0.1), 0 4px 14px rgba(31, 35, 40, 0.08);
+  --shadow-lg: 0 8px 24px rgba(31, 35, 40, 0.16);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --status-info: #0969da;
+    --status-warn: #9a6700;
+    --status-muted: #6e7781;
+    --status-success: #1a7f37;
+    --status-danger: #cf222e;
+
+    --bg: #f6f8fa;
+    --bg-panel: #ffffff;
+    --bg-elevated: #eaeef2;
+    --bg-sunken: #e1e7ed;
+    --border: #d0d7de;
+    --border-strong: #818b98;
+    --text: #1f2328;
+    --text-muted: #57606a;
+    --text-faint: #6e7781;
+    --on-accent: #ffffff;
+
+    --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.08);
+    --shadow: 0 1px 3px rgba(31, 35, 40, 0.1), 0 4px 14px rgba(31, 35, 40, 0.08);
+    --shadow-lg: 0 8px 24px rgba(31, 35, 40, 0.16);
+  }
 }
 
 * {
@@ -103,6 +178,13 @@ button {
     --border-strong: #88a0b6;
     --text-muted: #c7d2dc;
     --text-faint: #aebccb;
+  }
+  :root[data-theme="light"],
+  :root:not([data-theme="dark"]) {
+    --border: #57606a;
+    --border-strong: #424a53;
+    --text-muted: #24292f;
+    --text-faint: #363b42;
   }
 }
 
