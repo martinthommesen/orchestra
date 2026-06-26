@@ -210,16 +210,19 @@ const SortHeader = ({
   children: string;
 }) => {
   const active = sort.key === k;
+  // The sort control is a real <button> inside the header cell so it is keyboard-focusable and
+  // activates on Enter/Space natively; `aria-sort` stays on the <th> (the column header) per ARIA.
   return (
     <th
       className={`is-sortable${active ? " is-sorted" : ""}`}
-      onClick={() => onSort(k)}
       aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
     >
-      {children}
-      <span className="th-sort" aria-hidden="true">
-        {active ? sort.dir === "asc" ? <SortAscIcon /> : <SortDescIcon /> : <SortIcon />}
-      </span>
+      <button type="button" className="th-sort-btn" onClick={() => onSort(k)}>
+        {children}
+        <span className="th-sort" aria-hidden="true">
+          {active ? sort.dir === "asc" ? <SortAscIcon /> : <SortDescIcon /> : <SortIcon />}
+        </span>
+      </button>
     </th>
   );
 };

@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 /**
  * Theme controller for the cockpit. With no stored choice the theme follows
  * `prefers-color-scheme`; an explicit choice is persisted to `localStorage` and written as
  * `data-theme` on `document.documentElement`, which `tokens.css` honors over the OS preference.
- * The initial attribute is set synchronously during the first render so the very first paint is
- * already in the right theme (no flash).
+ * The attribute is written in a `useLayoutEffect` — after the first commit but **before the
+ * browser paints** — so the very first visible frame is already in the resolved theme (no flash).
+ * (Client-rendered SPA; no SSR, so the layout effect is safe.)
  */
 
 export type Theme = "dark" | "light";
@@ -34,8 +35,8 @@ const applyTheme = (theme: Theme): void => {
 export const useTheme = (): { theme: Theme; toggle: () => void; setTheme: (t: Theme) => void } => {
   const [theme, setThemeState] = useState<Theme>(resolveTheme);
 
-  // Apply on mount and whenever it changes; also track OS preference changes when unpinned.
-  useEffect(() => {
+  // Apply before paint on mount and whenever it changes (pre-paint → no theme flash).
+  useLayoutEffect(() => {
     applyTheme(theme);
   }, [theme]);
 

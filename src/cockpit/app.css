@@ -468,11 +468,27 @@
 }
 
 .data-table thead th.is-sortable {
-  cursor: pointer;
+  padding: 0;
   user-select: none;
 }
 
-.data-table thead th.is-sortable:hover {
+/* The sort control fills the header cell and looks like the header text — focus-visible ring
+   comes from the global :focus-visible rule (tokens.css). */
+.data-table thead th .th-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.data-table thead th.is-sortable:hover .th-sort-btn {
   color: var(--text);
 }
 
