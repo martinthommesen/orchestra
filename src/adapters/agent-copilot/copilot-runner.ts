@@ -70,8 +70,22 @@ const CHILD_ENV_PASSTHROUGH = new Set([
   "NODE_EXTRA_CA_CERTS",
 ]);
 
-const childEnv = (base: NodeJS.ProcessEnv, ghAuth: string | undefined): Record<string, string> => {
-  const env: Record<string, string> = {};
+/**
+ * The GitHub-credential env keys the Copilot CLI reads for *its own* auth. Never inherited from
+ * the daemon's environment: either injected from `copilot.github_token` (headless servers) or
+ * left **unset** so the CLI uses its ambient `/login`. The executor merges
+ * `{ ...process.env, ...command.env }`, so the daemon's own `GITHUB_TOKEN` (the operator's
+ * tracker credential) would otherwise leak into the child — F1. Setting these to `undefined`
+ * (vs `""`) is what *removes* the inherited value: Node's spawn skips undefined-valued keys,
+ * yielding a truly unset var, whereas `""` would present an empty, invalid token.
+ */
+const AGENT_TOKEN_KEYS = ["GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN"] as const;
+
+const childEnv = (
+  base: NodeJS.ProcessEnv,
+  agentToken: string | undefined,
+): Record<string, string | undefined> => {
+  const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(base)) {
     if (value === undefined) {
       continue;
@@ -79,10 +93,12 @@ const childEnv = (base: NodeJS.ProcessEnv, ghAuth: string | undefined): Record<s
     env[key] = CHILD_ENV_PASSTHROUGH.has(key) ? value : "";
   }
   env.COPILOT_AUTO_UPDATE = "false";
-  if (ghAuth !== undefined && ghAuth !== "") {
-    env.GITHUB_TOKEN = ghAuth;
-    env.COPILOT_GITHUB_TOKEN = ghAuth;
-    env.GH_TOKEN = ghAuth;
+  // Inject the agent credential, or unset the keys entirely (overriding any blank from the loop
+  // above and any inherited parent value). Sourced ONLY from `copilot.github_token` — never
+  // `tracker.api_key`, whose conflation was F1.
+  const token = agentToken !== undefined && agentToken !== "" ? agentToken : undefined;
+  for (const key of AGENT_TOKEN_KEYS) {
+    env[key] = token;
   }
   return env;
 };
@@ -92,7 +108,7 @@ const makeCopilotRunner = (
 ): Effect.Effect<typeof AgentRunner.Service, never, CommandExecutor.CommandExecutor> =>
   Effect.gen(function* () {
     const executor = yield* CommandExecutor.CommandExecutor;
-    const ghAuth = config.tracker.api_key;
+    const agentToken = config.copilot.github_token;
     const turnTimeoutMs = config.copilot.turn_timeout_ms;
 
     const run = (params: AgentRunParams): Stream.Stream<AgentEvent, AgentError> => {
@@ -116,7 +132,7 @@ const makeCopilotRunner = (
       ).pipe(
         // Safety Invariant 1: the OS-level cwd is the workspace, not just `-C`.
         Command.workingDirectory(params.workspacePath),
-        Command.env(childEnv(process.env, ghAuth)),
+        Command.env(childEnv(process.env, agentToken)),
         Command.stdout("pipe"),
         Command.stderr("inherit"),
       );

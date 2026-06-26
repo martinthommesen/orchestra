@@ -4,8 +4,8 @@ Running log of first-contact findings from the live-Copilot smoke (Milestone 1, 
 
 ## Finding F1 — Agent auth is conflated with the tracker token (marquee finding)
 
-**Status:** confirmed, unblocked by config; **clean fix deferred to a deliberate follow-up**
-(do not fix ahead of the smoke learning — manual-smoke-first).
+**Status:** confirmed; unblocked by config during the smoke; **clean fix now IMPLEMENTED**
+(commit follows this doc) — the credential is decoupled in code, no longer config-only.
 
 **Symptom.** Running the daemon, Copilot exits with `Authentication failed … ensure it has the
 'Copilot Requests' permission enabled`, even though standalone `copilot -p "say hello"` works
@@ -30,27 +30,35 @@ the tracker token is the only differing variable.
 entitled token satisfies tracker reads, clone hook, Copilot model auth, and the agent's git
 push — so it also makes the observe-only "agent opens a PR" outcome actually exercisable.
 
-**Clean fix (deferred follow-up — forward-only).** Decouple the agent credential from the
-tracker token:
+**Clean fix (DONE — forward-only).** Decoupled the agent credential from the tracker token:
 
-- Add optional `copilot.github_token` (`$VAR`-resolved, mirrors `tracker.api_key`), the
-  credential the agent subprocess runs as. Absent → inject **nothing** (the child uses its
-  ambient `/login`; `HOME`/`XDG_*` already pass through). Present → inject for headless servers.
-- Source `childEnv`'s injected token from `copilot.github_token`, never `tracker.api_key`.
-- **Two correctness/security constraints** (from review):
-  1. When no agent token is configured, **`delete`** `GITHUB_TOKEN`/`GH_TOKEN`/
-     `COPILOT_GITHUB_TOKEN` from the child env — do **not** blank to `""` (the proven-good
-     state is `unset`, not empty; empty may read as "an invalid token was supplied").
-  2. `copilot.github_token` is a **secret** — mirror `tracker.api_key` everywhere it's kept
-     off the wire/disk: verify `snapshot.ts` (`/api/v1/state`) and `workflow-file.ts`
-     (GET /settings secret-free subset + PUT whitelist) exclude it, and extend the
-     secret-safe tests. A new resolved secret leaking into the snapshot/settings would
-     regress the property this codebase guards hardest.
-- File as its own issue; this is a real defect, not just smoke scaffolding.
+- Added optional `copilot.github_token` (`$VAR`-resolved by the loader, mirrors
+  `tracker.api_key`) — the credential the **agent subprocess** runs as. Absent → inject
+  **nothing** (child uses its ambient `/login`; `HOME`/`XDG_*` already pass through). Present
+  → inject for headless servers. `copilot-runner.ts` now sources the injected token from
+  `config.copilot.github_token`, **never** `tracker.api_key`.
+- **Constraint 1 (unset, not blank) — and the merge-semantics trap it hid.** The node
+  executor builds the child env as `{ ...process.env, ...command.env }` (**merge**, verified
+  in `@effect/platform-node-shared`), so the daemon's own `GITHUB_TOKEN` (the operator's
+  tracker credential, canonical env per `workflow.ts`) would be **inherited** if the key were
+  merely omitted — silently re-introducing F1, un-blanked. So `childEnv` sets the three agent
+  keys to `undefined` (Node's spawn skips undefined-valued keys → the var is genuinely
+  **unset**), never `""`. Pinned by a discriminator test: with the tracker token planted in
+  `process.env` and no agent token configured, the child probe reads `__UNSET__`; with an agent
+  token configured, it reads that token and **not** the tracker token.
+- **Constraint 2 (secret-safe) — both surfaces verified structurally + tested.** `/settings`
+  is safe by construction (the `EditableSettings`/`SettingsPatch` whitelist excludes all of
+  `copilot.*`) and `/api/v1/state` embeds no config at all. Added tests: loader resolves /
+  drops `copilot.github_token`'s `$VAR`; the editable projection never carries `github_token`
+  even when the WORKFLOW.md sets it.
+- **Hooks checked (no half-migration):** hook scripts run with **no** `Command.env`, inheriting
+  the ambient orchestrator env — they never injected `tracker.api_key`, so nothing to decouple.
 
-**Outcome.** Unblock worked — fine-grained PAT (Copilot Requests + Contents/Issues/PR)
-exported as `GITHUB_TOKEN`, current code unchanged. Daemon ran the full loop against the live
-Copilot.
+**Smoke outcome (historical).** The smoke itself was unblocked by config — one fine-grained PAT
+(Copilot Requests + Contents/Issues/PR) exported as `GITHUB_TOKEN`, code then unchanged — and
+the daemon ran the full loop against live Copilot. The code fix above now makes that decoupling
+first-class so a headless deploy doesn't depend on the tracker and agent token happening to be
+the same entitled PAT.
 
 ## Finding F2 — Plumbing gate PASSED; streaming map.ts did NOT drift
 

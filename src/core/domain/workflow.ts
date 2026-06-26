@@ -102,6 +102,19 @@ const CopilotConfig = Schema.Struct({
   command: Schema.optionalWith(Schema.String, { default: () => "copilot" }),
   /** Optional model override (e.g. `claude-opus-4.8`); default chosen by Copilot. */
   model: Schema.optional(Schema.String),
+  /**
+   * The GitHub credential the **agent subprocess** runs as — Copilot's own model auth plus the
+   * git/PR tooling it invokes. A literal or `$VAR` (resolved by the loader, like
+   * `tracker.api_key`). Deliberately **distinct from `tracker.api_key`** (Sprint 7 / F1): the
+   * tracker token is a reader credential for Octokit, while Copilot additionally needs the
+   * fine-grained-PAT-only `Copilot Requests` entitlement — injecting the tracker token here
+   * overrode the working `/login` and broke auth. **Absent → inject nothing**: the subprocess
+   * inherits the CLI's ambient `/login` (the agent-token env keys are left UNSET, not blanked).
+   * **Present → inject** for headless servers with no interactive login. A **secret**: never
+   * surfaced via `/api/v1/state` (the snapshot embeds no config) or `/settings` (the editable
+   * whitelist excludes all of `copilot.*`).
+   */
+  github_token: Schema.optional(Schema.String),
   /** Total turn-stream timeout. */
   turn_timeout_ms: Schema.optionalWith(PositiveInt, {
     default: () => 3_600_000,

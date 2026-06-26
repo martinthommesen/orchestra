@@ -57,9 +57,16 @@ const resolveServiceConfig = (config: ServiceConfig, ctx: PathContext): ServiceC
   const { api_key: _omit, ...trackerRest } = config.tracker;
   const tracker = apiKey === undefined ? trackerRest : { ...trackerRest, api_key: apiKey };
 
+  // The agent subprocess credential (F1) is resolved the same way and dropped when missing, so
+  // the runner sees a real token or nothing — never a stale `$VAR` it would inject verbatim.
+  const ghToken = resolveOptionalValue(config.copilot.github_token, ctx.env);
+  const { github_token: _omitGh, ...copilotRest } = config.copilot;
+  const copilot = ghToken === undefined ? copilotRest : { ...copilotRest, github_token: ghToken };
+
   return {
     ...config,
     tracker,
+    copilot,
     workspace: {
       ...config.workspace,
       root: resolveWorkspaceRoot(config.workspace.root, ctx),

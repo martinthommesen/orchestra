@@ -204,11 +204,28 @@ describe("mapCopilotLine pinned to the live standalone capture", () => {
 
 const platform = NodeContext.layer;
 
-const config = (command: string): ServiceConfig =>
+const config = (command: string, githubToken?: string): ServiceConfig =>
   Schema.decodeUnknownSync(ServiceConfig)({
     tracker: { kind: "github", repo: "o/r", api_key: "t" },
-    copilot: { command },
+    copilot: { command, ...(githubToken !== undefined ? { github_token: githubToken } : {}) },
   });
+
+/** Scoped override of `process.env` keys, restored (set or deleted) on scope close. */
+const withProcessEnv = (vars: Record<string, string>) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const prev = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]] as const));
+      for (const [k, v] of Object.entries(vars)) process.env[k] = v;
+      return prev;
+    }),
+    (prev) =>
+      Effect.sync(() => {
+        for (const [k, v] of Object.entries(prev)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      }),
+  );
 
 /** Stand up a fake `copilot` script + a workspace dir, then run the real runner. */
 const runFakeCopilot = (
@@ -217,6 +234,7 @@ const runFakeCopilot = (
     events: ReadonlyArray<{ readonly _tag: string }>,
     exit: { readonly _tag: "Success" | "Failure"; readonly cause?: unknown },
   ) => void,
+  githubToken?: string,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -227,7 +245,7 @@ const runFakeCopilot = (
     yield* fs.writeFileString(bin, script);
     yield* fs.chmod(bin, 0o755);
 
-    const runner = yield* Effect.provide(AgentRunner, layerCopilotRunner(config(bin)));
+    const runner = yield* Effect.provide(AgentRunner, layerCopilotRunner(config(bin, githubToken)));
     const params = {
       issue: makeIssue({ id: "1", identifier: "ABC-1", state: "Todo" }),
       workspacePath: ws,
@@ -268,9 +286,11 @@ printf '{"type":"result","exitCode":0,"usage":{"premiumRequests":2,"totalApiDura
 exit 0
 `;
 
+// Distinguishes UNSET from empty: `${VAR-__UNSET__}` writes the sentinel only when the var is
+// genuinely absent (the proven-good state for the agent token), not merely blank.
 const ENV_SCRUB = `#!/bin/sh
 printf "%s" "$ORCHESTRA_COCKPIT_TOKEN" > cockpit-token.txt
-printf "%s" "$GITHUB_TOKEN" > github-token.txt
+printf "%s" "\${GITHUB_TOKEN-__UNSET__}" > github-token.txt
 printf "%s" "$HTTPS_PROXY" > proxy.txt
 echo '{"type":"result","exitCode":0}'
 exit 0
@@ -347,44 +367,57 @@ describe("CopilotRunner (subprocess)", () => {
   );
 
   it.scopedLive(
-    "scrubs daemon-only secrets but preserves connectivity env in the child process",
+    "injects copilot.github_token as the agent credential — never the tracker token (F1)",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        yield* Effect.acquireRelease(
-          Effect.sync(() => {
-            const previous = {
-              token: process.env.ORCHESTRA_COCKPIT_TOKEN,
-              proxy: process.env.HTTPS_PROXY,
-            };
-            process.env.ORCHESTRA_COCKPIT_TOKEN = "daemon-token-must-not-leak"; // gitleaks:allow — fake fixture token
-            process.env.HTTPS_PROXY = "http://proxy.internal:8080";
-            return previous;
-          }),
-          (previous) =>
-            Effect.sync(() => {
-              if (previous.token === undefined) {
-                delete process.env.ORCHESTRA_COCKPIT_TOKEN;
-              } else {
-                process.env.ORCHESTRA_COCKPIT_TOKEN = previous.token; // gitleaks:allow — restores saved value
-              }
-              if (previous.proxy === undefined) {
-                delete process.env.HTTPS_PROXY;
-              } else {
-                process.env.HTTPS_PROXY = previous.proxy;
-              }
-            }),
+        // Simulate the daemon carrying the operator's tracker credential in its own env: the
+        // child must NOT inherit it. Distinct sentinel values prove which one wins.
+        yield* withProcessEnv({
+          ORCHESTRA_COCKPIT_TOKEN: "daemon-token-must-not-leak", // gitleaks:allow — fake fixture
+          HTTPS_PROXY: "http://proxy.internal:8080",
+          GITHUB_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+        });
+
+        const ws = yield* runFakeCopilot(
+          ENV_SCRUB,
+          (events, exit) => {
+            expect(exit._tag).toBe("Success");
+            expect(events.map((e) => e._tag)).toContain("TurnCompleted");
+          },
+          "agent-token-distinct", // gitleaks:allow — fake fixture (copilot.github_token)
         );
+
+        // The child sees the configured agent token, NOT the daemon's tracker token; the
+        // daemon-only cockpit secret is blanked and connectivity env passes through.
+        expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("agent-token-distinct");
+        expect(yield* fs.readFileString(`${ws}/cockpit-token.txt`)).toBe("");
+        expect(yield* fs.readFileString(`${ws}/proxy.txt`)).toBe("http://proxy.internal:8080");
+      }).pipe(Effect.provide(platform)),
+  );
+
+  it.scopedLive(
+    "leaves GITHUB_TOKEN UNSET (not blank) when no copilot.github_token is configured (F1)",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // The daemon's own env carries the tracker token under the canonical GITHUB_TOKEN. With
+        // no agent token configured, the child must fall back to the CLI's ambient /login —
+        // which requires the var to be genuinely UNSET, not the inherited value and not "".
+        yield* withProcessEnv({
+          GITHUB_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+          GH_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+          COPILOT_GITHUB_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+        });
 
         const ws = yield* runFakeCopilot(ENV_SCRUB, (events, exit) => {
           expect(exit._tag).toBe("Success");
           expect(events.map((e) => e._tag)).toContain("TurnCompleted");
         });
 
-        // Daemon-only secret is blanked; GitHub token + connectivity settings pass through.
-        expect(yield* fs.readFileString(`${ws}/cockpit-token.txt`)).toBe("");
-        expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("t");
-        expect(yield* fs.readFileString(`${ws}/proxy.txt`)).toBe("http://proxy.internal:8080");
+        // Sentinel proves true-unset under the executor's {...process.env, ...env} merge — a
+        // regression to inherit-from-parent would surface the tracker token here instead.
+        expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("__UNSET__");
       }).pipe(Effect.provide(platform)),
   );
 
