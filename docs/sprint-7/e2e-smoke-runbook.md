@@ -61,7 +61,10 @@ tracker:
   api_key: $GITHUB_TOKEN
   required_labels: [orchestra]
   active_states: [Todo, In Progress]
-  terminal_states: [Done, Closed, Cancelled]
+  # `Human Review` is the handoff state (#79): the agent applies that label when its PR is up,
+  # which stops Orchestra re-running the finished issue. It MUST be listed here, or the issue
+  # falls back to Todo and re-dispatches forever (the F3 loop you'll otherwise watch live).
+  terminal_states: [Done, Closed, Cancelled, Human Review]
 
 workspace:
   root: ./.orchestra/workspaces

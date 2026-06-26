@@ -12,6 +12,7 @@ import {
   toStateRef,
 } from "../src/adapters/tracker-github/normalize";
 import { ServiceConfig } from "../src/core/domain/workflow";
+import { isEligible, selectionContext } from "../src/core/orchestrator/selection";
 
 const config = (tracker: Record<string, unknown> = {}): ServiceConfig =>
   Schema.decodeUnknownSync(ServiceConfig)({
@@ -105,6 +106,25 @@ describe("deriveState (§11.3)", () => {
   });
   it("honors a terminal status label to pick which terminal state on a closed issue", () => {
     expect(deriveState(payload({ state: "closed", labels: ["Done"] }), config())).toBe("Done");
+  });
+
+  it("treats a handoff status label (in terminal_states) on an OPEN issue as terminal (F3, #79)", () => {
+    // The live re-dispatch loop: an open issue the agent has handed off carries a status label
+    // that is NOT in any configured state, so precedence-3 falls back to active_states[0]
+    // (Todo) and the daemon re-runs the finished work forever. The fix is purely config: list
+    // the handoff label in terminal_states so it is recognized and stops dispatch.
+    const cfg = config({ terminal_states: ["Done", "Closed", "Cancelled", "Human Review"] });
+    const issue = toIssue(payload({ state: "open", labels: ["orchestra", "Human Review"] }), cfg);
+    // Recognized as the terminal handoff state — NOT the Todo fallback that caused the loop.
+    expect(issue.state).toBe("Human Review");
+    // And therefore no longer dispatch-eligible: the loop cannot recur.
+    const ctx = selectionContext({
+      activeStates: cfg.tracker.active_states,
+      terminalStates: cfg.tracker.terminal_states,
+      requiredLabels: cfg.tracker.required_labels,
+      claimed: [],
+    });
+    expect(isEligible(issue, ctx)).toBe(false);
   });
 });
 

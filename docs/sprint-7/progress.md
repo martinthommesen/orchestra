@@ -112,8 +112,33 @@ Symphony/Linear closes this gap with a real handoff state (e.g. "Human Review") 
 dispatch. On GitHub the equivalent is a **status label** (`normalize.ts` already maps
 status-labels → state): a workflow should hand off by applying a label that the operator puts in
 `terminal_states` (or a dedicated non-active state), so dispatch stops the moment the PR is up —
-without waiting for merge. **Action:** document this in the runbook + WORKFLOW guidance; consider
-a first-class "handoff label" convention. Not a code defect; a real ergonomics/spec-mapping gap.
+without waiting for merge.
+
+**FIXED — and confirmed live.** Re-running the smoke after M1 reproduced this exactly: issue #2,
+already handed off (`Human Review` label, PR open), was re-dispatched every poll and burned
+credits in an infinite loop. Root cause was purely **config inconsistency**: the example prompt
+told the agent to "move to your human-review state," but `terminal_states` did not contain such a
+label, so `normalize.ts` precedence-3 fell back to `active_states[0]` (Todo) → eligible → loop.
+
+The mechanism was already complete in code: `deriveState` recognizes any label in
+`terminal_states`, and `selection.isEligible` rejects every non-active state, so a recognized
+handoff label stops dispatch with **zero production-code change** (verified the dedicated-config
+alternative would be redundant — `isEligible` already excludes non-active states, and routing
+handoff through the existing terminal path also gets the `TerminalKill` workspace-clean +
+mark-completed that the "neither" path would leak). The fix:
+
+- `WORKFLOW.example.md` (and the smoke's `WORKFLOW.md` + runbook §2): `Human Review` added to
+  `terminal_states`; the prompt body now tells the agent to **apply the exact `Human Review`
+  label** as its final step (and not strip `orchestra`).
+- Regression guard in `test/tracker-github.test.ts`: an **open** issue carrying the handoff label
+  → `deriveState` returns the terminal state → `isEligible` is `false` (the loop cannot recur).
+- Tracked as [#79](https://github.com/martinthommesen/orchestra/issues/79).
+
+**Known adjacent (separate, pre-existing — not #79):** a worker that completes via `max_turns`
+(loop.ts `handleWorkerOutcome`) marks completed + deletes the registry entry but does **not**
+clean its workspace — only reconcile's `TerminalKill`/`NeitherKill` paths do. Handoff issues are
+reaped (and cleaned) by reconcile when caught mid-continuation, but a clean `max_turns` finish
+leaves the workspace until restart cleanup. Worth its own follow-up if it bites.
 
 ## Deferrals & follow-ups — filed as GitHub issues
 

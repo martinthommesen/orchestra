@@ -21,7 +21,13 @@ tracker:
   # endpoint: https://api.github.com   # override for GitHub Enterprise
   required_labels: [orchestra] # an issue needs ALL these labels to be picked up
   active_states: [Todo, In Progress] # states Orchestra will work
-  terminal_states: [Done, Closed, Cancelled] # states that stop a worker
+  # States that STOP dispatch. A plain GitHub issue is only open/closed, so "state" is read
+  # from a status LABEL (see normalize.ts §11.3). `Human Review` is the **handoff** state: the
+  # prompt below tells the agent to apply that label once its PR is up, which moves the issue
+  # out of `active_states` so Orchestra stops re-running already-finished work (without waiting
+  # for the PR to merge). This label MUST appear here, or the agent's handoff is unrecognized
+  # and the issue falls back to Todo → an infinite re-dispatch loop.
+  terminal_states: [Done, Closed, Cancelled, Human Review]
 
 # --- polling: how often to scan the tracker -----------------------------------
 polling:
@@ -109,6 +115,8 @@ restart from scratch unless the existing work is unsalvageable.
 3. Keep your changes focused and your commits well-described.
    {%- endif %}
 
-When the work is complete, open a pull request that references this issue and move the
-issue to your team's human-review state. Perform all Git and GitHub writes using your
-available tools.
+When the work is complete, open a pull request that references this issue (e.g. `Closes
+#{{ issue.identifier }}`), then **add the `Human Review` label to this issue** to hand it off.
+Applying that label is what tells Orchestra you are done and stops it from re-running this
+issue — do it as your final step, and do not remove the `orchestra` label. Perform all Git and
+GitHub writes using your available tools.
