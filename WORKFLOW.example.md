@@ -21,7 +21,13 @@ tracker:
   # endpoint: https://api.github.com   # override for GitHub Enterprise
   required_labels: [orchestra] # an issue needs ALL these labels to be picked up
   active_states: [Todo, In Progress] # states Orchestra will work
-  terminal_states: [Done, Closed, Cancelled] # states that stop a worker
+  # States that STOP dispatch. A plain GitHub issue is only open/closed, so "state" is read
+  # from a status LABEL (see normalize.ts §11.3). `Human Review` is the **handoff** state: the
+  # prompt below tells the agent to apply that label once its PR is up, which moves the issue
+  # out of `active_states` so Orchestra stops re-running already-finished work (without waiting
+  # for the PR to merge). This label MUST appear here, or the agent's handoff is unrecognized
+  # and the issue falls back to Todo → an infinite re-dispatch loop.
+  terminal_states: [Done, Closed, Cancelled, Human Review]
 
 # --- polling: how often to scan the tracker -----------------------------------
 polling:
@@ -52,6 +58,14 @@ agent:
 # --- copilot: the coding agent ------------------------------------------------
 copilot:
   command: copilot # the headless CLI Orchestra drives (see spike doc)
+  # github_token: $COPILOT_GITHUB_TOKEN
+  #   The credential the AGENT subprocess runs as — Copilot's own model auth + the
+  #   git/PR tooling it invokes. DISTINCT from tracker.api_key above: Copilot needs the
+  #   fine-grained-PAT-only `Copilot Requests` entitlement, which a classic tracker
+  #   token lacks. Leave UNSET to use the CLI's ambient `copilot /login` (the typical
+  #   workstation setup). SET it on a HEADLESS server with no interactive login — there
+  #   is no `/login` to fall back to, so an entitled PAT here is required. A secret:
+  #   `$VAR`, never surfaced via the cockpit `/settings` or `/api/v1/state`.
   # model: claude-opus-4.8       # optional model override; default chosen by Copilot
   turn_timeout_ms: 3600000 # hard cap per turn stream (1h)
   read_timeout_ms: 5000 # startup / sync-request timeout
@@ -101,6 +115,8 @@ restart from scratch unless the existing work is unsalvageable.
 3. Keep your changes focused and your commits well-described.
    {%- endif %}
 
-When the work is complete, open a pull request that references this issue and move the
-issue to your team's human-review state. Perform all Git and GitHub writes using your
-available tools.
+When the work is complete, open a pull request that references this issue (e.g. `Closes
+#{{ issue.identifier }}`), then **add the `Human Review` label to this issue** to hand it off.
+Applying that label is what tells Orchestra you are done and stops it from re-running this
+issue — do it as your final step, and do not remove the `orchestra` label. Perform all Git and
+GitHub writes using your available tools.

@@ -283,17 +283,29 @@ export type AgentEvent = typeof AgentEvent.Type;
 
 ### Copilot JSONL → `AgentEvent` mapping table (for Sprint 1)
 
-| Copilot `type`                                               | → `AgentEvent._tag`                                 | notes                                                                                   |
-| ------------------------------------------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| (process spawn ok, first `assistant.turn_start`)             | `SessionStarted`                                    | synthesize `session_id` from `result.sessionId`/`--session-id`; `turn_id` from `turnId` |
-| `assistant.turn_start`                                       | (internal turn bookkeeping)                         | not necessarily surfaced                                                                |
-| `assistant.message`                                          | `AgentMessage` (+ `Notification` for surfaced text) | carries `content`, `toolRequests[]`, per-msg `outputTokens`                             |
-| `assistant.turn_end` + `result.exitCode == 0`                | `TurnCompleted`                                     | attach `result.usage`                                                                   |
-| `tool.call` for an unsupported tool                          | `UnsupportedToolCall`                               | `tool` = requested name                                                                 |
-| `permission.*` auto-granted (`--allow-all-tools`)            | `ApprovalAutoApproved`                              | high-trust policy                                                                       |
-| `session.error` / `model.call_failure`                       | `TurnFailed` / `TurnEndedWithError`                 | `message` from payload                                                                  |
-| `result.exitCode != 0` (or process exit ≠ 0, or no `result`) | (runner error) `AgentProcessExit`                   | terminal failure → orchestrator retries                                                 |
-| any unrecognized line / bad JSON                             | `Malformed`                                         | `raw` = the line; never crash                                                           |
+> **Superseded by the Sprint 7 first-contact smoke (`docs/sprint-7/`).** The mapper is now
+> pinned to _observed_ output via `test/fixtures/copilot-jsonl/` — see `test/agent-copilot.test.ts`
+> ("pinned to the live standalone capture"). Two rows below misled the Sprint 1 implementation
+> and are corrected there: **(a)** the turn's only token count is the per-message
+> `assistant.message.outputTokens` — `result.usage` carries **no token fields at all** (this very
+> §4 capture already showed `usage = {premiumRequests, totalApiDurationMs, sessionDurationMs,
+codeChanges}`); so `output_tokens` rides the `AgentMessage`, not `TurnCompleted`. **(b)** the
+> Copilot CLI emits **no `input_tokens`/`total_tokens`** (observed n=2: Sprint 0 + Sprint 7,
+> both no-tool turns) — so the `budget.max_total_tokens` ceiling, which gates on `total_tokens`,
+> cannot bind on Copilot output (feeds the deferred #8 USD-ceiling follow-up). Whether a
+> _tool-using_ turn reports more is still uncaptured.
+
+| Copilot `type`                                               | → `AgentEvent._tag`                                 | notes                                                                                                          |
+| ------------------------------------------------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| (process spawn ok, first `assistant.turn_start`)             | `SessionStarted`                                    | synthesize `session_id` from `result.sessionId`/`--session-id`; `turn_id` from `turnId`                        |
+| `assistant.turn_start`                                       | (internal turn bookkeeping)                         | not necessarily surfaced                                                                                       |
+| `assistant.message`                                          | `AgentMessage` (+ `Notification` for surfaced text) | carries `content`, `toolRequests[]`, per-msg `outputTokens` → `usage.output_tokens` on the `AgentMessage` only |
+| `assistant.turn_end` + `result.exitCode == 0`                | `TurnCompleted`                                     | attach `result.usage` (`premium_requests` + `total_api_duration_ms`; **no token counts**)                      |
+| `tool.call` for an unsupported tool                          | `UnsupportedToolCall`                               | `tool` = requested name                                                                                        |
+| `permission.*` auto-granted (`--allow-all-tools`)            | `ApprovalAutoApproved`                              | high-trust policy                                                                                              |
+| `session.error` / `model.call_failure`                       | `TurnFailed` / `TurnEndedWithError`                 | `message` from payload                                                                                         |
+| `result.exitCode != 0` (or process exit ≠ 0, or no `result`) | (runner error) `AgentProcessExit`                   | terminal failure → orchestrator retries                                                                        |
+| any unrecognized line / bad JSON                             | `Malformed`                                         | `raw` = the line; never crash                                                                                  |
 
 ## 9. Open items handed to Sprint 1
 

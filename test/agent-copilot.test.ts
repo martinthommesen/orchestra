@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
@@ -29,17 +30,24 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
     expect(r.events[0]?._tag).toBe("Malformed");
   });
 
-  it("maps assistant.message to AgentMessage + Notification", () => {
+  it("maps assistant.message to AgentMessage + Notification, with output tokens on the AgentMessage only", () => {
     const r = mapCopilotLine(
-      JSON.stringify({ type: "assistant.message", data: { role: "assistant", content: "pong" } }),
+      JSON.stringify({
+        type: "assistant.message",
+        data: { content: "pong", model: "claude-opus-4.8", outputTokens: 5 },
+      }),
       NOW,
     );
     expect(r.events.map((e) => e._tag)).toEqual(["AgentMessage", "Notification"]);
-    const msg = r.events[0];
+    const [msg, note] = r.events;
     if (msg?._tag === "AgentMessage") {
       expect(msg.text).toBe("pong");
-      expect(msg.role).toBe("assistant");
+      // Per-message token count lives on `assistant.message` (the terminal `result` carries
+      // none). The orchestrator folds `usage` per event, so it rides the AgentMessage ONLY —
+      // tagging the sibling Notification too would double-count the same 5 tokens.
+      expect(msg.usage?.output_tokens).toBe(5);
     }
+    expect(note?.usage).toBeUndefined();
     expect(r.terminal).toBeUndefined();
   });
 
@@ -48,20 +56,29 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
     expect(r.events.map((e) => e._tag)).toEqual(["AgentMessage"]);
   });
 
-  it("maps a successful result to TurnCompleted + completed terminal", () => {
+  it("maps a successful result to TurnCompleted + completed terminal (request/duration usage, no tokens)", () => {
+    // Observed live: `result.usage` reports request/duration accounting only — no token
+    // counts (those arrive per `assistant.message`). `sessionDurationMs`/`codeChanges` are
+    // present in the wire shape but deliberately not surfaced into normalized Usage.
     const r = mapCopilotLine(
       JSON.stringify({
         type: "result",
         exitCode: 0,
-        usage: { premiumRequests: 2, outputTokens: 4 },
+        usage: {
+          premiumRequests: 15,
+          totalApiDurationMs: 1748,
+          sessionDurationMs: 8859,
+          codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] },
+        },
       }),
       NOW,
     );
     expect(r.events.map((e) => e._tag)).toEqual(["TurnCompleted"]);
     expect(r.terminal?._tag).toBe("completed");
     if (r.terminal?._tag === "completed") {
-      expect(r.terminal.usage?.premium_requests).toBe(2);
-      expect(r.terminal.usage?.output_tokens).toBe(4);
+      expect(r.terminal.usage?.premium_requests).toBe(15);
+      expect(r.terminal.usage?.total_api_duration_ms).toBe(1748);
+      expect(r.terminal.usage?.output_tokens).toBeUndefined();
     }
   });
 
@@ -93,14 +110,15 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
   it("drops an overflowing duration parsed from a raw result line (DEF-002)", () => {
     // JSON.parse turns an overflowing literal (1e400) into Infinity; left in usage it would
     // make runtime_seconds non-finite and corrupt the durable checkpoint on the next boot.
+    // The non-finite duration is dropped while a finite sibling field (premiumRequests) survives.
     const r = mapCopilotLine(
-      '{"type":"result","exitCode":0,"usage":{"totalApiDurationMs":1e400,"outputTokens":4}}',
+      '{"type":"result","exitCode":0,"usage":{"totalApiDurationMs":1e400,"premiumRequests":4}}',
       NOW,
     );
     expect(r.terminal?._tag).toBe("completed");
     if (r.terminal?._tag === "completed") {
       expect(r.terminal.usage?.total_api_duration_ms).toBeUndefined();
-      expect(r.terminal.usage?.output_tokens).toBe(4);
+      expect(r.terminal.usage?.premium_requests).toBe(4);
     }
   });
 
@@ -172,37 +190,114 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
 });
 
 describe("mapUsage", () => {
-  it("maps camelCase Copilot usage to normalized fields", () => {
+  it("maps the observed result.usage request/duration fields, ignoring non-usage extras", () => {
     expect(
       mapUsage({
-        inputTokens: 1,
-        outputTokens: 2,
-        totalTokens: 3,
-        premiumRequests: 4,
-        totalApiDurationMs: 5,
+        premiumRequests: 15,
+        totalApiDurationMs: 1748,
+        sessionDurationMs: 8859,
+        codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] },
       }),
     ).toEqual({
-      input_tokens: 1,
-      output_tokens: 2,
-      total_tokens: 3,
-      premium_requests: 4,
-      total_api_duration_ms: 5,
+      premium_requests: 15,
+      total_api_duration_ms: 1748,
     });
   });
   it("returns undefined when nothing usable is present", () => {
     expect(mapUsage({})).toBeUndefined();
     expect(mapUsage(null)).toBeUndefined();
+    // `result.usage` with only the non-token extras yields no normalized Usage.
+    expect(mapUsage({ sessionDurationMs: 10, codeChanges: { filesModified: [] } })).toBeUndefined();
+  });
+});
+
+// ─────────────────────── mapper pinned to the live capture ───────────────────────
+// Reconciles map.ts to *observed* Copilot output (Sprint 7 standalone smoke; raw at
+// docs/sprint-7/captured-jsonl.raw, scrubbed + trimmed into this fixture), superseding the
+// Sprint 0 spike's assumed mapping table. NOTE: this is the trivial no-tool "Print DONE" turn
+// — it pins the streaming + terminal/usage paths only. Tool-use paths (permission.*,
+// toolRequests, multi-message turns, error terminals) are NOT exercised and remain pinned to
+// spike assumptions until a tool-using run is captured (see docs/sprint-7/progress.md F2).
+describe("mapCopilotLine pinned to the live standalone capture", () => {
+  const lines = readFileSync(
+    new URL("./fixtures/copilot-jsonl/standalone-result.jsonl", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+
+  it("maps every captured line without a single Malformed event", () => {
+    const tags = lines.flatMap((l) => mapCopilotLine(l, NOW).events.map((e) => e._tag));
+    expect(tags).not.toContain("Malformed");
+  });
+
+  it("reaches exactly one terminal, completed, at the result line", () => {
+    const terminals = lines.map((l) => mapCopilotLine(l, NOW).terminal).filter((t) => t != null);
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]?._tag).toBe("completed");
+  });
+
+  it("accounts the turn's output tokens exactly once across the whole stream", () => {
+    // The only token count Copilot emits is the per-`assistant.message` `outputTokens` (5);
+    // summed over every emitted event it must total 5 — proving it rides exactly one event,
+    // not both AgentMessage and its sibling Notification.
+    const total = lines
+      .flatMap((l) => mapCopilotLine(l, NOW).events)
+      .reduce((n, e) => n + (e.usage?.output_tokens ?? 0), 0);
+    expect(total).toBe(5);
+  });
+});
+
+// ─────────────────── mapper pinned to a TOOL-USING capture ───────────────────
+// Sprint 7 / #78 — the happy-path fixture above is no-tool. This second capture forces shell +
+// file-write tools, exercising the paths the spike got wrong: the agent emits `tool.execution_*`
+// (NOT `tool.call`) and — under `--allow-all-tools` — **no `permission.*` events at all**, plus
+// `assistant.reasoning*` and `session.background_tasks_changed`. The point is that the mapper is
+// *robust* to all of it: every unrecognized family falls through to the forward-compat drop, so
+// the stream maps with ZERO Malformed and no functional map.ts change was needed for tool use.
+describe("mapCopilotLine pinned to a tool-using capture (#78)", () => {
+  const lines = readFileSync(
+    new URL("./fixtures/copilot-jsonl/tool-use.jsonl", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+
+  it("maps a real tool-using turn with zero Malformed and one completed terminal", () => {
+    const events = lines.flatMap((l) => mapCopilotLine(l, NOW).events);
+    expect(events.map((e) => e._tag)).not.toContain("Malformed");
+    const terminals = lines.map((l) => mapCopilotLine(l, NOW).terminal).filter((t) => t != null);
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]?._tag).toBe("completed");
+  });
+
+  it("drops the tool-execution / reasoning event families (forward-compat, not Malformed)", () => {
+    // A tool-call `assistant.message` carries empty `content` + `toolRequests` → a benign
+    // empty AgentMessage liveness tick (no Notification); the `tool.execution_*`,
+    // `assistant.reasoning*`, and `session.*` lines surface nothing at all.
+    for (const type of ["tool.execution_start", "tool.execution_complete", "assistant.reasoning"]) {
+      const line = lines.find((l) => (JSON.parse(l) as { type?: string }).type === type);
+      expect(line, `fixture is missing a ${type} line`).toBeDefined();
+      expect(mapCopilotLine(line as string, NOW)).toEqual({ events: [] });
+    }
+  });
+
+  it("sums per-message output tokens across the multi-message turn", () => {
+    const total = lines
+      .flatMap((l) => mapCopilotLine(l, NOW).events)
+      .reduce((n, e) => n + (e.usage?.output_tokens ?? 0), 0);
+    expect(total).toBe(147);
   });
   it("drops non-finite numeric fields so they can't corrupt the durable checkpoint (DEF-002)", () => {
     // A non-finite measurement (Infinity/NaN) is meaningless and, if it reached
     // agent_totals.runtime_seconds, JSON.stringify would emit `null` and the next-boot
-    // re-decode would discard the whole state file. Drop it like any non-number.
+    // re-decode would discard the whole state file. Drop it like any non-number, while a
+    // finite sibling field survives.
     const u = mapUsage({
       totalApiDurationMs: Number.POSITIVE_INFINITY,
-      outputTokens: Number.NaN,
-      totalTokens: 7,
+      premiumRequests: 7,
     });
-    expect(u).toEqual({ total_tokens: 7 });
+    expect(u).toEqual({ premium_requests: 7 });
   });
 });
 
@@ -210,11 +305,28 @@ describe("mapUsage", () => {
 
 const platform = NodeContext.layer;
 
-const config = (command: string): ServiceConfig =>
+const config = (command: string, githubToken?: string): ServiceConfig =>
   Schema.decodeUnknownSync(ServiceConfig)({
     tracker: { kind: "github", repo: "o/r", api_key: "t" },
-    copilot: { command },
+    copilot: { command, ...(githubToken !== undefined ? { github_token: githubToken } : {}) },
   });
+
+/** Scoped override of `process.env` keys, restored (set or deleted) on scope close. */
+const withProcessEnv = (vars: Record<string, string>) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const prev = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]] as const));
+      for (const [k, v] of Object.entries(vars)) process.env[k] = v;
+      return prev;
+    }),
+    (prev) =>
+      Effect.sync(() => {
+        for (const [k, v] of Object.entries(prev)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      }),
+  );
 
 /** Stand up a fake `copilot` script + a workspace dir, then run the real runner. */
 const runFakeCopilot = (
@@ -223,6 +335,7 @@ const runFakeCopilot = (
     events: ReadonlyArray<{ readonly _tag: string }>,
     exit: { readonly _tag: "Success" | "Failure"; readonly cause?: unknown },
   ) => void,
+  githubToken?: string,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -233,7 +346,7 @@ const runFakeCopilot = (
     yield* fs.writeFileString(bin, script);
     yield* fs.chmod(bin, 0o755);
 
-    const runner = yield* Effect.provide(AgentRunner, layerCopilotRunner(config(bin)));
+    const runner = yield* Effect.provide(AgentRunner, layerCopilotRunner(config(bin, githubToken)));
     const params = {
       issue: makeIssue({ id: "1", identifier: "ABC-1", state: "Todo" }),
       workspacePath: ws,
@@ -251,8 +364,8 @@ const runFakeCopilot = (
 const HAPPY = `#!/bin/sh
 echo "$PWD" > cwd.txt
 echo '{"type":"session.idle","ephemeral":true}'
-echo '{"type":"assistant.message","data":{"role":"assistant","content":"pong"}}'
-echo '{"type":"result","exitCode":0,"usage":{"premiumRequests":2,"outputTokens":4}}'
+echo '{"type":"assistant.message","data":{"content":"pong","model":"claude-opus-4.8","outputTokens":4}}'
+echo '{"type":"result","exitCode":0,"usage":{"premiumRequests":2,"totalApiDurationMs":1748}}'
 exit 0
 `;
 
@@ -270,13 +383,15 @@ exit 0
 // Emits the terminal `result` with NO trailing newline (printf, not echo) — the splitter
 // must still flush the final partial segment or the turn would look like a crash (#22).
 const NO_TRAILING_NEWLINE = `#!/bin/sh
-printf '{"type":"result","exitCode":0,"usage":{"outputTokens":4}}'
+printf '{"type":"result","exitCode":0,"usage":{"premiumRequests":2,"totalApiDurationMs":1748}}'
 exit 0
 `;
 
+// Distinguishes UNSET from empty: `${VAR-__UNSET__}` writes the sentinel only when the var is
+// genuinely absent (the proven-good state for the agent token), not merely blank.
 const ENV_SCRUB = `#!/bin/sh
 printf "%s" "$ORCHESTRA_COCKPIT_TOKEN" > cockpit-token.txt
-printf "%s" "$GITHUB_TOKEN" > github-token.txt
+printf "%s" "\${GITHUB_TOKEN-__UNSET__}" > github-token.txt
 printf "%s" "$HTTPS_PROXY" > proxy.txt
 echo '{"type":"result","exitCode":0}'
 exit 0
@@ -353,44 +468,57 @@ describe("CopilotRunner (subprocess)", () => {
   );
 
   it.scopedLive(
-    "scrubs daemon-only secrets but preserves connectivity env in the child process",
+    "injects copilot.github_token as the agent credential — never the tracker token (F1)",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        yield* Effect.acquireRelease(
-          Effect.sync(() => {
-            const previous = {
-              token: process.env.ORCHESTRA_COCKPIT_TOKEN,
-              proxy: process.env.HTTPS_PROXY,
-            };
-            process.env.ORCHESTRA_COCKPIT_TOKEN = "daemon-token-must-not-leak"; // gitleaks:allow — fake fixture token
-            process.env.HTTPS_PROXY = "http://proxy.internal:8080";
-            return previous;
-          }),
-          (previous) =>
-            Effect.sync(() => {
-              if (previous.token === undefined) {
-                delete process.env.ORCHESTRA_COCKPIT_TOKEN;
-              } else {
-                process.env.ORCHESTRA_COCKPIT_TOKEN = previous.token; // gitleaks:allow — restores saved value
-              }
-              if (previous.proxy === undefined) {
-                delete process.env.HTTPS_PROXY;
-              } else {
-                process.env.HTTPS_PROXY = previous.proxy;
-              }
-            }),
+        // Simulate the daemon carrying the operator's tracker credential in its own env: the
+        // child must NOT inherit it. Distinct sentinel values prove which one wins.
+        yield* withProcessEnv({
+          ORCHESTRA_COCKPIT_TOKEN: "daemon-token-must-not-leak", // gitleaks:allow — fake fixture
+          HTTPS_PROXY: "http://proxy.internal:8080",
+          GITHUB_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+        });
+
+        const ws = yield* runFakeCopilot(
+          ENV_SCRUB,
+          (events, exit) => {
+            expect(exit._tag).toBe("Success");
+            expect(events.map((e) => e._tag)).toContain("TurnCompleted");
+          },
+          "agent-token-distinct", // gitleaks:allow — fake fixture (copilot.github_token)
         );
+
+        // The child sees the configured agent token, NOT the daemon's tracker token; the
+        // daemon-only cockpit secret is blanked and connectivity env passes through.
+        expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("agent-token-distinct");
+        expect(yield* fs.readFileString(`${ws}/cockpit-token.txt`)).toBe("");
+        expect(yield* fs.readFileString(`${ws}/proxy.txt`)).toBe("http://proxy.internal:8080");
+      }).pipe(Effect.provide(platform)),
+  );
+
+  it.scopedLive(
+    "leaves GITHUB_TOKEN UNSET (not blank) when no copilot.github_token is configured (F1)",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // The daemon's own env carries the tracker token under the canonical GITHUB_TOKEN. With
+        // no agent token configured, the child must fall back to the CLI's ambient /login —
+        // which requires the var to be genuinely UNSET, not the inherited value and not "".
+        yield* withProcessEnv({
+          GITHUB_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+          GH_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+          COPILOT_GITHUB_TOKEN: "tracker-token-must-not-leak", // gitleaks:allow — fake fixture
+        });
 
         const ws = yield* runFakeCopilot(ENV_SCRUB, (events, exit) => {
           expect(exit._tag).toBe("Success");
           expect(events.map((e) => e._tag)).toContain("TurnCompleted");
         });
 
-        // Daemon-only secret is blanked; GitHub token + connectivity settings pass through.
-        expect(yield* fs.readFileString(`${ws}/cockpit-token.txt`)).toBe("");
-        expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("t");
-        expect(yield* fs.readFileString(`${ws}/proxy.txt`)).toBe("http://proxy.internal:8080");
+        // Sentinel proves true-unset under the executor's {...process.env, ...env} merge — a
+        // regression to inherit-from-parent would surface the tracker token here instead.
+        expect(yield* fs.readFileString(`${ws}/github-token.txt`)).toBe("__UNSET__");
       }).pipe(Effect.provide(platform)),
   );
 

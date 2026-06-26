@@ -129,7 +129,14 @@ export const addUsage = (s: OrchestratorState, usage: Usage): OrchestratorState 
   agent_totals: AgentTotals.make({
     input_tokens: s.agent_totals.input_tokens + (usage.input_tokens ?? 0),
     output_tokens: s.agent_totals.output_tokens + (usage.output_tokens ?? 0),
-    total_tokens: s.agent_totals.total_tokens + (usage.total_tokens ?? 0),
+    // `total = input + output`. When the source reports an explicit `total_tokens`, use it;
+    // otherwise derive it from the parts. Copilot surfaces only per-message `output_tokens`
+    // (no input/total — Sprint 7), so this lets `budget.max_total_tokens` actually bind on the
+    // one token signal it gives instead of staying inert. It under-counts by the unreported
+    // input tokens — inherent to the source, and a conservative (more permissive) ceiling.
+    total_tokens:
+      s.agent_totals.total_tokens +
+      (usage.total_tokens ?? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)),
     runtime_seconds: s.agent_totals.runtime_seconds + (usage.total_api_duration_ms ?? 0) / 1000,
   }),
 });

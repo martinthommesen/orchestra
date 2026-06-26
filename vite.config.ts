@@ -58,7 +58,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": { target: `http://127.0.0.1:${devPort}`, changeOrigin: false },
+      // Narrow to `/api/v1` — the cockpit's source tree has an `api/` directory
+      // (`api/instance.ts`, `api/errors.ts`) whose module requests would otherwise be
+      // swallowed by the proxy before Vite can serve them.
+      "/api/v1": { target: `http://127.0.0.1:${devPort}`, changeOrigin: false },
     },
   },
 });

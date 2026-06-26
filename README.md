@@ -194,6 +194,39 @@ prompt template). Every block is optional with sensible defaults; secrets use `$
 indirection resolved from the environment at load and are never written to the file.
 See [`WORKFLOW.example.md`](./WORKFLOW.example.md) for the fully annotated reference.
 
+## Security & trust posture
+
+**v1 targets trusted, single-tenant environments.** Orchestra runs autonomous coding agents
+that execute code; the trust model below is deliberate, observed against the live Copilot CLI
+(Sprint 7), and must be understood before pointing it at anything you care about.
+
+- **Agents run unsandboxed, auto-approving every tool.** The runner spawns Copilot with
+  `--allow-all-tools`, so the agent runs shell commands and writes files **directly on the host
+  with no approval prompt and no sandbox** — confirmed by the CLI's own telemetry
+  (`tool.execution_complete` reports `sandboxApplied: false`). Treat a dispatched issue as
+  arbitrary code execution by whoever can open issues in the tracked repo.
+- **The isolation boundary is the per-issue workspace + least-privilege token — not the OS.**
+  Each issue gets its own working directory (Safety Invariant 1: the agent's `cwd` _is_ that
+  workspace), and the agent can only reach what its credentials and that directory grant.
+  OS/container/VM sandboxing is **not** built in v1 — if you need it, run the whole daemon as a
+  low-privilege user inside a container or VM; that boundary, not Orchestra, is your sandbox.
+- **Two separate credentials, by design.** `tracker.api_key` is the daemon's reader credential
+  (issue polling) and what the clone hook uses; `copilot.github_token` (or the agent's ambient
+  `copilot /login`) is what the **agent subprocess** authenticates with. The daemon never injects
+  the tracker token into the agent — they are decoupled so a tracker token can't silently become
+  the agent's identity.
+- **Reader-not-writer at the orchestrator.** Orchestra only _reads_ the tracker to schedule work.
+  All ticket/PR writes (commits, pushes, opening the PR, the handoff label) are performed by the
+  **agent** through its own tools and credential — Orchestra issues no write-back.
+- **The cockpit is loopback + token-gated.** The control plane binds locally, requires a
+  per-process bearer token (`ORCHESTRA_COCKPIT_TOKEN`, else a CSPRNG one is minted and logged),
+  and rejects cross-origin Hosts (DNS-rebinding guard). Secrets never traverse it: the editable
+  settings surface and the JSON snapshot both exclude every resolved credential.
+
+If any of these assumptions don't hold for your environment (untrusted issue authors, shared
+host, secrets reachable from the workspace), **do not run v1 as-is** — isolate the daemon at the
+OS/container layer first.
+
 ## Build & quality gates
 
 ```bash

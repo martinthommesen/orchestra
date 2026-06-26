@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditableSettingsWire } from "../src/cockpit/api/types";
 import {
+  isDirty,
   type SettingsFormModel,
   toFormModel,
   validateSettings,
@@ -132,5 +133,45 @@ describe("validateSettings", () => {
     const ok = validateSettings({ ...validForm(), maxTotalTokens: "5000" }, WIRE);
     expect(ok.ok).toBe(true);
     expect(ok.patch?.budget?.max_total_tokens).toBe(5000);
+  });
+});
+
+describe("isDirty", () => {
+  it("is false for an unchanged form (even with surrounding whitespace)", () => {
+    expect(isDirty(validForm(), WIRE)).toBe(false);
+    expect(isDirty({ ...validForm(), intervalMs: " 30000 " }, WIRE)).toBe(false);
+  });
+
+  it("is true when any scalar field differs — including a half-typed invalid value", () => {
+    expect(isDirty({ ...validForm(), maxTurns: "30" }, WIRE)).toBe(true);
+    expect(isDirty({ ...validForm(), maxTurns: "abc" }, WIRE)).toBe(true);
+  });
+
+  it("is true when the token ceiling is cleared (number → blank)", () => {
+    expect(isDirty({ ...validForm(), maxTotalTokens: "" }, WIRE)).toBe(true);
+  });
+
+  it("is false when a null baseline ceiling stays blank", () => {
+    const nullWire = { ...WIRE, budget: { max_total_tokens: null } };
+    expect(isDirty({ ...toFormModel(nullWire) }, nullWire)).toBe(false);
+  });
+
+  it("is true when a per-state value changes, false when only row order changes", () => {
+    const reordered = {
+      ...validForm(),
+      byState: [
+        { state: "triage", value: "2" },
+        { state: "build", value: "4" },
+      ],
+    };
+    expect(isDirty(reordered, WIRE)).toBe(false);
+    const changed = {
+      ...validForm(),
+      byState: [
+        { state: "build", value: "8" },
+        { state: "triage", value: "2" },
+      ],
+    };
+    expect(isDirty(changed, WIRE)).toBe(true);
   });
 });

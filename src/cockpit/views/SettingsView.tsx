@@ -5,8 +5,11 @@ import type { EditableSettingsWire } from "../api/types";
 import { ConnectionBanner } from "../components/ConnectionBanner";
 import { DispatchControl } from "../components/DispatchControl";
 import { Panel } from "../components/Panel";
+import { SkeletonForm } from "../components/Skeleton";
+import { ToastRegion, useToast } from "../components/Toast";
 import {
   type FieldId,
+  isDirty,
   type SettingsFormModel,
   toFormModel,
   validateSettings,
@@ -14,12 +17,14 @@ import {
 import { usePolling } from "../usePolling";
 
 /**
- * Sprint 6 / #71 — the Settings view + global Pause/Resume control.
+ * The Settings view + global Pause/Resume control.
  *
  * The form is built from `GET /api/v1/settings` (the whitelisted subset — never any secret/
  * `tracker` key), validated client-side against the same schema (`validateSettings`, pure), and
  * saved via `PUT /api/v1/settings`. The shared `DispatchControl` reflects the live
  * `control.dispatch_paused`/`paused_by` from the polled snapshot and calls the control endpoints.
+ * Fields are grouped into Polling / Agent / Budget sections; an unsaved-changes indicator gates the
+ * Save button and a Reset restores the loaded baseline. Save success/failure surfaces a toast.
  */
 
 type SaveState =
@@ -31,6 +36,7 @@ type SaveState =
 export const SettingsView = () => {
   const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
   const control = poll.data?.control ?? null;
+  const toast = useToast();
 
   const [form, setForm] = useState<SettingsFormModel | null>(null);
   // The originally-loaded settings, retained so a save can send a SPARSE patch (only the
@@ -59,6 +65,9 @@ export const SettingsView = () => {
   }, []);
 
   const validation = form === null || baseline === null ? null : validateSettings(form, baseline);
+  const dirty = form !== null && baseline !== null && isDirty(form, baseline);
+  const canSave =
+    form !== null && validation !== null && validation.ok && dirty && save.phase !== "saving";
 
   const onSave = async () => {
     if (form === null || validation === null || !validation.ok || validation.patch === undefined) {
@@ -70,33 +79,57 @@ export const SettingsView = () => {
       setForm(toFormModel(updated));
       setBaseline(updated);
       setSave({ phase: "saved" });
+      toast.notify("success", "Settings saved");
     } catch (err) {
-      setSave({ phase: "error", message: describeError(err) });
+      const msg = describeError(err);
+      setSave({ phase: "error", message: msg });
+      toast.notify("danger", `Save failed: ${msg}`);
     }
   };
 
   const patch = (next: Partial<SettingsFormModel>) =>
     setForm((f) => (f === null ? f : { ...f, ...next }));
 
+  const reset = () => {
+    if (baseline !== null) {
+      setForm(toFormModel(baseline));
+      setSave({ phase: "idle" });
+    }
+  };
+
   return (
     <>
-      <ConnectionBanner connection={poll.connection} error={poll.error} updatedLabel={null} />
+      <ConnectionBanner
+        connection={poll.connection}
+        error={poll.error}
+        updatedLabel={null}
+        intervalMs={COCKPIT_POLL_MS}
+        lastUpdatedAtMs={poll.lastUpdatedAtMs}
+      />
 
       <Panel title="Dispatch control">
-        <DispatchControl control={control} />
+        <DispatchControl control={control} onNotify={toast.notify} />
       </Panel>
 
       <Panel
         title="Settings"
         actions={
-          <button
-            type="button"
-            className="btn"
-            disabled={form === null || save.phase === "saving" || validation?.ok === false}
-            onClick={onSave}
-          >
-            {save.phase === "saving" ? "Saving…" : "Save"}
-          </button>
+          <div className="panel__actions">
+            {dirty ? <span className="settings-dirty">Unsaved changes</span> : null}
+            <button
+              type="button"
+              className="btn btn--sm"
+              disabled={!dirty || save.phase === "saving"}
+              onClick={reset}
+              title="Revert to the loaded values"
+            >
+              Reset
+            </button>
+            <button type="button" className="btn btn--primary" disabled={!canSave} onClick={onSave}>
+              {dirty ? <span className="btn__dot" aria-hidden="true" /> : null}
+              {save.phase === "saving" ? "Saving…" : "Save"}
+            </button>
+          </div>
         }
       >
         {loadError !== null ? (
@@ -104,7 +137,7 @@ export const SettingsView = () => {
             Failed to load settings: {loadError}
           </p>
         ) : form === null || validation === null ? (
-          <p className="view-placeholder">Loading settings…</p>
+          <SkeletonForm fields={5} />
         ) : (
           <form
             className="settings-form"
@@ -113,77 +146,87 @@ export const SettingsView = () => {
               void onSave();
             }}
           >
-            <NumberField
-              id="intervalMs"
-              label="Poll interval (ms)"
-              hint="How often the daemon scans for work and refreshes this view. Lower is more responsive but adds load."
-              value={form.intervalMs}
-              error={validation.errors.intervalMs}
-              onChange={(v) => patch({ intervalMs: v })}
-            />
-            <NumberField
-              id="maxConcurrentAgents"
-              label="Max concurrent agents"
-              hint="Hard ceiling on sessions running at once, across every issue state."
-              value={form.maxConcurrentAgents}
-              error={validation.errors.maxConcurrentAgents}
-              onChange={(v) => patch({ maxConcurrentAgents: v })}
-            />
-            <NumberField
-              id="maxTurns"
-              label="Max turns"
-              hint="A session is stopped after this many agent turns, even if it hasn't finished."
-              value={form.maxTurns}
-              error={validation.errors.maxTurns}
-              onChange={(v) => patch({ maxTurns: v })}
-            />
-            <NumberField
-              id="maxFailureRetries"
-              label="Max failure retries"
-              hint="Failed attempts are parked after this many retries; set 0 to fail fast."
-              value={form.maxFailureRetries}
-              error={validation.errors.maxFailureRetries}
-              onChange={(v) => patch({ maxFailureRetries: v })}
-            />
-            <NumberField
-              id="maxRetryBackoffMs"
-              label="Max retry backoff (ms)"
-              hint="Upper bound on the exponential wait between retries of a failed attempt."
-              value={form.maxRetryBackoffMs}
-              error={validation.errors.maxRetryBackoffMs}
-              onChange={(v) => patch({ maxRetryBackoffMs: v })}
-            />
-            <NumberField
-              id="maxTotalTokens"
-              label="Max total tokens (blank = no ceiling)"
-              hint="When set, dispatch auto-pauses once total token spend crosses this budget."
-              value={form.maxTotalTokens}
-              error={validation.errors.maxTotalTokens}
-              onChange={(v) => patch({ maxTotalTokens: v })}
-              allowEmpty
-            />
+            <section className="settings-section">
+              <h3 className="settings-section__head">Polling</h3>
+              <NumberField
+                id="intervalMs"
+                label="Poll interval (ms)"
+                hint="How often the daemon scans for work and refreshes this view. Lower is more responsive but adds load."
+                value={form.intervalMs}
+                error={validation.errors.intervalMs}
+                onChange={(v) => patch({ intervalMs: v })}
+              />
+            </section>
 
-            {form.byState.length > 0 ? (
-              <fieldset className="settings-fieldset">
-                <legend>Per-state concurrency</legend>
-                {form.byState.map((row) => (
-                  <NumberField
-                    key={row.state}
-                    id={`byState:${row.state}` as FieldId}
-                    label={row.state}
-                    value={row.value}
-                    error={validation.errors[`byState:${row.state}`]}
-                    onChange={(v) =>
-                      patch({
-                        byState: form.byState.map((r) =>
-                          r.state === row.state ? { ...r, value: v } : r,
-                        ),
-                      })
-                    }
-                  />
-                ))}
-              </fieldset>
-            ) : null}
+            <section className="settings-section">
+              <h3 className="settings-section__head">Agent</h3>
+              <NumberField
+                id="maxConcurrentAgents"
+                label="Max concurrent agents"
+                hint="Hard ceiling on sessions running at once, across every issue state."
+                value={form.maxConcurrentAgents}
+                error={validation.errors.maxConcurrentAgents}
+                onChange={(v) => patch({ maxConcurrentAgents: v })}
+              />
+              <NumberField
+                id="maxTurns"
+                label="Max turns"
+                hint="A session is stopped after this many agent turns, even if it hasn't finished."
+                value={form.maxTurns}
+                error={validation.errors.maxTurns}
+                onChange={(v) => patch({ maxTurns: v })}
+              />
+              <NumberField
+                id="maxFailureRetries"
+                label="Max failure retries"
+                hint="Failed attempts are parked after this many retries; set 0 to fail fast."
+                value={form.maxFailureRetries}
+                error={validation.errors.maxFailureRetries}
+                onChange={(v) => patch({ maxFailureRetries: v })}
+              />
+              <NumberField
+                id="maxRetryBackoffMs"
+                label="Max retry backoff (ms)"
+                hint="Upper bound on the exponential wait between retries of a failed attempt."
+                value={form.maxRetryBackoffMs}
+                error={validation.errors.maxRetryBackoffMs}
+                onChange={(v) => patch({ maxRetryBackoffMs: v })}
+              />
+              {form.byState.length > 0 ? (
+                <fieldset className="settings-fieldset">
+                  <legend>Per-state concurrency</legend>
+                  {form.byState.map((row) => (
+                    <NumberField
+                      key={row.state}
+                      id={`byState:${row.state}` as FieldId}
+                      label={row.state}
+                      value={row.value}
+                      error={validation.errors[`byState:${row.state}`]}
+                      onChange={(v) =>
+                        patch({
+                          byState: form.byState.map((r) =>
+                            r.state === row.state ? { ...r, value: v } : r,
+                          ),
+                        })
+                      }
+                    />
+                  ))}
+                </fieldset>
+              ) : null}
+            </section>
+
+            <section className="settings-section">
+              <h3 className="settings-section__head">Budget</h3>
+              <NumberField
+                id="maxTotalTokens"
+                label="Max total tokens (blank = no ceiling)"
+                hint="When set, dispatch auto-pauses once total token spend crosses this budget."
+                value={form.maxTotalTokens}
+                error={validation.errors.maxTotalTokens}
+                onChange={(v) => patch({ maxTotalTokens: v })}
+                allowEmpty
+              />
+            </section>
 
             {save.phase === "saved" ? <p className="settings-ok">Settings saved.</p> : null}
             {save.phase === "error" ? (
@@ -194,6 +237,7 @@ export const SettingsView = () => {
           </form>
         )}
       </Panel>
+      <ToastRegion toasts={toast.toasts} onDismiss={toast.dismiss} />
     </>
   );
 };

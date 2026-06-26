@@ -229,6 +229,45 @@ describe("WorkflowFile settings persist (#66, DD-4)", () => {
     }).pipe(Effect.provide(NodeContext.layer)),
   );
 
+  it.scoped(
+    "the agent credential (copilot.github_token) never reaches the editable view (F1)",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orchestra-settings-" });
+        const path = `${dir}/WORKFLOW.md`;
+        // A WORKFLOW.md that DOES carry the agent credential — the secret must still stay off the
+        // cockpit's read/write surface, exactly like `tracker.api_key`.
+        yield* fs.writeFileString(
+          path,
+          [
+            "---",
+            "tracker:",
+            "  kind: github",
+            "  repo: acme/widgets",
+            `  api_key: $${CRED_ENV_VAR}`,
+            "copilot:",
+            "  github_token: $ORCHESTRA_FIXTURE_AGENT_CRED",
+            "polling:",
+            "  interval_ms: 30000",
+            "---",
+            BODY,
+            "",
+          ].join("\n"),
+        );
+
+        const settings = yield* Effect.gen(function* () {
+          const wf = yield* WorkflowFile;
+          return yield* wf.read;
+        }).pipe(Effect.provide(WorkflowFileLive(path)));
+
+        // `copilot.*` is outside the EditableSettings whitelist, so neither the key nor its $VAR
+        // can traverse GET/PUT /settings — the projection is exactly the three non-secret blocks.
+        expect(Object.keys(settings)).toEqual(["polling", "agent", "budget"]);
+        expect(JSON.stringify(settings)).not.toContain("github_token");
+      }).pipe(Effect.provide(NodeContext.layer)),
+  );
+
   it.scoped("an invalid patch (negative concurrency) is rejected before the write lands", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

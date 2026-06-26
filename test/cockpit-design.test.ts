@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COLOR_TOKEN_VAR } from "../src/cockpit/design/tokens";
+import { COLOR_TOKEN_BG_VAR, COLOR_TOKEN_VAR } from "../src/cockpit/design/tokens";
 import { badgeOf } from "../src/cockpit/model/fleet";
 import { parseRoute, ROUTE_LABELS, ROUTES, routeHref } from "../src/cockpit/router";
 import { STATUS_STYLES, type Status } from "../src/core/observability/glyphs";
@@ -14,13 +14,21 @@ describe("cockpit design tokens — single source of truth parity", () => {
     }
   });
 
-  it("badgeOf mirrors the glyph + label from glyphs.ts and binds the matching color var", () => {
+  it("exposes a tint background var for every semantic color token", () => {
+    for (const status of statuses) {
+      const semanticColor = STATUS_STYLES[status].color;
+      expect(COLOR_TOKEN_BG_VAR[semanticColor]).toMatch(/^--status-.*-bg$/);
+    }
+  });
+
+  it("badgeOf mirrors the glyph + label from glyphs.ts and binds the matching color + tint vars", () => {
     for (const status of statuses) {
       const style = STATUS_STYLES[status];
       const badge = badgeOf(status);
       expect(badge.glyph).toBe(style.glyph);
       expect(badge.label).toBe(style.label);
       expect(badge.colorVar).toBe(`var(${COLOR_TOKEN_VAR[style.color]})`);
+      expect(badge.bgVar).toBe(`var(${COLOR_TOKEN_BG_VAR[style.color]})`);
       expect(badge.known).toBe(true);
     }
   });

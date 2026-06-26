@@ -53,18 +53,18 @@ const parseTimestamp = (raw: unknown, fallback: Date): Date => {
   return fallback;
 };
 
-/** Map Copilot's `result.usage` (camelCase) into the normalized {@link Usage}. */
+/**
+ * Map Copilot's terminal `result.usage` into the normalized {@link Usage}. Observed live
+ * (Sprint 7, `docs/sprint-7/captured-jsonl.raw`): `result.usage` carries only request /
+ * duration accounting (`premiumRequests`, `totalApiDurationMs`, plus `sessionDurationMs` and
+ * a `codeChanges` summary we don't surface) — it reports **no token counts**. Per-message
+ * `output_tokens` arrives on `assistant.message` instead (see that case below).
+ */
 export const mapUsage = (raw: unknown): Usage | undefined => {
   const o = asRecord(raw);
   const usage: Record<string, number> = {};
-  const input = num(o.inputTokens);
-  const output = num(o.outputTokens);
-  const total = num(o.totalTokens);
   const premium = num(o.premiumRequests);
   const apiMs = num(o.totalApiDurationMs);
-  if (input !== undefined) usage.input_tokens = input;
-  if (output !== undefined) usage.output_tokens = output;
-  if (total !== undefined) usage.total_tokens = total;
   if (premium !== undefined) usage.premium_requests = premium;
   if (apiMs !== undefined) usage.total_api_duration_ms = apiMs;
   return Object.keys(usage).length > 0 ? (usage as Usage) : undefined;
@@ -126,15 +126,20 @@ export const mapCopilotLine = (line: string, now: Date): MappedLine => {
     }
 
     case "assistant.message": {
-      // The substantive payload: final assistant text (+ tool requests we let run).
+      // The substantive payload: assistant text. Live Copilot reports this message's
+      // output-token count here (`data.outputTokens`) — `result.usage` carries none — so the
+      // turn's token total is the sum of these. The orchestrator folds `usage` per event
+      // (loop.ts `handleAgentEvent`), so attach it to the AgentMessage ONLY: also tagging the
+      // sibling Notification would double-count the same tokens.
       const text = str(data.content);
-      const role = str(data.role);
+      const outputTokens = num(data.outputTokens);
+      const usage = outputTokens !== undefined ? { output_tokens: outputTokens } : undefined;
       const events: AgentEvent[] = [
         {
           _tag: "AgentMessage",
           timestamp: ts,
-          ...(role ? { role } : {}),
           ...(text ? { text } : {}),
+          ...(usage ? { usage } : {}),
         },
       ];
       if (text !== undefined && text.trim() !== "") {
@@ -172,14 +177,21 @@ export const mapCopilotLine = (line: string, now: Date): MappedLine => {
     }
 
     default: {
-      // `--allow-all-tools` auto-grants permissions; surface that decision but keep going.
+      // If the CLI ever surfaces an explicit permission decision, record it. NOTE: the Sprint 7
+      // tool-use capture (`test/fixtures/copilot-jsonl/tool-use.jsonl`) shows that under
+      // `--allow-all-tools` — the only mode the runner spawns — Copilot emits **no `permission.*`
+      // events at all**; tools just run (`tool.execution_*`). This branch is therefore unexercised
+      // in practice, kept only as a forward-safe net for other approval modes.
       if (type.startsWith("permission.")) {
         const kind = str(data.tool) ?? type;
         return { events: [{ _tag: "ApprovalAutoApproved", timestamp: ts, kind }] };
       }
-      // Recognized-but-unsurfaced events (turn_start/_end, streaming deltas, ephemeral
-      // session.* status noise) are dropped for forward-compatibility. A line with no
-      // `type` is structurally unexpected → Malformed so visibility is preserved.
+      // Everything else recognized-but-unsurfaced is dropped for forward-compatibility — turn
+      // start/end, streaming/reasoning deltas (`assistant.message_delta`, `assistant.reasoning*`),
+      // tool execution (`tool.execution_start|partial_result|complete`), and the ephemeral
+      // `session.*` status/background-task noise. A tool-call `assistant.message` (empty `content`
+      // + `toolRequests`) maps to a benign empty AgentMessage above. A line with no `type` is
+      // structurally unexpected → Malformed so visibility is preserved.
       return type === "" ? malformed(line, ts) : { events: [] };
     }
   }

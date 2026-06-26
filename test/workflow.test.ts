@@ -49,6 +49,8 @@ const withFm = [
   "  kind: github",
   "  repo: acme/widgets",
   "  api_key: $GH",
+  "copilot:",
+  "  github_token: $COPILOT_GH",
   "workspace:",
   "  root: ./ws",
   "---",
@@ -74,12 +76,14 @@ describe("parseWorkflow (SPEC §5–§6)", () => {
     Effect.gen(function* () {
       const def = yield* parseWorkflow(
         withFm,
-        ctx({ env: { GH: "tok_123" }, workflowDir: "/repo" }),
+        ctx({ env: { GH: "tok_123", COPILOT_GH: "copilot_tok" }, workflowDir: "/repo" }),
       );
       expect(def.config.tracker.kind).toBe("github");
       expect(def.config.tracker.repo).toBe("acme/widgets");
       // $VAR resolved from env (value never logged).
       expect(def.config.tracker.api_key).toBe("tok_123");
+      // The agent credential resolves independently of the tracker token (F1).
+      expect(def.config.copilot.github_token).toBe("copilot_tok");
       // relative root resolved against the WORKFLOW.md directory, made absolute.
       expect(def.config.workspace.root).toBe(nodePath.resolve("/repo", "ws"));
       // untouched section still defaulted.
@@ -88,10 +92,13 @@ describe("parseWorkflow (SPEC §5–§6)", () => {
     }),
   );
 
-  effectIt.effect("treats a missing $VAR as absent api_key (SPEC §5.3.1)", () =>
+  effectIt.effect("treats a missing $VAR as absent api_key / github_token (SPEC §5.3.1)", () =>
     Effect.gen(function* () {
       const def = yield* parseWorkflow(withFm, ctx({ env: {} }));
       expect(def.config.tracker.api_key).toBeUndefined();
+      // Unresolved agent token is dropped (not left as a literal "$COPILOT_GH"), so the runner
+      // injects nothing and the child falls back to the CLI's ambient /login.
+      expect(def.config.copilot.github_token).toBeUndefined();
     }),
   );
 

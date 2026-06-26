@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { COCKPIT_POLL_MS, client } from "../api/instance";
 import { ConnectionBanner } from "../components/ConnectionBanner";
+import { SearchIcon } from "../components/icons";
 import { Panel } from "../components/Panel";
+import { SkeletonTable } from "../components/Skeleton";
 import {
   EMPTY_FILTER,
   type EventFilter,
@@ -12,10 +14,10 @@ import {
 import { usePolling } from "../usePolling";
 
 /**
- * Sprint 6 / #69 — the Events view: the bounded `recent_events` lifecycle feed, newest-first
- * (the pure `toEventsView` reverses the append-only wire order) and filterable by level, kind,
- * and free text (`filterEvents`, also pure). Same non-overlapping poll + last-good-on-error as
- * Fleet.
+ * The Events view: the bounded `recent_events` lifecycle feed, newest-first (the pure
+ * `toEventsView` reverses the append-only wire order) and filterable by level, kind, and free text
+ * (`filterEvents`, also pure). Same non-overlapping poll + last-good-on-error as Fleet. The filter
+ * bar is sticky so it stays usable while scrolling a long feed.
  */
 export const EventsView = () => {
   const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
@@ -30,7 +32,13 @@ export const EventsView = () => {
 
   return (
     <>
-      <ConnectionBanner connection={poll.connection} error={poll.error} updatedLabel={null} />
+      <ConnectionBanner
+        connection={poll.connection}
+        error={poll.error}
+        updatedLabel={null}
+        intervalMs={COCKPIT_POLL_MS}
+        lastUpdatedAtMs={poll.lastUpdatedAtMs}
+      />
       <Panel
         title={`Events (${shown.length})`}
         actions={
@@ -58,17 +66,22 @@ export const EventsView = () => {
                 </option>
               ))}
             </select>
-            <input
-              type="search"
-              aria-label="Search events"
-              placeholder="search…"
-              value={filter.query}
-              onChange={(e) => setFilter((f) => ({ ...f, query: e.target.value }))}
-            />
+            <span className="filters__search">
+              <SearchIcon />
+              <input
+                type="search"
+                aria-label="Search events"
+                placeholder="search…"
+                value={filter.query}
+                onChange={(e) => setFilter((f) => ({ ...f, query: e.target.value }))}
+              />
+            </span>
           </div>
         }
       >
-        {shown.length === 0 ? (
+        {poll.data === null ? (
+          <SkeletonTable rows={6} columns={5} />
+        ) : shown.length === 0 ? (
           <p className="view-placeholder">No events match the current filter.</p>
         ) : (
           <ul className="event-feed">

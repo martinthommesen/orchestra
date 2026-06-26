@@ -1,16 +1,19 @@
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { describeError } from "../api/errors";
 import { COCKPIT_POLL_MS, client } from "../api/instance";
 import { ConnectionBanner } from "../components/ConnectionBanner";
+import { SkeletonCards } from "../components/Skeleton";
 import { StatusChip } from "../components/StatusChip";
-import { type CardAction, type KanbanCard, toKanban } from "../model/kanban";
+import { ToastRegion, useToast } from "../components/Toast";
+import { type CardAction, type ColumnId, type KanbanCard, toKanban } from "../model/kanban";
 import { usePolling } from "../usePolling";
 
 /**
- * Sprint 6 / #70 — the Kanban board. Columns are derived by the pure, unit-tested `toKanban` over
- * the polled snapshot (no drag). Running cards expose a Cancel button and Retrying cards a
- * Retry-now button; both call the authorized POSTs and reflect the returned `CommandResult`
- * (`AckWire`), reverting (re-enabling) the button on a rejected/failed call.
+ * The Kanban board. Columns are derived by the pure, unit-tested `toKanban` over the polled
+ * snapshot (no drag). Running cards expose a Cancel button and Retrying cards a Retry-now button;
+ * both call the authorized POSTs and reflect the returned `CommandResult` (`AckWire`), reverting
+ * (re-enabling) the button on a rejected/failed call. A successful action surfaces a transient
+ * toast.
  *
  * Action state is keyed by each card's per-session `instanceKey` (not `issueId`): a previously
  * actioned issue that re-appears as a NEW session gets a fresh, enabled button. Stale entries are
@@ -26,8 +29,18 @@ interface ActionState {
 const runAction = (action: CardAction, issueId: string) =>
   action === "cancel" ? client.cancel(issueId) : client.retry(issueId);
 
+/** Per-column accent color (the design-system status each column represents). */
+const COLUMN_ACCENT: Record<ColumnId, string> = {
+  claimed: "var(--accent)",
+  running: "var(--status-info)",
+  retrying: "var(--status-warn)",
+  abandoned: "var(--status-muted)",
+  completed: "var(--status-success)",
+};
+
 export const KanbanView = () => {
   const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
+  const toast = useToast();
   const [actions, setActions] = useState<Record<string, ActionState>>({});
   const now = Date.now();
 
@@ -56,30 +69,61 @@ export const KanbanView = () => {
     setActions((a) => ({ ...a, [card.instanceKey]: { phase: "pending", message: "" } }));
     try {
       const ack = await runAction(action, card.issueId);
-      setActions((a) => ({
-        ...a,
-        [card.instanceKey]: ack.accepted
-          ? { phase: "ok", message: "requested" }
-          : { phase: "error", message: ack.reason ?? "not accepted" },
-      }));
+      if (ack.accepted) {
+        setActions((a) => ({ ...a, [card.instanceKey]: { phase: "ok", message: "requested" } }));
+        toast.notify(
+          "success",
+          `${action === "cancel" ? "Cancel" : "Retry"} requested for ${card.identifier}`,
+        );
+      } else {
+        const reason = ack.reason ?? "not accepted";
+        setActions((a) => ({ ...a, [card.instanceKey]: { phase: "error", message: reason } }));
+        toast.notify("danger", `${card.identifier}: ${reason}`);
+      }
     } catch (err) {
       // Revert on error: surface the reason and re-enable the button for another attempt.
-      setActions((a) => ({
-        ...a,
-        [card.instanceKey]: { phase: "error", message: describeError(err) },
-      }));
+      const msg = describeError(err);
+      setActions((a) => ({ ...a, [card.instanceKey]: { phase: "error", message: msg } }));
+      toast.notify("danger", `${card.identifier}: ${msg}`);
     }
   };
 
   return (
     <>
-      <ConnectionBanner connection={poll.connection} error={poll.error} updatedLabel={null} />
+      <ConnectionBanner
+        connection={poll.connection}
+        error={poll.error}
+        updatedLabel={null}
+        intervalMs={COCKPIT_POLL_MS}
+        lastUpdatedAtMs={poll.lastUpdatedAtMs}
+      />
       {poll.data === null ? (
-        <p className="view-placeholder">Waiting for the first snapshot…</p>
+        <div className="kanban">
+          {["claimed", "running", "retrying", "abandoned", "completed"].map((id) => (
+            <section
+              className="kanban__col"
+              key={id}
+              style={{ "--col-accent": COLUMN_ACCENT[id as ColumnId] } as CSSProperties}
+            >
+              <header className="kanban__col-head">
+                <span className="kanban__col-title">{id}</span>
+                <span className="kanban__col-count">·</span>
+              </header>
+              <div className="kanban__cards">
+                <SkeletonCards count={id === "claimed" ? 0 : 2} />
+              </div>
+            </section>
+          ))}
+        </div>
       ) : (
         <div className="kanban">
           {columns.map((col) => (
-            <section className="kanban__col" key={col.id} aria-label={col.title}>
+            <section
+              className="kanban__col"
+              key={col.id}
+              aria-label={col.title}
+              style={{ "--col-accent": COLUMN_ACCENT[col.id] } as CSSProperties}
+            >
               <header className="kanban__col-head">
                 <span className="kanban__col-title">{col.title}</span>
                 <span className="kanban__col-count">{col.count}</span>
@@ -94,7 +138,12 @@ export const KanbanView = () => {
                     </span>
                   </p>
                 ) : col.cards.length === 0 ? (
-                  <p className="kanban__empty muted">—</p>
+                  <p className="kanban__empty">
+                    <span className="kanban__empty-glyph" aria-hidden="true">
+                      —
+                    </span>
+                    <span>empty</span>
+                  </p>
                 ) : (
                   col.cards.map((card) => (
                     <Card
@@ -110,6 +159,7 @@ export const KanbanView = () => {
           ))}
         </div>
       )}
+      <ToastRegion toasts={toast.toasts} onDismiss={toast.dismiss} />
     </>
   );
 };
@@ -156,10 +206,10 @@ const Card = ({
   const label = pending ? "…" : done ? "requested ✓" : armed ? "Confirm cancel" : baseLabel;
 
   return (
-    <article className="card">
+    <article className="card" style={{ "--card-accent": card.badge.colorVar } as CSSProperties}>
       <div className="card__head">
         <span className="card__id mono">{card.identifier}</span>
-        <StatusChip badge={card.badge} />
+        <StatusChip badge={card.badge} size="sm" />
       </div>
       <p className="card__detail muted">{card.detail}</p>
       {act ? (

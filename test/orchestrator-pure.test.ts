@@ -601,6 +601,17 @@ describe("state transitions", () => {
     expect(s.agent_totals.total_tokens).toBe(9);
     expect(s.agent_totals.runtime_seconds).toBeCloseTo(2);
   });
+
+  it("folds output-only usage into total_tokens so the budget binds on Copilot (#77)", () => {
+    // Copilot reports only per-message `output_tokens` — no input/total. Without the fallback,
+    // `total_tokens` would stay 0 and `budget.max_total_tokens` could never pause real runs.
+    const s = addUsage(addUsage(base(), { output_tokens: 5 }), { output_tokens: 7 });
+    expect(s.agent_totals.output_tokens).toBe(12);
+    expect(s.agent_totals.total_tokens).toBe(12);
+    // A result-style usage with no token fields (premium/duration only) adds nothing to the total.
+    const s2 = addUsage(s, { premium_requests: 3, total_api_duration_ms: 1_000 });
+    expect(s2.agent_totals.total_tokens).toBe(12);
+  });
 });
 
 // ───────────────────────────── preflight (§6.3) ─────────────────────────────

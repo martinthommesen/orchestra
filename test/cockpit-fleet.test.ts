@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { SnapshotWire } from "../src/cockpit/api/types";
-import { badgeForPhase, toFleetView } from "../src/cockpit/model/fleet";
+import {
+  badgeForPhase,
+  type SortDir,
+  type SortKey,
+  sortRunning,
+  toFleetView,
+} from "../src/cockpit/model/fleet";
 
 const NOW = Date.parse("2026-01-01T00:01:00.000Z");
 
@@ -119,10 +125,81 @@ describe("toFleetView", () => {
     );
     expect(vm.budget).toMatchObject({ paused: false, stateLabel: "active" });
     expect(vm.budget?.summary).toBe("250 / 1000 tokens · 750 left");
+    expect(vm.budget?.fraction).toBeCloseTo(0.25);
+    expect(vm.budget?.percentLabel).toBe("25%");
     expect(vm.restore?.summary).toContain(
       "1 running · 0 retrying · 3 completed · restored 12s ago",
     );
     expect(vm.rateLimits).toEqual({ available: true, summary: '{"remaining":42}' });
+  });
+
+  it("clamps the budget fraction to [0,1] and reports 0 for a non-positive limit", () => {
+    const over = toFleetView(
+      baseSnapshot({
+        budget: { limit_tokens: 100, spent_tokens: 250, remaining_tokens: 0, paused: true },
+      }),
+      NOW,
+    );
+    expect(over.budget?.fraction).toBe(1);
+    expect(over.budget?.percentLabel).toBe("100%");
+    expect(over.budget?.stateLabel).toBe("paused");
+    const zeroLimit = toFleetView(
+      baseSnapshot({
+        budget: { limit_tokens: 0, spent_tokens: 0, remaining_tokens: 0, paused: false },
+      }),
+      NOW,
+    );
+    expect(zeroLimit.budget?.fraction).toBe(0);
+    expect(zeroLimit.budget?.percentLabel).toBe("0%");
+  });
+
+  it("derives metric cards with semantic accents in nav order", () => {
+    const vm = toFleetView(
+      baseSnapshot({ counts: { running: 2, retrying: 1, abandoned: 0, completed: 4, claimed: 7 } }),
+      NOW,
+    );
+    expect(vm.metrics.map((m) => m.label)).toEqual([
+      "Running",
+      "Retrying",
+      "Abandoned",
+      "Completed",
+      "Claimed",
+      "Max agents",
+    ]);
+    expect(vm.metrics[0]).toMatchObject({ value: 2, accent: "info" });
+    expect(vm.metrics[1]).toMatchObject({ value: 1, accent: "warn" });
+    expect(vm.metrics[3]).toMatchObject({ value: 4, accent: "success" });
+    expect(vm.metrics[4]).toMatchObject({ value: 7, accent: "neutral" });
+  });
+
+  it("carries elapsedMs/attemptNumber on running rows for sorting", () => {
+    const vm = toFleetView(
+      baseSnapshot({
+        running: [
+          {
+            issue_id: "i1",
+            issue_identifier: "ORC-1",
+            attempt: 2,
+            workspace_path: "/ws",
+            started_at: "2026-01-01T00:00:30.000Z",
+            status: "StreamingTurn",
+          },
+          {
+            issue_id: "i2",
+            issue_identifier: "ORC-2",
+            attempt: null,
+            workspace_path: "/ws",
+            started_at: "not-a-date",
+            status: "PreparingWorkspace",
+          },
+        ],
+      }),
+      NOW,
+    );
+    expect(vm.running[0]?.elapsedMs).toBe(30000);
+    expect(vm.running[0]?.attemptNumber).toBe(2);
+    expect(vm.running[1]?.elapsedMs).toBeNull();
+    expect(vm.running[1]?.attemptNumber).toBeNull();
   });
 
   it("formats totals runtime as a human duration", () => {
@@ -139,5 +216,68 @@ describe("toFleetView", () => {
     const vm = toFleetView(baseSnapshot({ rate_limits: cyclic }), NOW);
     expect(vm.rateLimits.available).toBe(true);
     expect(vm.rateLimits.summary).toContain("unserializable");
+  });
+});
+
+describe("sortRunning", () => {
+  const rows = toFleetView(
+    baseSnapshot({
+      running: [
+        {
+          issue_id: "b",
+          issue_identifier: "ORC-B",
+          attempt: 1,
+          workspace_path: "/ws",
+          started_at: "2026-01-01T00:00:50.000Z", // 10s elapsed
+          status: "StreamingTurn",
+        },
+        {
+          issue_id: "a",
+          issue_identifier: "ORC-A",
+          attempt: 3,
+          workspace_path: "/ws",
+          started_at: "2026-01-01T00:00:20.000Z", // 40s elapsed
+          status: "Failed",
+        },
+        {
+          issue_id: "c",
+          issue_identifier: "ORC-C",
+          attempt: null,
+          workspace_path: "/ws",
+          started_at: "not-a-date",
+          status: "PreparingWorkspace",
+        },
+      ],
+    }),
+    NOW,
+  ).running;
+
+  const ids = (r: typeof rows) => r.map((x) => x.issueId);
+
+  it("sorts by identifier ascending/descending", () => {
+    expect(ids(sortRunning(rows, "issue", "asc"))).toEqual(["a", "b", "c"]);
+    expect(ids(sortRunning(rows, "issue", "desc"))).toEqual(["c", "b", "a"]);
+  });
+
+  it("sorts by elapsed; unknown (null) always sinks regardless of direction", () => {
+    expect(ids(sortRunning(rows, "elapsed", "asc"))).toEqual(["b", "a", "c"]);
+    expect(ids(sortRunning(rows, "elapsed", "desc"))).toEqual(["a", "b", "c"]);
+  });
+
+  it("sorts by attempt; unknown (null) always sinks regardless of direction", () => {
+    expect(ids(sortRunning(rows, "attempt", "asc"))).toEqual(["b", "a", "c"]);
+    expect(ids(sortRunning(rows, "attempt", "desc"))).toEqual(["a", "b", "c"]);
+  });
+
+  it("sorts by status label", () => {
+    // failed < running < unknown (alphabetical); direction flips known, unknown still sinks
+    const sorted = sortRunning(rows, "status" as SortKey, "asc" as SortDir);
+    expect(sorted[0]?.badge.label).toBe("failed");
+  });
+
+  it("does not mutate the input array", () => {
+    const before = ids(rows);
+    sortRunning(rows, "elapsed", "desc");
+    expect(ids(rows)).toEqual(before);
   });
 });
