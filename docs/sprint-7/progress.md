@@ -162,8 +162,10 @@ files, pushed, and opened PRs unprompted).
 targets trusted environments; isolation is the **per-issue workspace + least-privilege token**,
 not OS/container sandboxing (§44, future). The Copilot CLI surfaces `sandboxApplied`/
 `sandboxOptOutRequested` in telemetry but the smoke saw no spawn flag that flips them on; if one
-exists it would thread through as a small additive `copilot.*` knob (M3 step 2). **Still owed:**
-the README trust-posture section, grounded in this observation.
+exists it would thread through as a small additive `copilot.*` knob (M3 step 2). **DONE:** the
+README now carries a "Security & trust posture" section grounded in this observation (unsandboxed
+auto-approve; isolation = workspace + token; OS/container sandbox is the operator's job, §44
+future). M3 (#9) is resolved by observation + documentation.
 
 ## Deferrals & follow-ups — filed as GitHub issues
 
