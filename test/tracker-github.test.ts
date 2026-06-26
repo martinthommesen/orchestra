@@ -137,6 +137,28 @@ describe("deriveState (§11.3)", () => {
     });
     expect(isEligible(issue, ctx)).toBe(false);
   });
+
+  it("prefers a terminal/handoff label over a lingering active label on an OPEN issue (#79)", () => {
+    // The agent applies `Human Review` but leaves the old `In Progress` label, which sorts FIRST
+    // in GitHub's label order. A first-match-wins scan would return `In Progress` (active) and
+    // re-dispatch finished work; terminal precedence must win so the handoff holds.
+    const cfg = config({
+      active_states: ["Todo", "In Progress"],
+      terminal_states: ["Done", "Closed", "Human Review"],
+    });
+    const issue = toIssue(
+      payload({ state: "open", labels: ["In Progress", "Human Review"] }),
+      cfg,
+    );
+    expect(issue.state).toBe("Human Review");
+    const ctx = selectionContext({
+      activeStates: cfg.tracker.active_states,
+      terminalStates: cfg.tracker.terminal_states,
+      requiredLabels: cfg.tracker.required_labels,
+      claimed: [],
+    });
+    expect(isEligible(issue, ctx)).toBe(false);
+  });
 });
 
 describe("toIssue", () => {

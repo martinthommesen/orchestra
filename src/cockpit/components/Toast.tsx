@@ -42,20 +42,43 @@ export const useToast = (): ToastApi => {
   return { toasts, notify, dismiss };
 };
 
-/** Auto-dismiss the latest toast after `TTL_MS`; cleared on unmount. */
+/**
+ * Auto-dismiss EACH toast `TTL_MS` after it first appears — one independent timer per id, so a
+ * burst of actions dismisses every toast on its own schedule (not just the latest) and the queue
+ * can't grow without bound. Timers for toasts dismissed early are dropped; all are cleared on unmount.
+ */
 export const useToastAutoDismiss = (
   toasts: ReadonlyArray<Toast>,
   dismiss: (id: number) => void,
 ) => {
-  const latest = toasts.at(-1) ?? null;
-  const idRef = useRef<number | null>(null);
+  const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   useEffect(() => {
-    if (latest === null) return;
-    if (idRef.current === latest.id) return;
-    idRef.current = latest.id;
-    const t = setTimeout(() => dismiss(latest.id), TTL_MS);
-    return () => clearTimeout(t);
-  }, [latest, dismiss]);
+    const live = timers.current;
+    // Arm a timer for every toast that doesn't already have one.
+    for (const t of toasts) {
+      if (!live.has(t.id)) {
+        live.set(
+          t.id,
+          setTimeout(() => dismiss(t.id), TTL_MS),
+        );
+      }
+    }
+    // Reap timers for toasts already gone (dismissed early or auto-dismissed) so the map can't leak.
+    for (const [id, handle] of live) {
+      if (!toasts.some((t) => t.id === id)) {
+        clearTimeout(handle);
+        live.delete(id);
+      }
+    }
+  }, [toasts, dismiss]);
+
+  useEffect(() => {
+    const live = timers.current;
+    return () => {
+      for (const handle of live.values()) clearTimeout(handle);
+      live.clear();
+    };
+  }, []);
 };
 
 export const ToastRegion = ({

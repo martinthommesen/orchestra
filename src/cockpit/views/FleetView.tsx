@@ -71,9 +71,13 @@ export const FleetView = () => {
   const filtered =
     statusFilter === "all" ? vm.running : vm.running.filter((r) => r.badge.label === statusFilter);
   const sorted = sortRunning(filtered, sort.key, sort.dir);
+  // Options = statuses currently present PLUS the active filter, so a filter whose status has
+  // since vanished stays visible and clearable (otherwise the control would disappear while the
+  // stale filter still hid every live row, stranding "No sessions match" with no way to reset).
   const statusOptions = new Set(vm.running.map((r) => r.badge.label));
+  if (statusFilter !== "all") statusOptions.add(statusFilter);
   const statusFilterActions =
-    statusOptions.size > 1 ? (
+    statusOptions.size > 1 || statusFilter !== "all" ? (
       <select
         aria-label="Filter by status"
         value={statusFilter}

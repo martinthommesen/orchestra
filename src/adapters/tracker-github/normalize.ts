@@ -130,19 +130,29 @@ export const deriveState = (p: GitHubIssuePayload, config: ServiceConfig): strin
     }
     return deriveClosedState(config, p.state_reason ?? null);
   }
-  // Precedence 2: an open issue reads its state from the first matching status label.
-  const stateByLabel = new Map<string, string>();
-  for (const s of [...config.tracker.active_states, ...config.tracker.terminal_states]) {
-    stateByLabel.set(normalizeState(s), s);
-  }
-  for (const label of labelNames(p)) {
-    const hit = stateByLabel.get(normalizeState(label));
-    if (hit !== undefined) {
-      return hit;
+  // Precedence 2: an open issue reads its state from a status label, with TERMINAL/handoff
+  // labels winning over ACTIVE ones regardless of GitHub's label order. This makes a handoff
+  // robust (#79): an issue moved to e.g. `Human Review` that still carries a lingering active
+  // label (`Todo`/`In Progress`) stops dispatch instead of normalizing back to active and
+  // re-running already-finished work — the same terminal-wins precedence a closed issue gets.
+  const labels = labelNames(p);
+  const matchFirst = (states: ReadonlyArray<string>): string | undefined => {
+    const byLabel = new Map(states.map((s) => [normalizeState(s), s] as const));
+    for (const label of labels) {
+      const hit = byLabel.get(normalizeState(label));
+      if (hit !== undefined) {
+        return hit;
+      }
     }
-  }
+    return undefined;
+  };
   // Precedence 3: open with no status label → first active state.
-  return config.tracker.active_states[0] ?? "Todo";
+  return (
+    matchFirst(config.tracker.terminal_states) ??
+    matchFirst(config.tracker.active_states) ??
+    config.tracker.active_states[0] ??
+    "Todo"
+  );
 };
 
 const toDate = (iso: string | null | undefined): Date | null => {

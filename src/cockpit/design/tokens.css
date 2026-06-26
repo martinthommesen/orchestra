@@ -179,12 +179,22 @@ button {
     --text-muted: #c7d2dc;
     --text-faint: #aebccb;
   }
-  :root[data-theme="light"],
-  :root:not([data-theme="dark"]) {
+  /* Light high-contrast overrides — guarded exactly like the main light theme so they apply
+     ONLY when light is actually active. An explicit `data-theme="light"` pin, OR an unpinned
+     user on a light OS; a dark-OS user with no `data-theme` must NOT get light text on dark. */
+  :root[data-theme="light"] {
     --border: #57606a;
     --border-strong: #424a53;
     --text-muted: #24292f;
     --text-faint: #363b42;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --border: #57606a;
+      --border-strong: #424a53;
+      --text-muted: #24292f;
+      --text-faint: #363b42;
+    }
   }
 }
 
