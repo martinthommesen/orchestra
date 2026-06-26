@@ -50,6 +50,19 @@ describe("toEventsView", () => {
     const [row] = toEventsView(snap([ev({ emitted_at: "nope" })]), NOW);
     expect(row?.relativeLabel).toBe("—");
   });
+
+  it("falls back to the level glyph for an unknown event kind (⚠ for warn, · for info)", () => {
+    const [warnRow] = toEventsView(snap([ev({ kind: "totally_unknown", level: "warn" })]), NOW);
+    expect(warnRow?.glyph).toBe("⚠");
+    const [infoRow] = toEventsView(snap([ev({ kind: "totally_unknown", level: "info" })]), NOW);
+    expect(infoRow?.glyph).toBe("·");
+  });
+
+  it("truncates an over-long message to one capped line so the feed can't overflow", () => {
+    const [row] = toEventsView(snap([ev({ message: "x".repeat(500) })]), NOW);
+    expect(row?.message.length).toBeLessThanOrEqual(200);
+    expect(row?.message).not.toBe("x".repeat(500));
+  });
 });
 
 describe("filterEvents", () => {
@@ -91,6 +104,16 @@ describe("filterEvents", () => {
 
   it("returns all rows for the empty filter", () => {
     expect(filterEvents(rows, { level: "all", kind: "all", query: "  " })).toHaveLength(3);
+  });
+
+  it("free-text search works when an event has no identifier (no crash, message still matched)", () => {
+    const noId = toEventsView(
+      snap([ev({ seq: 9, kind: "completed", message: "finished cleanup" })]),
+      NOW,
+    );
+    expect(noId[0]?.identifier).toBeNull();
+    expect(filterEvents(noId, { level: "all", kind: "all", query: "cleanup" })).toHaveLength(1);
+    expect(filterEvents(noId, { level: "all", kind: "all", query: "ORC-9" })).toHaveLength(0);
   });
 
   it("lists distinct kinds sorted", () => {

@@ -224,4 +224,17 @@ describe("toKanban", () => {
     // (its action button is enabled again) rather than inheriting the prior session's state.
     expect(first?.instanceKey).not.toBe(second?.instanceKey);
   });
+
+  it("retry card detail collapses to just the attempt when error + schedule are absent", () => {
+    // A retry entry with a null error and no scheduled_at/delay_ms must not render a dangling
+    // separator or a bogus due time — the detail collapses to just "#attempt".
+    const cols = toKanban(
+      snap({
+        counts: { running: 0, retrying: 1, completed: 0, claimed: 1 },
+        retrying: [{ issue_id: "i9", identifier: "ORC-9", attempt: 2, due_at_ms: 0, error: null }],
+      }),
+      NOW,
+    );
+    expect(col(cols, "retrying")?.cards[0]?.detail).toBe("#2");
+  });
 });

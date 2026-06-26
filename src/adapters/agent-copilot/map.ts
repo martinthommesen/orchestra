@@ -34,7 +34,13 @@ const asRecord = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
-const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+// Finite-only: a vendor JSON number can be non-finite (`1e400` parses to `Infinity`,
+// `typeof === "number"`), which would silently corrupt the durable checkpoint —
+// `runtime_seconds` accumulates `total_api_duration_ms`, and `JSON.stringify(Infinity)`
+// emits `null`, which then fails the strict re-decode on the next boot and discards the
+// whole state file. A non-finite measurement is meaningless; drop it like any non-number.
+const num = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) ? v : undefined;
 
 const parseTimestamp = (raw: unknown, fallback: Date): Date => {
   const s = str(raw);
@@ -93,8 +99,19 @@ export const mapCopilotLine = (line: string, now: Date): MappedLine => {
 
   switch (type) {
     case "result": {
-      // Terminal: dual success signal is `result.exitCode` (and the process exit).
-      const exitCode = num(obj.exitCode) ?? 0;
+      // Terminal: dual success signal is `result.exitCode` (and the process exit). A clean
+      // turn is exitCode 0; an entirely absent field keeps the historical "completed"
+      // default. But a PRESENT-but-non-numeric value (e.g. the string "5") must NOT coerce
+      // to success — that would mask a failed turn (and the runner's `sawCompleted` latch
+      // would then also swallow the process's own non-zero exit). Map any present
+      // non-numeric/non-finite code to a non-zero (failure) exit.
+      const rawExit = obj.exitCode;
+      const exitCode =
+        rawExit === undefined
+          ? 0
+          : typeof rawExit === "number" && Number.isFinite(rawExit)
+            ? rawExit
+            : 1;
       const usage = mapUsage(obj.usage);
       if (exitCode === 0) {
         return {

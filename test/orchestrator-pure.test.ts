@@ -29,6 +29,7 @@ import {
   selectionContext,
 } from "../src/core/orchestrator/selection";
 import {
+  abandon,
   addUsage,
   claim,
   clearRetry,
@@ -549,6 +550,37 @@ describe("state transitions", () => {
     expect(s.completed).toEqual([]);
     expect(s.running.a).toBeUndefined();
     expect(s.claimed).not.toContain("a");
+  });
+
+  it("abandon parks the issue: clears running/retry, adds to abandoned, KEEPS the claim (ORC-F037)", () => {
+    // Park a running issue. The ORC-F037 invariant: running/retry_attempts/abandoned are
+    // mutually exclusive, and a parked issue STAYS claimed so selection never re-picks it.
+    const s0 = setRunning(base(), attempt("a"));
+    const parked = abandon(s0, {
+      issue_id: "a",
+      identifier: "a",
+      attempts: 4,
+      abandoned_at: new Date(0),
+      reason: "exhausted failure retries",
+    });
+    expect(parked.abandoned.a?.attempts).toBe(4);
+    expect(parked.running.a).toBeUndefined();
+    expect(parked.retry_attempts.a).toBeUndefined();
+    expect(parked.claimed).toContain("a"); // stays claimed → selection skips it until reaped
+
+    // Re-dispatch (setRunning) and retry (setRetry) both move it OUT of abandoned.
+    expect(setRunning(parked, attempt("a")).abandoned.a).toBeUndefined();
+    expect(
+      setRetry(parked, { issue_id: "a", identifier: "a", attempt: 1, due_at_ms: 0, error: null })
+        .abandoned.a,
+    ).toBeUndefined();
+
+    // markCompleted clears abandoned + the claim; release does too (without completing).
+    const done = markCompleted(parked, "a");
+    expect(done.abandoned.a).toBeUndefined();
+    expect(done.claimed).not.toContain("a");
+    expect(done.completed).toContain("a");
+    expect(release(parked, "a").abandoned.a).toBeUndefined();
   });
 
   it("addUsage accumulates token + runtime totals", () => {

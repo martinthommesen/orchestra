@@ -104,8 +104,12 @@ const messageFromBody = (status: number, body: string): string => {
         return parsed.message;
       }
     } catch {
-      return body;
+      // Not JSON — fall through and surface the raw body.
     }
+    // Valid JSON without a usable `message` (e.g. `{"error":"..."}`), or non-JSON text:
+    // preserve the raw body so the server's actual diagnostic isn't dropped for a generic
+    // status line.
+    return body;
   }
   return `request failed with status ${status}`;
 };
