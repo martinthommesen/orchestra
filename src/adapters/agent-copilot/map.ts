@@ -47,18 +47,18 @@ const parseTimestamp = (raw: unknown, fallback: Date): Date => {
   return fallback;
 };
 
-/** Map Copilot's `result.usage` (camelCase) into the normalized {@link Usage}. */
+/**
+ * Map Copilot's terminal `result.usage` into the normalized {@link Usage}. Observed live
+ * (Sprint 7, `docs/sprint-7/captured-jsonl.raw`): `result.usage` carries only request /
+ * duration accounting (`premiumRequests`, `totalApiDurationMs`, plus `sessionDurationMs` and
+ * a `codeChanges` summary we don't surface) — it reports **no token counts**. Per-message
+ * `output_tokens` arrives on `assistant.message` instead (see that case below).
+ */
 export const mapUsage = (raw: unknown): Usage | undefined => {
   const o = asRecord(raw);
   const usage: Record<string, number> = {};
-  const input = num(o.inputTokens);
-  const output = num(o.outputTokens);
-  const total = num(o.totalTokens);
   const premium = num(o.premiumRequests);
   const apiMs = num(o.totalApiDurationMs);
-  if (input !== undefined) usage.input_tokens = input;
-  if (output !== undefined) usage.output_tokens = output;
-  if (total !== undefined) usage.total_tokens = total;
   if (premium !== undefined) usage.premium_requests = premium;
   if (apiMs !== undefined) usage.total_api_duration_ms = apiMs;
   return Object.keys(usage).length > 0 ? (usage as Usage) : undefined;
@@ -109,15 +109,20 @@ export const mapCopilotLine = (line: string, now: Date): MappedLine => {
     }
 
     case "assistant.message": {
-      // The substantive payload: final assistant text (+ tool requests we let run).
+      // The substantive payload: assistant text. Live Copilot reports this message's
+      // output-token count here (`data.outputTokens`) — `result.usage` carries none — so the
+      // turn's token total is the sum of these. The orchestrator folds `usage` per event
+      // (loop.ts `handleAgentEvent`), so attach it to the AgentMessage ONLY: also tagging the
+      // sibling Notification would double-count the same tokens.
       const text = str(data.content);
-      const role = str(data.role);
+      const outputTokens = num(data.outputTokens);
+      const usage = outputTokens !== undefined ? { output_tokens: outputTokens } : undefined;
       const events: AgentEvent[] = [
         {
           _tag: "AgentMessage",
           timestamp: ts,
-          ...(role ? { role } : {}),
           ...(text ? { text } : {}),
+          ...(usage ? { usage } : {}),
         },
       ];
       if (text !== undefined && text.trim() !== "") {

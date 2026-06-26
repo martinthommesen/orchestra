@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { it } from "@effect/vitest";
@@ -29,17 +30,24 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
     expect(r.events[0]?._tag).toBe("Malformed");
   });
 
-  it("maps assistant.message to AgentMessage + Notification", () => {
+  it("maps assistant.message to AgentMessage + Notification, with output tokens on the AgentMessage only", () => {
     const r = mapCopilotLine(
-      JSON.stringify({ type: "assistant.message", data: { role: "assistant", content: "pong" } }),
+      JSON.stringify({
+        type: "assistant.message",
+        data: { content: "pong", model: "claude-opus-4.8", outputTokens: 5 },
+      }),
       NOW,
     );
     expect(r.events.map((e) => e._tag)).toEqual(["AgentMessage", "Notification"]);
-    const msg = r.events[0];
+    const [msg, note] = r.events;
     if (msg?._tag === "AgentMessage") {
       expect(msg.text).toBe("pong");
-      expect(msg.role).toBe("assistant");
+      // Per-message token count lives on `assistant.message` (the terminal `result` carries
+      // none). The orchestrator folds `usage` per event, so it rides the AgentMessage ONLY —
+      // tagging the sibling Notification too would double-count the same 5 tokens.
+      expect(msg.usage?.output_tokens).toBe(5);
     }
+    expect(note?.usage).toBeUndefined();
     expect(r.terminal).toBeUndefined();
   });
 
@@ -48,20 +56,29 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
     expect(r.events.map((e) => e._tag)).toEqual(["AgentMessage"]);
   });
 
-  it("maps a successful result to TurnCompleted + completed terminal", () => {
+  it("maps a successful result to TurnCompleted + completed terminal (request/duration usage, no tokens)", () => {
+    // Observed live: `result.usage` reports request/duration accounting only — no token
+    // counts (those arrive per `assistant.message`). `sessionDurationMs`/`codeChanges` are
+    // present in the wire shape but deliberately not surfaced into normalized Usage.
     const r = mapCopilotLine(
       JSON.stringify({
         type: "result",
         exitCode: 0,
-        usage: { premiumRequests: 2, outputTokens: 4 },
+        usage: {
+          premiumRequests: 15,
+          totalApiDurationMs: 1748,
+          sessionDurationMs: 8859,
+          codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] },
+        },
       }),
       NOW,
     );
     expect(r.events.map((e) => e._tag)).toEqual(["TurnCompleted"]);
     expect(r.terminal?._tag).toBe("completed");
     if (r.terminal?._tag === "completed") {
-      expect(r.terminal.usage?.premium_requests).toBe(2);
-      expect(r.terminal.usage?.output_tokens).toBe(4);
+      expect(r.terminal.usage?.premium_requests).toBe(15);
+      expect(r.terminal.usage?.total_api_duration_ms).toBe(1748);
+      expect(r.terminal.usage?.output_tokens).toBeUndefined();
     }
   });
 
@@ -125,26 +142,61 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
 });
 
 describe("mapUsage", () => {
-  it("maps camelCase Copilot usage to normalized fields", () => {
+  it("maps the observed result.usage request/duration fields, ignoring non-usage extras", () => {
     expect(
       mapUsage({
-        inputTokens: 1,
-        outputTokens: 2,
-        totalTokens: 3,
-        premiumRequests: 4,
-        totalApiDurationMs: 5,
+        premiumRequests: 15,
+        totalApiDurationMs: 1748,
+        sessionDurationMs: 8859,
+        codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] },
       }),
     ).toEqual({
-      input_tokens: 1,
-      output_tokens: 2,
-      total_tokens: 3,
-      premium_requests: 4,
-      total_api_duration_ms: 5,
+      premium_requests: 15,
+      total_api_duration_ms: 1748,
     });
   });
   it("returns undefined when nothing usable is present", () => {
     expect(mapUsage({})).toBeUndefined();
     expect(mapUsage(null)).toBeUndefined();
+    // `result.usage` with only the non-token extras yields no normalized Usage.
+    expect(mapUsage({ sessionDurationMs: 10, codeChanges: { filesModified: [] } })).toBeUndefined();
+  });
+});
+
+// ─────────────────────── mapper pinned to the live capture ───────────────────────
+// Reconciles map.ts to *observed* Copilot output (Sprint 7 standalone smoke; raw at
+// docs/sprint-7/captured-jsonl.raw, scrubbed + trimmed into this fixture), superseding the
+// Sprint 0 spike's assumed mapping table. NOTE: this is the trivial no-tool "Print DONE" turn
+// — it pins the streaming + terminal/usage paths only. Tool-use paths (permission.*,
+// toolRequests, multi-message turns, error terminals) are NOT exercised and remain pinned to
+// spike assumptions until a tool-using run is captured (see docs/sprint-7/progress.md F2).
+describe("mapCopilotLine pinned to the live standalone capture", () => {
+  const lines = readFileSync(
+    new URL("./fixtures/copilot-jsonl/standalone-result.jsonl", import.meta.url),
+    "utf8",
+  )
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+
+  it("maps every captured line without a single Malformed event", () => {
+    const tags = lines.flatMap((l) => mapCopilotLine(l, NOW).events.map((e) => e._tag));
+    expect(tags).not.toContain("Malformed");
+  });
+
+  it("reaches exactly one terminal, completed, at the result line", () => {
+    const terminals = lines.map((l) => mapCopilotLine(l, NOW).terminal).filter((t) => t != null);
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]?._tag).toBe("completed");
+  });
+
+  it("accounts the turn's output tokens exactly once across the whole stream", () => {
+    // The only token count Copilot emits is the per-`assistant.message` `outputTokens` (5);
+    // summed over every emitted event it must total 5 — proving it rides exactly one event,
+    // not both AgentMessage and its sibling Notification.
+    const total = lines
+      .flatMap((l) => mapCopilotLine(l, NOW).events)
+      .reduce((n, e) => n + (e.usage?.output_tokens ?? 0), 0);
+    expect(total).toBe(5);
   });
 });
 
@@ -193,8 +245,8 @@ const runFakeCopilot = (
 const HAPPY = `#!/bin/sh
 echo "$PWD" > cwd.txt
 echo '{"type":"session.idle","ephemeral":true}'
-echo '{"type":"assistant.message","data":{"role":"assistant","content":"pong"}}'
-echo '{"type":"result","exitCode":0,"usage":{"premiumRequests":2,"outputTokens":4}}'
+echo '{"type":"assistant.message","data":{"content":"pong","model":"claude-opus-4.8","outputTokens":4}}'
+echo '{"type":"result","exitCode":0,"usage":{"premiumRequests":2,"totalApiDurationMs":1748}}'
 exit 0
 `;
 
@@ -212,7 +264,7 @@ exit 0
 // Emits the terminal `result` with NO trailing newline (printf, not echo) — the splitter
 // must still flush the final partial segment or the turn would look like a crash (#22).
 const NO_TRAILING_NEWLINE = `#!/bin/sh
-printf '{"type":"result","exitCode":0,"usage":{"outputTokens":4}}'
+printf '{"type":"result","exitCode":0,"usage":{"premiumRequests":2,"totalApiDurationMs":1748}}'
 exit 0
 `;
 

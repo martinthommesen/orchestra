@@ -98,7 +98,6 @@ const Notification = Schema.TaggedStruct("Notification", {
 /** Any other assistant message payload (SPEC `other_message`). */
 const AgentMessage = Schema.TaggedStruct("AgentMessage", {
   ...EventEnvelope,
-  role: Schema.optional(Schema.String),
   text: Schema.optional(Schema.String),
 });
 
