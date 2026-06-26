@@ -167,6 +167,30 @@ README now carries a "Security & trust posture" section grounded in this observa
 auto-approve; isolation = workspace + token; OS/container sandbox is the operator's job, §44
 future). M3 (#9) is resolved by observation + documentation.
 
+## Finding F5 — Session-resume resolved by observation (Milestone 2 / #6)
+
+Driven live, two ways, with a nuanced verdict:
+
+- **Standalone probe (clean session):** turn 1 (`--session-id $S`) planted a codeword in one
+  process; turn 2 (`--resume $S`) in a **separate** process recalled it exactly, no error. So the
+  Copilot CLI persists sessions to disk and `--resume <id>` **carries full context across process
+  boundaries**.
+- **Daemon kill-restart (the real #6 scenario):** with `resume_sessions: true`, killed the daemon
+  **mid-turn** (after `SessionStarted`, before `TurnCompleted`). The checkpoint correctly captured
+  the running attempt **with its `session_id`** (`StreamingTurn`). On restart the orphan was
+  dispatched `resumed=true` with the same id — but the resumed turn **failed
+  (`AgentProcessExit`)**: a session whose process was killed mid-turn is **not resumable**. The
+  **self-heal fired exactly as designed** — a fresh turn (`resumed=false`, new id) on the on-disk
+  workspace, which **completed and handed off** (PR opened, `Human Review` applied, `TerminalKill`).
+  (A later in-run continuation, `resumed=true` off a _cleanly-completed_ turn, succeeded — matching
+  the probe.)
+
+**Verdict — `resume_sessions` is safe to enable, but stays default-off** because the benefit is
+narrow: the common crash case (mid-turn restart) is unresumable and fail-safes to fresh anyway;
+resume only helps when a restart lands _between_ turns (clean session). Crucially the live run
+**proved "can only help, never strand."** `workflow.ts` doc updated with this evidence; the #41
+baseline (fresh continuation) remains the default. #6 is **resolved, not re-deferred.**
+
 ## Deferrals & follow-ups — filed as GitHub issues
 
 Per the plan (open issues for the deferrals + one per real drift finding so nothing is lost):

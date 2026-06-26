@@ -141,10 +141,17 @@ const PersistenceConfig = Schema.Struct({
    * Opt-in best-effort agent session resume on restart (Sprint 4 / #42). When `true`, a
    * restored continuation carries its persisted `session_id` and is dispatched with
    * `--resume`; when `false` (default) the restored continuation runs fresh — exactly the
-   * #41 baseline. Resume is self-healing: a stale/expired session id fails the turn and
+   * #41 baseline. Resume is self-healing: a stale/unresumable session id fails the turn and
    * falls back to a fresh continuation against the on-disk workspace (the true record of
-   * progress), so it can only help, never strand. Default **off** because Copilot owns the
-   * session lifecycle and cross-restart liveness is not guaranteed.
+   * progress), so it can only help, never strand.
+   *
+   * **Sprint 7 live verdict (#6) — safe to enable, but stays default-off because the benefit
+   * is narrow.** Observed against the real Copilot CLI: cross-process `--resume <id>` of a
+   * *cleanly-completed* session IS honored and carries full context; but a session whose
+   * process was **killed mid-turn** (the usual crash-restart case) is **not resumable** — the
+   * resumed turn exits non-zero (`AgentProcessExit`) and the self-heal fallback runs a fresh
+   * turn on the on-disk workspace (proven live, end-to-end). So enabling it helps only when a
+   * restart lands *between* turns (clean session) and fail-safes otherwise; it never strands.
    */
   resume_sessions: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations({ identifier: "PersistenceConfig" });
