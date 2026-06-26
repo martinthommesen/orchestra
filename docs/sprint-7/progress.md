@@ -82,11 +82,14 @@ totalApiDurationMs, sessionDurationMs, codeChanges}`. The Sprint 0 §4 capture _
   `output_tokens` now rides the **`AgentMessage`** (the orchestrator folds `usage` per event,
   so it accumulates into `agent_totals` automatically); it is attached to the `AgentMessage`
   **only**, never the sibling `Notification`, or the same tokens would double-count.
-- **No `input_tokens` / `total_tokens` are emitted anywhere** (n=3 now: Sprint 0 + the no-tool
-  AND tool-use Sprint 7 captures). Since the `budget.max_total_tokens` ceiling gates on
-  `total_tokens`, it **cannot bind on Copilot output as-is** — feeds deferred **#77**. Not
-  fabricating a `total_tokens` from `output_tokens`. (A tool-use turn summed 147 output tokens
-  across two `assistant.message`s and still reported zero input/total.)
+- **No `input_tokens` / `total_tokens` are emitted anywhere** (n=3: Sprint 0 + the no-tool AND
+  tool-use Sprint 7 captures); Copilot surfaces only per-message `output_tokens`. **Fixed in PR
+  review:** `addUsage` now derives the running total as `total_tokens ?? input + output`, so for
+  Copilot `agent_totals.total_tokens` accumulates the output sum and `budget.max_total_tokens`
+  **actually binds** (it was silently inert). Arithmetically `total = input + output`, and input
+  is 0, so this is an honest — if conservative — total (under-counts only by the unreported input
+  tokens). The Fleet "Total tokens" now reflects the output sum rather than a flat 0. **#77 now
+  covers only the deferred USD ceiling** (`max_cost_usd` × `usd_per_million_tokens`).
 - **`assistant.message.role` does not exist** (the real field is `model`); the dead `role`
   extraction + the unused `AgentMessage.role` schema field were removed.
 
@@ -197,9 +200,10 @@ Per the plan (open issues for the deferrals + one per real drift finding so noth
 
 - **F1** — agent/tracker credential conflation: **fixed in-tree** (commit `d05fe58`), not an
   open issue. The token model is documented for operators in `WORKFLOW.example.md` + the runbook.
-- [#77](https://github.com/martinthommesen/orchestra/issues/77) — **budget ceiling can't bind on
-  Copilot** (the F2 token-accounting finding: no `input_tokens`/`total_tokens` emitted) **+ the
-  deferred USD ceiling** (was #8), which is downstream of the same accounting gap.
+- [#77](https://github.com/martinthommesen/orchestra/issues/77) — the **deferred USD ceiling**
+  (was #8: `max_cost_usd` × `usd_per_million_tokens`). The token-binding half (the F2 finding that
+  `budget.max_total_tokens` was inert on Copilot's output-only usage) is **fixed in this PR** —
+  `addUsage` folds output into the running total — so #77 narrows to the USD ceiling only.
 - [#78](https://github.com/martinthommesen/orchestra/issues/78) — **§56 live gated integration
   suite** (deferred): the runbook is its spec; the captured fixtures make it cheap. Carries the
   tool-use-capture gap from the F2 caveat.
