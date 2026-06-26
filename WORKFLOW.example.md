@@ -52,6 +52,14 @@ agent:
 # --- copilot: the coding agent ------------------------------------------------
 copilot:
   command: copilot # the headless CLI Orchestra drives (see spike doc)
+  # github_token: $COPILOT_GITHUB_TOKEN
+  #   The credential the AGENT subprocess runs as — Copilot's own model auth + the
+  #   git/PR tooling it invokes. DISTINCT from tracker.api_key above: Copilot needs the
+  #   fine-grained-PAT-only `Copilot Requests` entitlement, which a classic tracker
+  #   token lacks. Leave UNSET to use the CLI's ambient `copilot /login` (the typical
+  #   workstation setup). SET it on a HEADLESS server with no interactive login — there
+  #   is no `/login` to fall back to, so an entitled PAT here is required. A secret:
+  #   `$VAR`, never surfaced via the cockpit `/settings` or `/api/v1/state`.
   # model: claude-opus-4.8       # optional model override; default chosen by Copilot
   turn_timeout_ms: 3600000 # hard cap per turn stream (1h)
   read_timeout_ms: 5000 # startup / sync-request timeout
