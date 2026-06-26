@@ -160,14 +160,21 @@ export const mapCopilotLine = (line: string, now: Date): MappedLine => {
     }
 
     default: {
-      // `--allow-all-tools` auto-grants permissions; surface that decision but keep going.
+      // If the CLI ever surfaces an explicit permission decision, record it. NOTE: the Sprint 7
+      // tool-use capture (`test/fixtures/copilot-jsonl/tool-use.jsonl`) shows that under
+      // `--allow-all-tools` — the only mode the runner spawns — Copilot emits **no `permission.*`
+      // events at all**; tools just run (`tool.execution_*`). This branch is therefore unexercised
+      // in practice, kept only as a forward-safe net for other approval modes.
       if (type.startsWith("permission.")) {
         const kind = str(data.tool) ?? type;
         return { events: [{ _tag: "ApprovalAutoApproved", timestamp: ts, kind }] };
       }
-      // Recognized-but-unsurfaced events (turn_start/_end, streaming deltas, ephemeral
-      // session.* status noise) are dropped for forward-compatibility. A line with no
-      // `type` is structurally unexpected → Malformed so visibility is preserved.
+      // Everything else recognized-but-unsurfaced is dropped for forward-compatibility — turn
+      // start/end, streaming/reasoning deltas (`assistant.message_delta`, `assistant.reasoning*`),
+      // tool execution (`tool.execution_start|partial_result|complete`), and the ephemeral
+      // `session.*` status/background-task noise. A tool-call `assistant.message` (empty `content`
+      // + `toolRequests`) maps to a benign empty AgentMessage above. A line with no `type` is
+      // structurally unexpected → Malformed so visibility is preserved.
       return type === "" ? malformed(line, ts) : { events: [] };
     }
   }

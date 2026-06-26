@@ -82,11 +82,11 @@ totalApiDurationMs, sessionDurationMs, codeChanges}`. The Sprint 0 §4 capture _
   `output_tokens` now rides the **`AgentMessage`** (the orchestrator folds `usage` per event,
   so it accumulates into `agent_totals` automatically); it is attached to the `AgentMessage`
   **only**, never the sibling `Notification`, or the same tokens would double-count.
-- **No `input_tokens` / `total_tokens` are emitted anywhere** (n=2: Sprint 0 + Sprint 7, both
-  no-tool turns). Since the `budget.max_total_tokens` ceiling gates on `total_tokens`, it
-  **cannot bind on Copilot output as-is** — a real finding that feeds the deferred **#8**
-  USD/token-ceiling follow-up. Not fabricating a `total_tokens` from `output_tokens`. Whether a
-  _tool-using_ turn reports more is still uncaptured (this capture is the trivial happy path).
+- **No `input_tokens` / `total_tokens` are emitted anywhere** (n=3 now: Sprint 0 + the no-tool
+  AND tool-use Sprint 7 captures). Since the `budget.max_total_tokens` ceiling gates on
+  `total_tokens`, it **cannot bind on Copilot output as-is** — feeds deferred **#77**. Not
+  fabricating a `total_tokens` from `output_tokens`. (A tool-use turn summed 147 output tokens
+  across two `assistant.message`s and still reported zero input/total.)
 - **`assistant.message.role` does not exist** (the real field is `model`); the dead `role`
   extraction + the unused `AgentMessage.role` schema field were removed.
 
@@ -94,10 +94,19 @@ totalApiDurationMs, sessionDurationMs, codeChanges}`. The Sprint 0 §4 capture _
 banner-superseded; scrubbed fixture `test/fixtures/copilot-jsonl/standalone-result.jsonl` (12
 representative lines, home-path scrubbed, bulky `session.*` catalogs trimmed) pins the mapper in
 `test/agent-copilot.test.ts` ("pinned to the live standalone capture"): zero `Malformed`, exactly
-one `completed` terminal, output tokens accounted exactly once. **Caveat (carry-forward):** this
-pins the **streaming + terminal/usage** paths only. Tool-use paths (`permission.*`,
-`toolRequests`, multi-message turns, error terminals) are **not** exercised and remain on spike
-assumptions until a tool-using run (e.g. the F2 README/PR run) is teed to a file.
+one `completed` terminal, output tokens accounted exactly once.
+
+**Tool-use caveat — now CLOSED (#78).** A second capture (`tool-use.jsonl`) forced shell +
+file-write tools, exercising the paths the spike assumed: the agent emits `tool.execution_start|
+partial_result|complete` (**not** `tool.call`), `assistant.reasoning*`, and
+`session.background_tasks_changed`; a tool-call arrives as an `assistant.message` with **empty
+`content` + `toolRequests`**; and under `--allow-all-tools` there are **zero `permission.*`
+events** (the spike's `permission.* → ApprovalAutoApproved` is unexercised — that branch is now
+a documented forward-safe net only). Critically, **`map.ts` did not drift** — every unrecognized
+family falls through the forward-compat drop, so the tool-use stream maps with **zero
+`Malformed`** and needed **no functional change**. Pinned by a second fixture + tests
+("pinned to a tool-using capture (#78)"). The live README/PR daemon runs (issues #5/#7) further
+confirm tool use end-to-end (agent opened PRs #6/#8 via its own tooling).
 
 ## Finding F3 — Handoff has no home in the plain-GitHub state model (product finding)
 
@@ -139,6 +148,22 @@ mark-completed that the "neither" path would leak). The fix:
 clean its workspace — only reconcile's `TerminalKill`/`NeitherKill` paths do. Handoff issues are
 reaped (and cleaned) by reconcile when caught mid-continuation, but a clean `max_turns` finish
 leaves the workspace until restart cleanup. Worth its own follow-up if it bites.
+
+## Finding F4 — Trust posture observed: agent runs tools UNSANDBOXED (Milestone 3 / #9)
+
+The tool-use capture answers #9 by observation. `tool.execution_complete.data.toolTelemetry.
+properties` reports `sandboxApplied: "false"`, `sandboxOptOutRequested: "false"`,
+`executionMode: "sync"`, `detached: "false"`. So under the runner's spawn flags
+(`--allow-all-tools`, no approval prompts) the agent executes `bash` (and file writes) **directly
+on the host, with no sandbox** — confirmed live too (issues #5/#7: the agent ran git, edited
+files, pushed, and opened PRs unprompted).
+
+**This is the v1 trust posture to document, not a defect** (Security Rule #5 / spec §15.1): v1
+targets trusted environments; isolation is the **per-issue workspace + least-privilege token**,
+not OS/container sandboxing (§44, future). The Copilot CLI surfaces `sandboxApplied`/
+`sandboxOptOutRequested` in telemetry but the smoke saw no spawn flag that flips them on; if one
+exists it would thread through as a small additive `copilot.*` knob (M3 step 2). **Still owed:**
+the README trust-posture section, grounded in this observation.
 
 ## Deferrals & follow-ups — filed as GitHub issues
 

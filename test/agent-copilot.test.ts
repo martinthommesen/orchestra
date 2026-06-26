@@ -200,6 +200,45 @@ describe("mapCopilotLine pinned to the live standalone capture", () => {
   });
 });
 
+// ─────────────────── mapper pinned to a TOOL-USING capture ───────────────────
+// Sprint 7 / #78 — the happy-path fixture above is no-tool. This second capture forces shell +
+// file-write tools, exercising the paths the spike got wrong: the agent emits `tool.execution_*`
+// (NOT `tool.call`) and — under `--allow-all-tools` — **no `permission.*` events at all**, plus
+// `assistant.reasoning*` and `session.background_tasks_changed`. The point is that the mapper is
+// *robust* to all of it: every unrecognized family falls through to the forward-compat drop, so
+// the stream maps with ZERO Malformed and no functional map.ts change was needed for tool use.
+describe("mapCopilotLine pinned to a tool-using capture (#78)", () => {
+  const lines = readFileSync(new URL("./fixtures/copilot-jsonl/tool-use.jsonl", import.meta.url), "utf8")
+    .split("\n")
+    .filter((l) => l.trim() !== "");
+
+  it("maps a real tool-using turn with zero Malformed and one completed terminal", () => {
+    const events = lines.flatMap((l) => mapCopilotLine(l, NOW).events);
+    expect(events.map((e) => e._tag)).not.toContain("Malformed");
+    const terminals = lines.map((l) => mapCopilotLine(l, NOW).terminal).filter((t) => t != null);
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]?._tag).toBe("completed");
+  });
+
+  it("drops the tool-execution / reasoning event families (forward-compat, not Malformed)", () => {
+    // A tool-call `assistant.message` carries empty `content` + `toolRequests` → a benign
+    // empty AgentMessage liveness tick (no Notification); the `tool.execution_*`,
+    // `assistant.reasoning*`, and `session.*` lines surface nothing at all.
+    for (const type of ["tool.execution_start", "tool.execution_complete", "assistant.reasoning"]) {
+      const line = lines.find((l) => (JSON.parse(l) as { type?: string }).type === type);
+      expect(line, `fixture is missing a ${type} line`).toBeDefined();
+      expect(mapCopilotLine(line as string, NOW)).toEqual({ events: [] });
+    }
+  });
+
+  it("sums per-message output tokens across the multi-message turn", () => {
+    const total = lines
+      .flatMap((l) => mapCopilotLine(l, NOW).events)
+      .reduce((n, e) => n + (e.usage?.output_tokens ?? 0), 0);
+    expect(total).toBe(147);
+  });
+});
+
 // ───────────────────────── subprocess integration ─────────────────────────
 
 const platform = NodeContext.layer;
