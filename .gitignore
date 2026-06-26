@@ -19,6 +19,9 @@ log/
 # Orchestra runtime
 /workspaces/
 symphony_workspaces/
+/.orchestra/
+# Local operator config (copied from WORKFLOW.example.md; never committed)
+/WORKFLOW.md
 
 # Env / secrets
 .env
@@ -28,6 +31,18 @@ local.settings.json
 
 # Sprint 0 Copilot spike throwaway PoC (never committed)
 /.spike-copilot/
+
+# Claude Code local config (e.g. preview launch.json)
+/.claude/
+
+# Sprint 7 raw Copilot captures — provenance only; scrubbed fixtures are in
+# test/fixtures/copilot-jsonl/ (raws carry absolute home paths, never committed)
+docs/sprint-*/captured-*.raw
+
+# Local screenshots / browser-automation artifacts
+/.cockpit-shots/
+/.cockpit-fleet.png
+/.playwright-mcp/
 
 # deepsec generated output
 .deepsec/.env*.local
