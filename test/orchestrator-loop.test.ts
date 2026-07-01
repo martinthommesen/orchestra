@@ -730,6 +730,44 @@ describe("orchestrator loop (fakes + TestClock)", () => {
       }),
   );
 
+  it.scoped("AgentProgress accounts usage before returning", () =>
+    Effect.gen(function* () {
+      const issue = makeIssue({ id: "i1", identifier: "ORC-1", state: "In Progress" });
+      const tracker = yield* makeFakeTracker({
+        candidates: [issue],
+        states: [makeStateRef("i1", "In Progress")],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+      const obs = yield* makeRecordingObserver();
+      yield* runner.control.pushScript("i1", [
+        Ev.agentProgress({ output_tokens: 5 }),
+        Ev.turnCompleted(),
+        { _tag: "complete" },
+      ]);
+
+      const def = buildDef({ maxTurns: 1 });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obs.layer,
+      });
+
+      yield* Effect.gen(function* () {
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+        yield* waitFor(obs.queue, (o) => o._tag === "WorkerCompleted" && o.issueId === "i1");
+
+        const store = yield* OrchestratorStore;
+        const state = yield* store.get;
+        expect(state.agent_totals.output_tokens).toBe(5);
+        expect(state.agent_totals.total_tokens).toBe(5);
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
+  );
+
   // ── #81 continuation racing a handoff ────────────────────────────────────────
 
   it.scoped(

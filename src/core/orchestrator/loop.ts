@@ -716,13 +716,13 @@ export const runOrchestrator = (
             return;
           }
           rec.lastEventAt = yield* clock.monotonicMillis;
-          if (event._tag === "AgentProgress") return; // liveness only — stall clock refreshed above
-          if (event._tag === "SessionStarted") {
-            rec.sessionId = event.session_id;
-          }
           const usage: Usage | undefined = event.usage;
           if (usage !== undefined) {
             yield* store.update((s) => addUsage(s, usage));
+          }
+          if (event._tag === "AgentProgress") return; // liveness only — stall clock + usage refreshed above
+          if (event._tag === "SessionStarted") {
+            rec.sessionId = event.session_id;
           }
           yield* store.update((s) => {
             const ra = s.running[issueId];

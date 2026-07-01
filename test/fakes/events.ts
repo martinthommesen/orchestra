@@ -34,7 +34,8 @@ export const turnCompleted = (usage?: Usage): AgentEvent => ({
   ...(usage ? { usage } : {}),
 });
 
-export const agentProgress = (): AgentEvent => ({
+export const agentProgress = (usage?: Usage): AgentEvent => ({
   _tag: "AgentProgress",
   timestamp: ts(),
+  ...(usage ? { usage } : {}),
 });
