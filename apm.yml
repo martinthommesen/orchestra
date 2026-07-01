@@ -1,0 +1,19 @@
+# apm.yml — Agent Package Manager manifest for Orchestra.
+# https://github.com/microsoft/apm
+#
+# Declares the agentic configuration for this project so any developer who
+# clones the repo can reproduce the full agent setup with `apm install`.
+
+name: orchestra
+version: 0.0.0
+description: >
+  TypeScript/Effect daemon that orchestrates GitHub Copilot coding-agent sessions:
+  polls GitHub Issues, manages per-issue workspaces, bounded concurrency, retries,
+  durable state, and a React web cockpit.
+
+dependencies:
+  mcp:
+    # GitHub MCP server — aligned with the project's Octokit/GitHub integration.
+    # Provides issue lookup, PR creation, and repo context to coding agents.
+    - name: io.github.github/github-mcp-server
+      transport: http

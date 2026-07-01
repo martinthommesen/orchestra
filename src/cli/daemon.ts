@@ -11,6 +11,7 @@ import { LiveBudgetLive } from "../core/observability/live-budget";
 import { ObservabilityLive } from "../core/observability/observer-tee";
 import { RecentCompletionsLive } from "../core/observability/recent-completions";
 import { RestoreStatusLive } from "../core/observability/restore-status";
+import { TelemetryLive } from "../core/observability/telemetry";
 import { CommandBusLive } from "../core/orchestrator/command";
 import { runOrchestrator } from "../core/orchestrator/loop";
 import { layerDurableOrchestratorStore } from "../core/persistence";
@@ -102,7 +103,7 @@ export const runDaemon = (argv: ReadonlyArray<string>): void => {
     yield* run.pipe(Effect.provide(appLayer(def.config)));
   }).pipe(Effect.provide(NodeContext.layer));
 
-  NodeRuntime.runMain(program.pipe(Effect.provide(LoggerLive)), {
+  NodeRuntime.runMain(program.pipe(Effect.provide(LoggerLive), Effect.provide(TelemetryLive)), {
     // We install our own logfmt logger; suppress runMain's built-in pretty logger so
     // there is a single, stable structured line per event.
     disablePrettyLogger: true,

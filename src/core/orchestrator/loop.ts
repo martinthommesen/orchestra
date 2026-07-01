@@ -700,7 +700,7 @@ export const runOrchestrator = (
           dispatched: toDispatch.map((i) => i.id),
           dispatchSkipped: budget.paused || operatorPaused,
         });
-      });
+      }).pipe(Effect.withSpan("orchestrator.tick"));
 
       // ───────────────────────────── Message handlers ─────────────────────────────
 

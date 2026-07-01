@@ -1,0 +1,43 @@
+# Dependabot configuration — automatic dependency update PRs.
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+
+updates:
+  # npm / pnpm workspace — covers all package.json dependencies.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      effect:
+        patterns:
+          - "effect"
+          - "@effect/*"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      vite-build:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "tsup"
+          - "tsx"
+      linting:
+        patterns:
+          - "@biomejs/biome"
+          - "prettier"
+          - "typescript"
+    open-pull-requests-limit: 10
+
+  # GitHub Actions — keeps action hashes up to date.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5

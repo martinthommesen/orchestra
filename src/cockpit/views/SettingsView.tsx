@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { describeError } from "../api/errors";
-import { COCKPIT_POLL_MS, client } from "../api/instance";
+import { client } from "../api/instance";
 import type { EditableSettingsWire } from "../api/types";
-import { ConnectionBanner } from "../components/ConnectionBanner";
 import { DispatchControl } from "../components/DispatchControl";
 import { Panel } from "../components/Panel";
 import { SkeletonForm } from "../components/Skeleton";
@@ -14,7 +13,7 @@ import {
   toFormModel,
   validateSettings,
 } from "../model/settings";
-import { usePolling } from "../usePolling";
+import { useSnapshot } from "../snapshot";
 
 /**
  * The Settings view + global Pause/Resume control.
@@ -34,7 +33,7 @@ type SaveState =
   | { phase: "error"; message: string };
 
 export const SettingsView = () => {
-  const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
+  const poll = useSnapshot();
   const control = poll.data?.control ?? null;
   const toast = useToast();
 
@@ -66,8 +65,7 @@ export const SettingsView = () => {
 
   const validation = form === null || baseline === null ? null : validateSettings(form, baseline);
   const dirty = form !== null && baseline !== null && isDirty(form, baseline);
-  const canSave =
-    form !== null && validation !== null && validation.ok && dirty && save.phase !== "saving";
+  const canSave = form !== null && validation?.ok === true && dirty && save.phase !== "saving";
 
   const onSave = async () => {
     if (form === null || validation === null || !validation.ok || validation.patch === undefined) {
@@ -98,15 +96,7 @@ export const SettingsView = () => {
   };
 
   return (
-    <>
-      <ConnectionBanner
-        connection={poll.connection}
-        error={poll.error}
-        updatedLabel={null}
-        intervalMs={COCKPIT_POLL_MS}
-        lastUpdatedAtMs={poll.lastUpdatedAtMs}
-      />
-
+    <div className="view">
       <Panel title="Dispatch control">
         <DispatchControl control={control} onNotify={toast.notify} />
       </Panel>
@@ -238,7 +228,7 @@ export const SettingsView = () => {
         )}
       </Panel>
       <ToastRegion toasts={toast.toasts} onDismiss={toast.dismiss} />
-    </>
+    </div>
   );
 };
 

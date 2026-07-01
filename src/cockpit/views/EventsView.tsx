@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { COCKPIT_POLL_MS, client } from "../api/instance";
-import { ConnectionBanner } from "../components/ConnectionBanner";
 import { SearchIcon } from "../components/icons";
 import { Panel } from "../components/Panel";
 import { SkeletonTable } from "../components/Skeleton";
@@ -11,34 +9,25 @@ import {
   filterEvents,
   toEventsView,
 } from "../model/events";
-import { usePolling } from "../usePolling";
+import { useSnapshot } from "../snapshot";
 
 /**
- * The Events view: the bounded `recent_events` lifecycle feed, newest-first (the pure
- * `toEventsView` reverses the append-only wire order) and filterable by level, kind, and free text
- * (`filterEvents`, also pure). Same non-overlapping poll + last-good-on-error as Fleet. The filter
- * bar is sticky so it stays usable while scrolling a long feed.
+ * The Events view: the bounded `recent_events` lifecycle feed, newest-first (the pure `toEventsView`
+ * reverses the append-only wire order) and filterable by level, kind, and free text (`filterEvents`,
+ * also pure). Reads the shared snapshot poll. The filter bar lives in the panel header so it stays put
+ * while scrolling a long feed.
  */
 export const EventsView = () => {
-  const poll = usePolling(() => client.getState(), COCKPIT_POLL_MS);
+  const poll = useSnapshot();
   const [filter, setFilter] = useState<EventFilter>(EMPTY_FILTER);
   const now = Date.now();
 
-  // The feed is bounded, so deriving on each render is cheap; relative labels then refresh on the
-  // next poll without an effect or memo dance.
   const rows = poll.data === null ? [] : toEventsView(poll.data, now);
   const kinds = eventKinds(rows);
   const shown = filterEvents(rows, filter);
 
   return (
-    <>
-      <ConnectionBanner
-        connection={poll.connection}
-        error={poll.error}
-        updatedLabel={null}
-        intervalMs={COCKPIT_POLL_MS}
-        lastUpdatedAtMs={poll.lastUpdatedAtMs}
-      />
+    <div className="view">
       <Panel
         title={`Events (${shown.length})`}
         actions={
@@ -50,7 +39,7 @@ export const EventsView = () => {
                 setFilter((f) => ({ ...f, level: e.target.value as EventFilter["level"] }))
               }
             >
-              <option value="all">all levels</option>
+              <option value="all">All levels</option>
               <option value="info">info</option>
               <option value="warn">warn</option>
             </select>
@@ -59,7 +48,7 @@ export const EventsView = () => {
               value={filter.kind}
               onChange={(e) => setFilter((f) => ({ ...f, kind: e.target.value }))}
             >
-              <option value="all">all kinds</option>
+              <option value="all">All kinds</option>
               {kinds.map((k) => (
                 <option key={k} value={k}>
                   {k}
@@ -71,7 +60,7 @@ export const EventsView = () => {
               <input
                 type="search"
                 aria-label="Search events"
-                placeholder="search…"
+                placeholder="Search…"
                 value={filter.query}
                 onChange={(e) => setFilter((f) => ({ ...f, query: e.target.value }))}
               />
@@ -99,6 +88,6 @@ export const EventsView = () => {
           </ul>
         )}
       </Panel>
-    </>
+    </div>
   );
 };

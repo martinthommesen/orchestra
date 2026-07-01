@@ -17,7 +17,11 @@ export interface Toast {
   readonly message: string;
 }
 
-const TTL_MS = 3500;
+const TTL_MS: Record<ToastTone, number> = {
+  success: 3500,
+  info: 3500,
+  danger: 8000,
+};
 
 export interface ToastApi {
   readonly toasts: ReadonlyArray<Toast>;
@@ -50,9 +54,9 @@ export const useToast = (): ToastApi => {
  */
 const ToastItem = ({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) => {
   useEffect(() => {
-    const timer = setTimeout(() => onDismiss(toast.id), TTL_MS);
+    const timer = setTimeout(() => onDismiss(toast.id), TTL_MS[toast.tone]);
     return () => clearTimeout(timer);
-  }, [toast.id, onDismiss]);
+  }, [toast.id, toast.tone, onDismiss]);
   return (
     <output className={`toast toast--${toast.tone}`}>
       <span className="toast__icon" aria-hidden="true">
