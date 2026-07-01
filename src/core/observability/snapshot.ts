@@ -4,6 +4,7 @@ import type { ActivityEntry } from "./live-activity";
 import type { RecentCompletion } from "./recent-completions";
 import type { EventEnvelope } from "./recent-events";
 import type { RestoreSummary } from "./restore-status";
+import type { SnapshotWire } from "./snapshot-wire";
 
 /**
  * The JSON snapshot **projection** (SPEC §13.3/§13.7) consumed by `GET /api/v1/state`.
@@ -54,15 +55,17 @@ const controlProjection = (operatorPaused: boolean, budget: BudgetStatus | undef
 };
 
 /** Project the budget status onto the additive wire block, or null to omit it. */
-const budgetProjection = (budget: BudgetStatus | undefined) =>
-  budget?.configured
-    ? {
-        limit_tokens: budget.limitTokens,
-        spent_tokens: budget.spentTokens,
-        remaining_tokens: budget.remainingTokens,
-        paused: budget.paused,
-      }
-    : null;
+const budgetProjection = (budget: BudgetStatus | undefined) => {
+  if (!budget?.configured || budget.limitTokens === null || budget.remainingTokens === null) {
+    return null;
+  }
+  return {
+    limit_tokens: budget.limitTokens,
+    spent_tokens: budget.spentTokens,
+    remaining_tokens: budget.remainingTokens,
+    paused: budget.paused,
+  };
+};
 
 /** Project the boot-time restore summary onto the additive wire block, or null to omit it. */
 const restoreProjection = (restore: RestoreSummary | undefined) =>
@@ -75,15 +78,48 @@ const restoreProjection = (restore: RestoreSummary | undefined) =>
         restored_completed: restore.restoredCompleted,
       };
 
-/** JSON-friendly projection of the authoritative state (Dates → ISO via JSON). */
-export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}) => {
+/** JSON-friendly projection of the authoritative state (Dates → ISO explicitly). */
+export const toSnapshot = (s: OrchestratorState, extra: SnapshotExtras = {}): SnapshotWire => {
   const running = Object.values(s.running).map((ra) => {
     const act = extra.activity?.get(ra.issue_id);
+    // Build conforming RunAttemptWire: explicit Date→string + exact-optional handling
+    // (Effect Schema's optional fields widen to `T | undefined`; exactOptionalPropertyTypes
+    // requires the absent-or-T form, so each optional field needs a conditional spread).
+    const base = {
+      issue_id: ra.issue_id,
+      issue_identifier: ra.issue_identifier,
+      attempt: ra.attempt,
+      workspace_path: ra.workspace_path,
+      started_at: ra.started_at.toISOString(),
+      status: ra.status,
+      ...(ra.error !== undefined ? { error: ra.error } : {}),
+      ...(ra.turn !== undefined ? { turn: ra.turn } : {}),
+      ...(ra.failure_attempts !== undefined ? { failure_attempts: ra.failure_attempts } : {}),
+      ...(ra.session_id !== undefined ? { session_id: ra.session_id } : {}),
+    };
     // Additive: attach last_activity only when this running issue has any (else omit).
-    return act === undefined ? ra : { ...ra, last_activity: act };
+    return act === undefined ? base : { ...base, last_activity: act };
   });
-  const retrying = Object.values(s.retry_attempts);
-  const abandoned = Object.values(s.abandoned);
+  const retrying = Object.values(s.retry_attempts).map((e) => ({
+    issue_id: e.issue_id,
+    identifier: e.identifier,
+    attempt: e.attempt,
+    due_at_ms: e.due_at_ms,
+    // Convert scheduled_at Date → ISO string; use conditional spread for exactOptionalPropertyTypes.
+    ...(e.scheduled_at !== undefined ? { scheduled_at: e.scheduled_at.toISOString() } : {}),
+    ...(e.delay_ms !== undefined ? { delay_ms: e.delay_ms } : {}),
+    ...(e.kind !== undefined ? { kind: e.kind } : {}),
+    ...(e.session_id !== undefined ? { session_id: e.session_id } : {}),
+    error: e.error,
+  }));
+  const abandoned = Object.values(s.abandoned).map((a) => ({
+    issue_id: a.issue_id,
+    identifier: a.identifier,
+    attempts: a.attempts,
+    // Convert abandoned_at Date → ISO string (the wire contract is string).
+    abandoned_at: a.abandoned_at.toISOString(),
+    reason: a.reason,
+  }));
   const budget = budgetProjection(extra.budget);
   const restore = restoreProjection(extra.restore);
   const control = controlProjection(extra.operatorPaused ?? false, extra.budget);

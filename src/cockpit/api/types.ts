@@ -1,144 +1,37 @@
 /**
  * Sprint 6 / #67 — the cockpit wire types. Plain TypeScript mirrors of the daemon's JSON
- * surface (the `toSnapshot` projection in `core/observability/snapshot.ts` and the cockpit
- * `HttpApi` in `core/cockpit/api.ts`). The browser speaks plain `fetch` + JSON — no Effect,
- * no Schema — so these are hand-kept structural mirrors. They are DOM-free on purpose so the
- * pure view-model mappers that consume them can be unit-tested under the Node test program.
+ * surface. The browser speaks plain `fetch` + JSON — no Effect, no Schema — so these are
+ * DOM-free on purpose so the pure view-model mappers that consume them can be unit-tested
+ * under the Node test program.
+ *
+ * **Snapshot-family types** (`SnapshotWire` and its sub-types) are re-exported from the
+ * daemon projection contract (`core/observability/snapshot-wire`) — the single source of
+ * truth for the `GET /api/v1/state` wire shape. The cockpit derives its types from the
+ * daemon; there are no hand-kept mirror copies here.
+ *
+ * **HttpApi request/response types** (`EditableSettingsWire`, `SettingsPatchWire`,
+ * `ControlStateWire`, `AckWire`) mirror `core/cockpit/api.ts` (a Schema-based `HttpApi`)
+ * and remain hand-declared here to avoid pulling Effect `Schema` types into the browser.
  *
  * Additive contract: every block the daemon emits ONLY when relevant (`budget`, `restore`,
  * `control`, `last_activity`, …) is optional here; an absent field means "omit the panel".
  */
 
-/** The granular run-attempt phase (mirror of `domain/run-attempt.ts`). */
-export type RunAttemptPhase =
-  | "PreparingWorkspace"
-  | "BuildingPrompt"
-  | "LaunchingAgentProcess"
-  | "InitializingSession"
-  | "StreamingTurn"
-  | "Finishing"
-  | "Succeeded"
-  | "Failed"
-  | "TimedOut"
-  | "Stalled"
-  | "CanceledByReconciliation";
-
-/** Last-activity breadcrumb attached to a running attempt (additive). */
-export interface ActivityEntryWire {
-  readonly event_tag: string;
-  readonly at: string;
-  readonly message?: string;
-}
-
-/** A live running attempt. */
-export interface RunAttemptWire {
-  readonly issue_id: string;
-  readonly issue_identifier: string;
-  readonly attempt: number | null;
-  readonly workspace_path: string;
-  readonly started_at: string;
-  readonly status: RunAttemptPhase;
-  readonly error?: string;
-  readonly turn?: number;
-  readonly failure_attempts?: number;
-  readonly session_id?: string | null;
-  readonly last_activity?: ActivityEntryWire;
-}
-
-/** A scheduled retry. */
-export interface RetryEntryWire {
-  readonly issue_id: string;
-  readonly identifier: string;
-  readonly attempt: number;
-  readonly due_at_ms: number;
-  readonly scheduled_at?: string;
-  readonly delay_ms?: number;
-  readonly kind?: "failure" | "continuation";
-  readonly session_id?: string | null;
-  readonly error: string | null;
-}
-
-/** An active issue parked after exhausting failure retries. */
-export interface AbandonedIssueWire {
-  readonly issue_id: string;
-  readonly identifier: string;
-  readonly attempts: number;
-  readonly abandoned_at: string;
-  readonly reason: string;
-}
-
-/** One lifecycle event in the bounded feed. */
-export interface EventEnvelopeWire {
-  readonly seq: number;
-  readonly emitted_at: string;
-  readonly level: "info" | "warn";
-  readonly kind: string;
-  readonly issue_id?: string;
-  readonly identifier?: string;
-  readonly message: string;
-}
-
-/** A rich completion-history entry. */
-export interface RecentCompletionWire {
-  readonly issue_id: string;
-  readonly identifier: string;
-  readonly finished_at: string;
-  readonly outcome: string;
-}
-
-/** Aggregate token + runtime accounting. */
-export interface AgentTotalsWire {
-  readonly input_tokens: number;
-  readonly output_tokens: number;
-  readonly total_tokens: number;
-  readonly runtime_seconds: number;
-}
-
-/** Budget guardrail status (additive — only present when a ceiling is configured). */
-export interface BudgetWire {
-  readonly limit_tokens: number;
-  readonly spent_tokens: number;
-  readonly remaining_tokens: number;
-  readonly paused: boolean;
-}
-
-/** Boot-time restore summary (additive — only present after a real restore). */
-export interface RestoreWire {
-  readonly at: string;
-  readonly orphaned_running_converted: number;
-  readonly rearmed_retries: number;
-  readonly restored_completed: number;
-}
-
-/** Dispatch-gate status (additive — only present when dispatch is withheld). */
-export interface ControlWire {
-  readonly dispatch_paused: boolean;
-  readonly paused_by: "operator" | "budget";
-}
-
-/** The full `GET /api/v1/state` snapshot. */
-export interface SnapshotWire {
-  readonly poll_interval_ms: number;
-  readonly max_concurrent_agents: number;
-  readonly counts: {
-    readonly running: number;
-    readonly retrying: number;
-    readonly abandoned: number;
-    readonly completed: number;
-    readonly claimed: number;
-  };
-  readonly running: ReadonlyArray<RunAttemptWire>;
-  readonly retrying: ReadonlyArray<RetryEntryWire>;
-  readonly abandoned: ReadonlyArray<AbandonedIssueWire>;
-  readonly completed: ReadonlyArray<string>;
-  readonly recent_completed: ReadonlyArray<RecentCompletionWire>;
-  readonly recent_events: ReadonlyArray<EventEnvelopeWire>;
-  readonly totals: AgentTotalsWire;
-  readonly rate_limits: unknown;
-  readonly budget?: BudgetWire;
-  readonly restore?: RestoreWire;
-  readonly control?: ControlWire;
-}
+// Re-export the snapshot-family wire types from the daemon contract (single source of truth).
+export type {
+  AbandonedIssueWire,
+  ActivityEntryWire,
+  AgentTotalsWire,
+  BudgetWire,
+  ControlWire,
+  EventEnvelopeWire,
+  RecentCompletionWire,
+  RestoreWire,
+  RetryEntryWire,
+  RunAttemptPhase,
+  RunAttemptWire,
+  SnapshotWire,
+} from "../../core/observability/snapshot-wire";
 
 /** The whitelisted editable settings subset (`GET/PUT /api/v1/settings`) — no secrets. */
 export interface EditableSettingsWire {
