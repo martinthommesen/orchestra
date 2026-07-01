@@ -219,6 +219,85 @@ describe("toFleetView", () => {
   });
 });
 
+// ── toBudgetVM USD variants (#77) ─────────────────────────────────────────────
+
+describe("toBudgetVM USD variants (#77)", () => {
+  it("USD-only: no crash, correct fraction and summary", () => {
+    const vm = toFleetView(
+      baseSnapshot({
+        budget: {
+          spent_tokens: 500_000,
+          spent_usd: 5,
+          limit_usd: 10,
+          remaining_usd: 5,
+          paused: false,
+        },
+      }),
+      NOW,
+    );
+    expect(vm.budget).not.toBeNull();
+    expect(vm.budget?.stateLabel).toBe("active");
+    expect(vm.budget?.fraction).toBeCloseTo(0.5);
+    expect(vm.budget?.percentLabel).toBe("50%");
+    expect(vm.budget?.summary).toBe("$5.00 / $10.00 · $5.00 left");
+  });
+
+  it("USD-only paused at ceiling: fraction clamps to 1, stateLabel paused", () => {
+    const vm = toFleetView(
+      baseSnapshot({
+        budget: {
+          spent_tokens: 1_000_000,
+          spent_usd: 10,
+          limit_usd: 10,
+          remaining_usd: 0,
+          paused: true,
+        },
+      }),
+      NOW,
+    );
+    expect(vm.budget?.paused).toBe(true);
+    expect(vm.budget?.stateLabel).toBe("paused");
+    expect(vm.budget?.fraction).toBe(1);
+  });
+
+  it("both ceilings: fraction = max of the two; summary lists both groups", () => {
+    // token fraction = 800/1000 = 0.8, usd fraction = 2/10 = 0.2 → max = 0.8
+    const vm = toFleetView(
+      baseSnapshot({
+        budget: {
+          spent_tokens: 800,
+          limit_tokens: 1000,
+          remaining_tokens: 200,
+          spent_usd: 2,
+          limit_usd: 10,
+          remaining_usd: 8,
+          paused: false,
+        },
+      }),
+      NOW,
+    );
+    expect(vm.budget?.fraction).toBeCloseTo(0.8);
+    expect(vm.budget?.percentLabel).toBe("80%");
+    expect(vm.budget?.summary).toBe("800 / 1000 tokens · 200 left · $2.00 / $10.00 · $8.00 left");
+  });
+
+  it("token-only unchanged: summary and fraction match existing behavior", () => {
+    const vm = toFleetView(
+      baseSnapshot({
+        budget: {
+          spent_tokens: 250,
+          limit_tokens: 1000,
+          remaining_tokens: 750,
+          paused: false,
+        },
+      }),
+      NOW,
+    );
+    expect(vm.budget?.summary).toBe("250 / 1000 tokens · 750 left");
+    expect(vm.budget?.fraction).toBeCloseTo(0.25);
+  });
+});
+
 describe("sortRunning", () => {
   const rows = toFleetView(
     baseSnapshot({

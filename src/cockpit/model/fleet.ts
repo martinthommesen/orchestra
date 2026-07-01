@@ -205,13 +205,40 @@ const toRunningRow = (now: number, r: RunAttemptWire): RunningRowVM => {
 };
 
 const toBudgetVM = (b: BudgetWire): BudgetVM => {
-  const fraction =
-    b.limit_tokens > 0 ? Math.min(1, Math.max(0, b.spent_tokens / b.limit_tokens)) : 0;
+  // Compute per-ceiling fractions only when the ceiling is present and positive.
+  const tokenFraction =
+    b.limit_tokens !== undefined && b.limit_tokens > 0 ? b.spent_tokens / b.limit_tokens : null;
+  const usdFraction =
+    b.limit_usd !== undefined && b.spent_usd !== undefined && b.limit_usd > 0
+      ? b.spent_usd / b.limit_usd
+      : null;
+  // fraction = the max of whichever ceilings are configured ("this close to the nearest cap").
+  const rawFraction =
+    tokenFraction !== null && usdFraction !== null
+      ? Math.max(tokenFraction, usdFraction)
+      : tokenFraction !== null
+        ? tokenFraction
+        : usdFraction !== null
+          ? usdFraction
+          : 0;
+  const fraction = Math.min(1, Math.max(0, rawFraction));
+
+  // Build the summary by listing whichever ceiling(s) are configured.
+  const parts: string[] = [];
+  if (b.limit_tokens !== undefined) {
+    parts.push(`${b.spent_tokens} / ${b.limit_tokens} tokens · ${b.remaining_tokens ?? 0} left`);
+  }
+  if (b.limit_usd !== undefined && b.spent_usd !== undefined) {
+    parts.push(
+      `$${b.spent_usd.toFixed(2)} / $${b.limit_usd.toFixed(2)} · $${(b.remaining_usd ?? 0).toFixed(2)} left`,
+    );
+  }
+
   return {
     paused: b.paused,
     stateLabel: b.paused ? "paused" : "active",
     colorVar: b.paused ? `var(${COLOR_TOKEN_VAR.warn})` : cssVar("running"),
-    summary: `${b.spent_tokens} / ${b.limit_tokens} tokens · ${b.remaining_tokens} left`,
+    summary: parts.join(" · "),
     fraction,
     percentLabel: `${Math.round(fraction * 100)}%`,
   };

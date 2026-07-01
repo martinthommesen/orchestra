@@ -95,9 +95,12 @@ export interface AgentTotalsWire {
 
 /** Budget guardrail status (additive — only present when a ceiling is configured). */
 export interface BudgetWire {
-  readonly limit_tokens: number;
   readonly spent_tokens: number;
-  readonly remaining_tokens: number;
+  readonly limit_tokens?: number;
+  readonly remaining_tokens?: number;
+  readonly spent_usd?: number;
+  readonly limit_usd?: number;
+  readonly remaining_usd?: number;
   readonly paused: boolean;
 }
 

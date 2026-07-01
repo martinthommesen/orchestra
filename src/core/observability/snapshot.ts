@@ -4,7 +4,7 @@ import type { ActivityEntry } from "./live-activity";
 import type { RecentCompletion } from "./recent-completions";
 import type { EventEnvelope } from "./recent-events";
 import type { RestoreSummary } from "./restore-status";
-import type { SnapshotWire } from "./snapshot-wire";
+import type { BudgetWire, SnapshotWire } from "./snapshot-wire";
 
 /**
  * The JSON snapshot **projection** (SPEC §13.3/§13.7) consumed by `GET /api/v1/state`.
@@ -55,15 +55,18 @@ const controlProjection = (operatorPaused: boolean, budget: BudgetStatus | undef
 };
 
 /** Project the budget status onto the additive wire block, or null to omit it. */
-const budgetProjection = (budget: BudgetStatus | undefined) => {
-  if (!budget?.configured || budget.limitTokens === null || budget.remainingTokens === null) {
-    return null;
-  }
+const budgetProjection = (budget: BudgetStatus | undefined): BudgetWire | null => {
+  if (!budget?.configured) return null;
   return {
-    limit_tokens: budget.limitTokens,
     spent_tokens: budget.spentTokens,
-    remaining_tokens: budget.remainingTokens,
     paused: budget.paused,
+    ...(budget.limitTokens !== null && budget.remainingTokens !== null
+      ? { limit_tokens: budget.limitTokens, remaining_tokens: budget.remainingTokens }
+      : {}),
+    ...(budget.spentUsd !== null ? { spent_usd: budget.spentUsd } : {}),
+    ...(budget.limitUsd !== null && budget.remainingUsd !== null
+      ? { limit_usd: budget.limitUsd, remaining_usd: budget.remainingUsd }
+      : {}),
   };
 };
 
