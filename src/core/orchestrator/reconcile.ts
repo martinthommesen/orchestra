@@ -72,7 +72,7 @@ export interface ReconcileInput {
  * vanished/other → release. Active returns `null` (no action) so the pending retry fires as
  * planned or the exhausted issue stays parked/claimed.
  */
-const classifyTrackerOnly = (
+export const classifyTrackerOnly = (
   issueId: string,
   refreshed: ReadonlyMap<string, IssueStateRef>,
   activeStates: ReadonlySet<string>,

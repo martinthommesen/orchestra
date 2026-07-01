@@ -35,6 +35,7 @@ import { Observer, type RetryKind } from "./observer";
 import { preflight } from "./preflight";
 import {
   type AbandonedView,
+  classifyTrackerOnly,
   planReconciliation,
   type ReconcileAction,
   type RetryingView,
@@ -796,6 +797,33 @@ export const runOrchestrator = (
           const attempt = rec.pendingAttempt;
           rec.pendingKind = null;
           rec.pendingAttempt = 0;
+          // #81: a handoff can land in the 1s continuation window (CONTINUATION_DELAY_MS), which is far
+          // shorter than the poll interval — so reconcile's mid-backoff terminal check (classifyTrackerOnly
+          // on the `retrying` view) usually cannot run in time and we'd waste a whole turn re-running
+          // COMPLETED work on an issue a human has taken over. Re-check this one issue's tracker state right
+          // before re-dispatching a continuation; terminal → clean up, neither/vanished → release, both via
+          // the same reconcile action. Fail-open on a tracker error (reconcile's refresh-failed semantics):
+          // proceed with the continuation — the next reconcile tick still catches a genuine handoff.
+          // ponytail: continuation only. A failure retry has the same theoretical window, but it re-runs a
+          // FAILED turn (lower value) and its exponential backoff usually spans a poll tick; drop the `kind`
+          // gate to guard that path too if it ever matters.
+          if (kind === "continuation") {
+            const stateResult = yield* Effect.either(tracker.fetchIssueStatesByIds([issueId]));
+            if (Either.isRight(stateResult)) {
+              const refreshed = new Map(stateResult.right.map((r) => [r.id, r] as const));
+              const action = classifyTrackerOnly(issueId, refreshed, activeStates, terminalStates);
+              if (action !== null) {
+                yield* applyReconcileAction(action);
+                return;
+              }
+            } else {
+              yield* observer.emit({
+                _tag: "TrackerError",
+                op: "fetchIssueStatesByIds",
+                message: errLabel(stateResult.left),
+              });
+            }
+          }
           yield* store.update((s) => clearRetry(s, issueId));
           yield* observer.emit({ _tag: "RetryFired", issueId, identifier: rec.issue.identifier });
           if (kind === "continuation") {

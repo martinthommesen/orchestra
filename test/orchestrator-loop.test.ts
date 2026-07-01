@@ -1,7 +1,7 @@
 import { it } from "@effect/vitest";
 import { Duration, Effect, Fiber, TestClock } from "effect";
 import { describe, expect } from "vitest";
-import { TurnFailed } from "../src/core/errors";
+import { TrackerApiRequest, TurnFailed } from "../src/core/errors";
 import { RecentCompletions } from "../src/core/observability/recent-completions";
 import { runOrchestrator } from "../src/core/orchestrator/loop";
 import type { Observation } from "../src/core/orchestrator/observer";
@@ -94,6 +94,7 @@ describe("orchestrator loop (fakes + TestClock)", () => {
     Effect.gen(function* () {
       const tracker = yield* makeFakeTracker({
         candidates: [makeIssue({ id: "i1", identifier: "ORC-1", state: "Todo" })],
+        states: [makeStateRef("i1", "Todo")],
       });
       const runner = yield* makeFakeAgentRunner();
       const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
@@ -727,5 +728,131 @@ describe("orchestrator loop (fakes + TestClock)", () => {
           yield* Fiber.interrupt(fiber);
         }).pipe(Effect.provide(env));
       }),
+  );
+
+  // ── #81 continuation racing a handoff ────────────────────────────────────────
+
+  it.scoped(
+    "continuation racing a terminal handoff is reconciled, not re-dispatched (Fixes #81)",
+    () =>
+      Effect.gen(function* () {
+        const tracker = yield* makeFakeTracker({
+          candidates: [makeIssue({ id: "i1", identifier: "ORC-1", state: "Todo" })],
+          states: [makeStateRef("i1", "In Progress")],
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+        const obs = yield* makeRecordingObserver();
+        // Only ONE script: turn 2 must never run.
+        yield* runner.control.pushScript("i1", [
+          Ev.sessionStarted("s1"),
+          Ev.turnCompleted(),
+          { _tag: "complete" },
+        ]);
+
+        const def = buildDef({ maxTurns: 2 });
+        const env = loopLayer(def, {
+          tracker: tracker.layer,
+          runner: runner.layer,
+          workspace: wsm.layer,
+          observer: obs.layer,
+        });
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          const store = yield* OrchestratorStore;
+
+          // Wait for turn 1 to finish and a continuation to be scheduled.
+          yield* waitFor(
+            obs.queue,
+            (o) => o._tag === "RetryScheduled" && o.issueId === "i1" && o.kind === "continuation",
+          );
+
+          // Hand off to a human BEFORE the continuation fires (within the 1s window).
+          yield* tracker.control.setStateOf("i1", "Done");
+
+          // Advance only the continuation delay — well under the 30s poll interval,
+          // so NO reconcile tick runs; the continuation must guard itself.
+          yield* TestClock.adjust(Duration.millis(1_100));
+
+          const killed = yield* waitFor(
+            obs.queue,
+            (o) => o._tag === "WorkerKilled" && o.issueId === "i1",
+          );
+          expect(killed._tag === "WorkerKilled" && killed.reason).toBe("terminal");
+
+          // Turn 2 was never dispatched.
+          const runs = yield* runner.control.runs;
+          expect(runs).toHaveLength(1);
+
+          // Issue is completed (not just released).
+          const state = yield* store.get;
+          expect(state.completed).toContain("i1");
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }),
+  );
+
+  it.scoped("continuation is fail-open: a tracker error does not block turn N+1 (Fixes #81)", () =>
+    Effect.gen(function* () {
+      const tracker = yield* makeFakeTracker({
+        candidates: [makeIssue({ id: "i1", identifier: "ORC-1", state: "Todo" })],
+        states: [makeStateRef("i1", "In Progress")],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+      const obs = yield* makeRecordingObserver();
+      // Two scripts: turn 2 MUST run because the guard is fail-open.
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s1"),
+        Ev.turnCompleted(),
+        { _tag: "complete" },
+      ]);
+      yield* runner.control.pushScript("i1", [
+        Ev.sessionStarted("s1"),
+        Ev.turnCompleted(),
+        { _tag: "complete" },
+      ]);
+
+      const def = buildDef({ maxTurns: 2 });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obs.layer,
+      });
+
+      yield* Effect.gen(function* () {
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+
+        // Wait for the continuation to be scheduled, then inject a tracker error.
+        yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "RetryScheduled" && o.issueId === "i1" && o.kind === "continuation",
+        );
+        yield* tracker.control.failStatesRefresh(
+          new TrackerApiRequest({ message: "network blip" }),
+        );
+
+        // Advance just the continuation delay — the guard should fail-open and proceed.
+        yield* TestClock.adjust(Duration.millis(1_100));
+
+        // A TrackerError with op "fetchIssueStatesByIds" must be emitted (fail-open signal).
+        yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "TrackerError" && o.op === "fetchIssueStatesByIds",
+        );
+
+        // Turn 2 is still dispatched despite the tracker error.
+        yield* waitFor(obs.queue, isDispatched("i1", 2));
+        yield* waitFor(obs.queue, (o) => o._tag === "WorkerCompleted" && o.issueId === "i1");
+
+        const runs = yield* runner.control.runs;
+        expect(runs).toHaveLength(2);
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
   );
 });
