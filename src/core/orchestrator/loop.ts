@@ -11,6 +11,7 @@ import {
 } from "effect";
 import type { AgentEvent, Usage } from "../domain/agent-event";
 import { Issue, type IssueStateRef, normalizeState } from "../domain/issue";
+import type { OrchestratorState } from "../domain/orchestrator-state";
 import type { RetryEntry } from "../domain/retry-entry";
 import { RunAttempt } from "../domain/run-attempt";
 import type { WorkflowDefinition } from "../domain/workflow";
@@ -503,6 +504,27 @@ export const runOrchestrator = (
       const cleanupWorkspace = (issueId: string, identifier: string, ws: Workspace) =>
         Effect.forkScoped(cleanupWorkspaceEffect(issueId, identifier, ws));
 
+      /** Drop a claimed registry entry, interrupt its fibers, then apply the durable
+       *  transition — the canonical kill-and-forget dance, extracted from the three
+       *  sites (TerminalKill / NeitherKill / CancelSession) that share it verbatim.
+       *  Ordering is load-bearing: delete FIRST (suppresses spurious WorkerDone and
+       *  stale RetryDue), then interrupt worker, then timer, then persist the state
+       *  change.  All caller-specific follow-up (emits, completions, Deferred) stays
+       *  in the caller. */
+      const killAndForget = (
+        issueId: string,
+        rec: IssueRuntime,
+        transition: (s: OrchestratorState) => OrchestratorState,
+      ): Effect.Effect<void, never, Scope.Scope> =>
+        Effect.gen(function* () {
+          const fiber = rec.workerFiber;
+          const timer = rec.timerFiber;
+          registry.delete(issueId); // FIRST — before any interrupt
+          if (fiber !== null) yield* Fiber.interrupt(fiber);
+          if (timer !== null) yield* Fiber.interrupt(timer);
+          yield* store.update(transition);
+        });
+
       const applyReconcileAction = (
         action: ReconcileAction,
       ): Effect.Effect<void, never, Scope.Scope> =>
@@ -528,17 +550,8 @@ export const runOrchestrator = (
               break;
             }
             case "TerminalKill": {
-              const fiber = rec.workerFiber;
-              const timer = rec.timerFiber;
               const ws = rec.workspace;
-              registry.delete(action.issueId);
-              if (fiber !== null) {
-                yield* Fiber.interrupt(fiber);
-              }
-              if (timer !== null) {
-                yield* Fiber.interrupt(timer);
-              }
-              yield* store.update((s) => markCompleted(s, action.issueId));
+              yield* killAndForget(action.issueId, rec, (s) => markCompleted(s, action.issueId));
               yield* completions.record({
                 issue_id: action.issueId,
                 identifier: rec.issue.identifier,
@@ -555,16 +568,7 @@ export const runOrchestrator = (
               break;
             }
             case "NeitherKill": {
-              const fiber = rec.workerFiber;
-              const timer = rec.timerFiber;
-              registry.delete(action.issueId);
-              if (fiber !== null) {
-                yield* Fiber.interrupt(fiber);
-              }
-              if (timer !== null) {
-                yield* Fiber.interrupt(timer);
-              }
-              yield* store.update((s) => release(s, action.issueId));
+              yield* killAndForget(action.issueId, rec, (s) => release(s, action.issueId));
               yield* observer.emit({
                 _tag: "WorkerKilled",
                 issueId: action.issueId,
@@ -919,17 +923,8 @@ export const runOrchestrator = (
               // it (not a completion — it can be re-picked later) and drop the registry
               // entry. No other worker is touched. Dropping the entry first means the
               // interrupted worker's onExit posts no spurious WorkerDone.
-              const fiber = rec.workerFiber;
-              const timer = rec.timerFiber;
               const identifier = rec.issue.identifier;
-              registry.delete(command.issueId);
-              if (fiber !== null) {
-                yield* Fiber.interrupt(fiber);
-              }
-              if (timer !== null) {
-                yield* Fiber.interrupt(timer);
-              }
-              yield* store.update((s) => release(s, command.issueId));
+              yield* killAndForget(command.issueId, rec, (s) => release(s, command.issueId));
               yield* observer.emit({
                 _tag: "SessionCancelled",
                 issueId: command.issueId,
