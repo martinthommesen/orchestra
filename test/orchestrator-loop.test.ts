@@ -621,4 +621,111 @@ describe("orchestrator loop (fakes + TestClock)", () => {
         }).pipe(Effect.provide(env));
       }),
   );
+
+  // ── #82 AgentProgress liveness pulses ──────────────────────────────────────────
+
+  it.scoped(
+    "AgentProgress pulses prevent stall kill: a worker quiet between pulses is not killed (#82)",
+    () =>
+      Effect.gen(function* () {
+        const issue = makeIssue({ id: "i1", identifier: "ORC-1", state: "In Progress" });
+        const tracker = yield* makeFakeTracker({
+          candidates: [issue],
+          states: [makeStateRef("i1", "In Progress")],
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+        const obs = yield* makeRecordingObserver();
+        // Worker: agentProgress pulses 2s apart (< 5s stall timeout), with an AgentMessage
+        // as a synchronization sentinel after the second pulse. The sentinel creates an
+        // AgentEvent observer observation we can waitFor, which guarantees the preceding
+        // agentProgress has already been processed (and lastEventAt refreshed) before we
+        // let the reconcile tick fire in phase 2.
+        yield* runner.control.pushScript("i1", [
+          Ev.agentProgress(), // immediate pulse
+          { _tag: "delay", ms: 2_000 }, // 2s quiet gap (< stall 5s)
+          Ev.agentProgress(), // second pulse
+          Ev.agentMessage("still working"), // sync sentinel: produces AgentEvent obs
+          { _tag: "delay", ms: 2_000 }, // 2s more simulated tool work
+          Ev.agentProgress(), // third pulse
+          Ev.turnCompleted(),
+          { _tag: "complete" },
+        ]);
+
+        // Poll every 3.5s; stall if silent for 5s. The 3.5s interval is chosen so that
+        // the first reconcile tick fires at t=3500 (while the worker is still live and
+        // claimed) and the SECOND tick falls at t=7000, which is beyond the total
+        // adjust(6000) window — preventing a spurious re-dispatch after completion.
+        const def = buildDef({ maxTurns: 1, intervalMs: 3_500, stallTimeoutMs: 5_000 });
+        const env = loopLayer(def, {
+          tracker: tracker.layer,
+          runner: runner.layer,
+          workspace: wsm.layer,
+          observer: obs.layer,
+        });
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          yield* waitFor(obs.queue, isDispatched("i1"));
+
+          // Phase 1: advance 2s — fires delay(2000), emitting the second agentProgress
+          // and then the AgentMessage sentinel. Wait for the AgentEvent obs from the
+          // sentinel: by then the preceding agentProgress is guaranteed processed, so
+          // lastEventAt is fresh (≤ 2000ms ago) before the reconcile tick fires.
+          yield* TestClock.adjust(Duration.millis(2_000));
+          yield* waitFor(obs.queue, (o) => o._tag === "AgentEvent");
+
+          // Phase 2: advance 4s more (total 6s). Interval fires at t=3.5s → Tick →
+          // reconcile: lastEventAt≈2000, gap < stall threshold → no stall. Worker
+          // completes at t=4s. The next interval tick is at t=7s (outside this window).
+          yield* TestClock.adjust(Duration.millis(4_000));
+          yield* waitFor(obs.queue, (o) => o._tag === "WorkerCompleted" && o.issueId === "i1");
+
+          // Exactly one run — no stall-retry was triggered.
+          const runs = yield* runner.control.runs;
+          expect(runs).toHaveLength(1);
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }),
+  );
+
+  it.scoped(
+    "stall detection still fires for a genuinely silent worker (fix does not disable it, #82)",
+    () =>
+      Effect.gen(function* () {
+        const issue = makeIssue({ id: "i1", identifier: "ORC-1", state: "In Progress" });
+        const tracker = yield* makeFakeTracker({
+          candidates: [issue],
+          states: [makeStateRef("i1", "In Progress")],
+        });
+        const runner = yield* makeFakeAgentRunner();
+        const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+        const obs = yield* makeRecordingObserver();
+        // Worker emits NO events at all — completely silent subprocess.
+        yield* runner.control.pushScript("i1", [{ _tag: "stall" }]);
+
+        // Stall timeout 5s; poll every 6s — reconcile sees 6s of silence > 5s → StallKill.
+        const def = buildDef({ maxTurns: 1, intervalMs: 6_000, stallTimeoutMs: 5_000 });
+        const env = loopLayer(def, {
+          tracker: tracker.layer,
+          runner: runner.layer,
+          workspace: wsm.layer,
+          observer: obs.layer,
+        });
+
+        yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+          yield* waitFor(obs.queue, isDispatched("i1"));
+          yield* TestClock.adjust(Duration.millis(6_000));
+          const killed = yield* waitFor(
+            obs.queue,
+            (o) => o._tag === "WorkerKilled" && o.issueId === "i1",
+          );
+          expect(killed._tag === "WorkerKilled" && killed.reason).toBe("stall");
+
+          yield* Fiber.interrupt(fiber);
+        }).pipe(Effect.provide(env));
+      }),
+  );
 });

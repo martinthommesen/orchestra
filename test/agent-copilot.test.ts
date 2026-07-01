@@ -163,12 +163,33 @@ describe("mapCopilotLine (JSONL → AgentEvent)", () => {
     expect(r.events[0]?._tag).toBe("ApprovalAutoApproved");
   });
 
-  it("drops recognized-but-unsurfaced events without crashing", () => {
+  it("maps recognized-but-unsurfaced events to a single AgentProgress (liveness pulse)", () => {
     for (const type of ["session.idle", "assistant.turn_start", "assistant.message_delta"]) {
-      expect(mapCopilotLine(JSON.stringify({ type, ephemeral: true }), NOW)).toEqual({
-        events: [],
-      });
+      const r = mapCopilotLine(JSON.stringify({ type, ephemeral: true }), NOW);
+      expect(r.events).toHaveLength(1);
+      expect(r.events[0]?._tag).toBe("AgentProgress");
+      expect(r.terminal).toBeUndefined();
     }
+  });
+
+  it("maps tool.execution_* and assistant.reasoning* lines to AgentProgress (not dropped)", () => {
+    for (const type of [
+      "tool.execution_start",
+      "tool.execution_complete",
+      "tool.execution_partial_result",
+      "assistant.reasoning",
+      "assistant.reasoning_summary",
+    ]) {
+      const r = mapCopilotLine(JSON.stringify({ type, data: {} }), NOW);
+      expect(r.events).toHaveLength(1);
+      expect(r.events[0]?._tag).toBe("AgentProgress");
+      expect(r.terminal).toBeUndefined();
+    }
+  });
+
+  it("empty/whitespace lines still yield no events (blank output is not work)", () => {
+    expect(mapCopilotLine("", NOW)).toEqual({ events: [] });
+    expect(mapCopilotLine("   \t  ", NOW)).toEqual({ events: [] });
   });
 
   it("falls back to the injected `now` for a missing or invalid timestamp (never throws)", () => {
@@ -271,14 +292,19 @@ describe("mapCopilotLine pinned to a tool-using capture (#78)", () => {
     expect(terminals[0]?._tag).toBe("completed");
   });
 
-  it("drops the tool-execution / reasoning event families (forward-compat, not Malformed)", () => {
-    // A tool-call `assistant.message` carries empty `content` + `toolRequests` → a benign
-    // empty AgentMessage liveness tick (no Notification); the `tool.execution_*`,
-    // `assistant.reasoning*`, and `session.*` lines surface nothing at all.
+  it("maps tool-execution / reasoning event families to AgentProgress liveness pulses", () => {
+    // tool.execution_* and assistant.reasoning* are recognized non-empty subprocess lines —
+    // each now produces exactly one AgentProgress to refresh the stall clock.
+    // A tool-call `assistant.message` (empty `content` + toolRequests) stays a benign
+    // empty AgentMessage (no Notification); the `session.*` / `background_tasks_changed`
+    // lines also surface an AgentProgress (all liveness, no stall).
     for (const type of ["tool.execution_start", "tool.execution_complete", "assistant.reasoning"]) {
       const line = lines.find((l) => (JSON.parse(l) as { type?: string }).type === type);
       expect(line, `fixture is missing a ${type} line`).toBeDefined();
-      expect(mapCopilotLine(line as string, NOW)).toEqual({ events: [] });
+      const r = mapCopilotLine(line as string, NOW);
+      expect(r.events).toHaveLength(1);
+      expect(r.events[0]?._tag).toBe("AgentProgress");
+      expect(r.terminal).toBeUndefined();
     }
   });
 

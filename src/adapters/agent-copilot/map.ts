@@ -186,13 +186,11 @@ export const mapCopilotLine = (line: string, now: Date): MappedLine => {
         const kind = str(data.tool) ?? type;
         return { events: [{ _tag: "ApprovalAutoApproved", timestamp: ts, kind }] };
       }
-      // Everything else recognized-but-unsurfaced is dropped for forward-compatibility — turn
-      // start/end, streaming/reasoning deltas (`assistant.message_delta`, `assistant.reasoning*`),
-      // tool execution (`tool.execution_start|partial_result|complete`), and the ephemeral
-      // `session.*` status/background-task noise. A tool-call `assistant.message` (empty `content`
-      // + `toolRequests`) maps to a benign empty AgentMessage above. A line with no `type` is
-      // structurally unexpected → Malformed so visibility is preserved.
-      return type === "" ? malformed(line, ts) : { events: [] };
+      if (type === "") return malformed(line, ts);
+      // ponytail: any recognized non-empty subprocess line counts as liveness. If Copilot is ever
+      // observed emitting idle keep-alive lines while genuinely hung, gate this on the active-work
+      // families only (tool.execution_*, assistant.reasoning*, *_delta) instead of every recognized line.
+      return { events: [{ _tag: "AgentProgress", timestamp: ts }] };
     }
   }
 };

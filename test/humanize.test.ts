@@ -28,6 +28,7 @@ const TAGS: ReadonlyArray<string> = [
   "Notification",
   "AgentMessage",
   "Malformed",
+  "AgentProgress",
 ];
 
 describe("humanizeAgentEvent (#55)", () => {

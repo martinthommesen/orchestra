@@ -711,6 +711,7 @@ export const runOrchestrator = (
             return;
           }
           rec.lastEventAt = yield* clock.monotonicMillis;
+          if (event._tag === "AgentProgress") return; // liveness only — stall clock refreshed above
           if (event._tag === "SessionStarted") {
             rec.sessionId = event.session_id;
           }

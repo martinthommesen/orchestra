@@ -107,6 +107,11 @@ const Malformed = Schema.TaggedStruct("Malformed", {
   raw: Schema.String,
 });
 
+/** A liveness pulse: the agent subprocess emitted output (tool call, reasoning, delta) but nothing
+ *  the orchestrator surfaces semantically. Refreshes the stall clock so a busy but quiet phase is
+ *  not mistaken for a hang. Carries no payload beyond the envelope. */
+const AgentProgress = Schema.TaggedStruct("AgentProgress", { ...EventEnvelope });
+
 /** The normalized agent event union streamed to the orchestrator (SPEC §10.4). */
 export const AgentEvent = Schema.Union(
   SessionStarted,
@@ -121,6 +126,7 @@ export const AgentEvent = Schema.Union(
   Notification,
   AgentMessage,
   Malformed,
+  AgentProgress,
 ).annotations({ identifier: "AgentEvent" });
 export type AgentEvent = typeof AgentEvent.Type;
 export type AgentEventEncoded = typeof AgentEvent.Encoded;

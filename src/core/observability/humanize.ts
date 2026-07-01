@@ -34,6 +34,7 @@ export const AGENT_EVENT_SUMMARIES: Record<AgentEventTag, string> = {
   Notification: "sent a notification",
   AgentMessage: "working",
   Malformed: "emitted an unrecognized event",
+  AgentProgress: "processing",
 };
 
 /** Fallback when an event tag is itself blank (defensive — tags are normally non-empty). */
