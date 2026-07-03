@@ -3,9 +3,9 @@
   "core": {
     "runId": "q-20260703-142107",
     "startedAt": "2026-07-03T14:21:07Z",
-    "updatedAt": "2026-07-03T14:31:37.051Z",
-    "status": "discovery",
-    "phase": "01-discovery",
+    "updatedAt": "2026-07-03T14:38:00Z",
+    "status": "blocked",
+    "phase": "06-adversarial-closeout",
     "branch": "codex/continuous-quality-loop",
     "scope": "Whole repository continuous-quality loop for Orchestra.",
     "repoOverview": "Orchestra is a Node >=22 / TypeScript strict daemon built on Effect. The CLI entry point is src/cli/main.ts, runDaemon wires Effect layers in src/cli/daemon.ts, the core orchestrator owns a single state fiber in src/core/orchestrator/loop.ts, adapters integrate GitHub Issues, Copilot CLI, and per-issue workspaces, and src/cockpit is a React 19 + Vite operator cockpit served by the daemon on loopback. Durable state lives under <workspace.root>/.orchestra/state.json at runtime. Config is WORKFLOW.md YAML front matter plus Liquid prompt body, decoded via Effect Schema. The repo has Vitest tests, Biome/Prettier lint, TypeScript checks, Vite/tsup build, React Doctor, and a checked-in .deepsec workspace.",
@@ -32,19 +32,19 @@
       "CONFIG": 5,
       "DATA": 3,
       "RULE": 6,
-      "TC": 1,
-      "RUN": 1,
-      "DEF": 1,
-      "FIX": 1,
-      "REG": 1,
+      "TC": 7,
+      "RUN": 7,
+      "DEF": 2,
+      "FIX": 2,
+      "REG": 2,
       "A11Y": 1,
       "SEC": 1,
       "PERF": 1,
       "UX": 1,
-      "RISK": 2,
+      "RISK": 3,
       "WAIVER": 1,
       "ASSUME": 4,
-      "BLOCKER": 1,
+      "BLOCKER": 2,
       "CHK": 1
     },
     "appliedInboxThrough": 0,
@@ -93,6 +93,28 @@
         "confidence": 25,
         "confidenceRationale": "The run has a canonical tracker and live canvas, but substantive quality proof is still pending.",
         "nextActions": "Create baseline preservation commit, dispatch read-only lanes, run quality gates, remediate findings, and repeat until readiness rule holds."
+      },
+      {
+        "n": 2,
+        "date": "2026-07-03T14:38:00Z",
+        "scope": "Remediation and closeout evidence for required-label reconciliation and security audit.",
+        "discoveredOrUpdated": "Parallel core lane found a High reconciliation defect. Remaining read-only lanes were interrupted after timeout; local cross-cutting sweeps covered TODO/legacy markers, secrets/security boundaries, cockpit accessibility markers, git diff, and runtime smoke.",
+        "testsAddedExecuted": "Added pure reconciliation tests and a loop-level TestClock regression for required-label removal. Ran focused vitest, pnpm check, pnpm build, pnpm audit --audit-level=low, and built-daemon smoke.",
+        "testsPassedFailedBlocked": "Focused vitest: 56 passed. Full pnpm check: 40 files / 464 tests passed with React Doctor 100/100. Build passed. Audit found no known vulnerabilities. Runtime smoke served cockpit/state but dispatch proof blocked by local WORKFLOW.md tracker credential/preflight.",
+        "defectsFoundFixedVerified": "DEF-001 fixed and verified by FIX-001 and REG-001.",
+        "regressionResult": "Regression passed for pure reconciliation, loop reconciliation, full suite, build, audit, and cockpit state/static smoke.",
+        "remainingBySeverity": {
+          "Critical": 0,
+          "High": 0,
+          "Medium": 0,
+          "Low": 0
+        },
+        "remainingReviewIssues": "No unresolved repo-controlled findings from completed evidence. Full live dispatch proof remains externally blocked by gitignored operator config/credentials.",
+        "remainingRisks": "RISK-001 is an accepted architecture boundary. RISK-002 records partial adversarial lane completion due lane timeouts.",
+        "blockers": "BLOCKER-001: valid local WORKFLOW.md tracker credentials/repo access needed for live dispatch proof.",
+        "confidence": 88,
+        "confidenceRationale": "Core gates, regression, build, audit, and smoke evidence are strong; confidence is below Ready because live dispatch proof depends on external credentials and several read-only lanes timed out before returning.",
+        "nextActions": "Provide valid WORKFLOW.md tracker credentials/repo access, rerun live dispatch proof, and optionally rerun timed-out read-only lanes."
       }
     ]
   },
@@ -103,24 +125,12 @@
       "featureName": "CLI daemon startup",
       "status": "Documented",
       "discoveredIn": "README.md; src/cli/main.ts; src/cli/daemon.ts; test/example-workflow.test.ts",
-      "primaryFiles": [
-        "src/cli/main.ts",
-        "src/cli/daemon.ts",
-        "src/cli/args.ts"
-      ],
+      "primaryFiles": ["src/cli/main.ts", "src/cli/daemon.ts", "src/cli/args.ts"],
       "relatedRoutes": [],
       "relatedComponents": [],
-      "relatedApis": [
-        "API-001"
-      ],
-      "relatedDataModels": [
-        "DATA-001"
-      ],
-      "relatedConfig": [
-        "CONFIG-001",
-        "CONFIG-002",
-        "CONFIG-003"
-      ],
+      "relatedApis": ["API-001"],
+      "relatedDataModels": ["DATA-001"],
+      "relatedConfig": ["CONFIG-001", "CONFIG-002", "CONFIG-003"],
       "relatedPermissionsRoles": [],
       "userStory": "As an operator, run orchestra against a WORKFLOW.md file and optionally expose the cockpit.",
       "actualImplementedBehavior": "runDaemon parses argv, loads workflow config, builds Effect layers, forks cockpit when --port is present, then runs the orchestrator.",
@@ -131,9 +141,7 @@
       "businessRules": "Single daemon process owns the run.",
       "edgeCases": "Missing workflow file, invalid port, bind failure, invalid YAML/front matter, missing secrets.",
       "dependencies": "Effect runtime, Node platform, tsx/tsup build output.",
-      "assumptions": [
-        "ASSUME-001"
-      ],
+      "assumptions": ["ASSUME-001"],
       "knownRisks": [],
       "relatedTestCases": [],
       "relatedDefects": [],
@@ -159,18 +167,9 @@
       ],
       "relatedRoutes": [],
       "relatedComponents": [],
-      "relatedApis": [
-        "API-002",
-        "API-003"
-      ],
-      "relatedDataModels": [
-        "DATA-001",
-        "DATA-002"
-      ],
-      "relatedConfig": [
-        "CONFIG-001",
-        "CONFIG-002"
-      ],
+      "relatedApis": ["API-002", "API-003"],
+      "relatedDataModels": ["DATA-001", "DATA-002"],
+      "relatedConfig": ["CONFIG-001", "CONFIG-002"],
       "relatedPermissionsRoles": [],
       "userStory": "As an operator, let the daemon schedule issue work with bounded concurrency and durable retry behavior.",
       "actualImplementedBehavior": "A single owner fiber drains messages, reconciles tracker state, preflights, selects candidates, dispatches workers, records running/retry/completed state, and applies backoff.",
@@ -207,16 +206,9 @@
       ],
       "relatedRoutes": [],
       "relatedComponents": [],
-      "relatedApis": [
-        "API-001"
-      ],
+      "relatedApis": ["API-001"],
       "relatedDataModels": [],
-      "relatedConfig": [
-        "CONFIG-001",
-        "CONFIG-002",
-        "CONFIG-003",
-        "CONFIG-004"
-      ],
+      "relatedConfig": ["CONFIG-001", "CONFIG-002", "CONFIG-003", "CONFIG-004"],
       "relatedPermissionsRoles": [],
       "userStory": "As an operator, describe how issues are selected and prompted without leaking secrets.",
       "actualImplementedBehavior": "WORKFLOW.md front matter is decoded with defaults; Liquid body renders prompts; safe cockpit settings writes persist whitelisted raw config while preserving the Liquid body.",
@@ -251,13 +243,9 @@
       ],
       "relatedRoutes": [],
       "relatedComponents": [],
-      "relatedApis": [
-        "API-003"
-      ],
+      "relatedApis": ["API-003"],
       "relatedDataModels": [],
-      "relatedConfig": [
-        "CONFIG-002"
-      ],
+      "relatedConfig": ["CONFIG-002"],
       "relatedPermissionsRoles": [],
       "userStory": "As an operator, each issue should run in its own workspace with the agent cwd set to that workspace.",
       "actualImplementedBehavior": "WorkspaceManager computes sanitized per-issue paths, runs hooks, and gives the agent runner a workspace cwd.",
@@ -269,9 +257,7 @@
       "edgeCases": "Path traversal, duplicate identifiers, hook failure, pre-existing workspace, missing root.",
       "dependencies": "Node filesystem and command executor through @effect/platform-node.",
       "assumptions": [],
-      "knownRisks": [
-        "RISK-001"
-      ],
+      "knownRisks": ["RISK-001"],
       "relatedTestCases": [],
       "relatedDefects": [],
       "runtimeRegistrationEvidence": "layerWorkspaceManager is wired in src/cli/daemon.ts.",
@@ -294,13 +280,9 @@
       ],
       "relatedRoutes": [],
       "relatedComponents": [],
-      "relatedApis": [
-        "API-003"
-      ],
+      "relatedApis": ["API-003"],
       "relatedDataModels": [],
-      "relatedConfig": [
-        "CONFIG-003"
-      ],
+      "relatedConfig": ["CONFIG-003"],
       "relatedPermissionsRoles": [],
       "userStory": "As the daemon, run headless Copilot sessions and normalize streaming events.",
       "actualImplementedBehavior": "The adapter spawns Copilot with configured credentials/environment, maps JSONL events, and returns a worker outcome.",
@@ -312,9 +294,7 @@
       "edgeCases": "Malformed JSONL, process failure, timeout, input-required, stale resume session, missing copilot auth.",
       "dependencies": "GitHub Copilot CLI available in environment.",
       "assumptions": [],
-      "knownRisks": [
-        "RISK-001"
-      ],
+      "knownRisks": ["RISK-001"],
       "relatedTestCases": [],
       "relatedDefects": [],
       "runtimeRegistrationEvidence": "layerCopilotRunner is wired in src/cli/daemon.ts.",
@@ -352,26 +332,11 @@
         "/api/v1/issues/:id/retry",
         "/api/v1/issues/:id/cancel"
       ],
-      "relatedComponents": [
-        "AppShell",
-        "CommandPalette",
-        "DispatchControl",
-        "StatusChip",
-        "Toast"
-      ],
-      "relatedApis": [
-        "API-001"
-      ],
-      "relatedDataModels": [
-        "DATA-001"
-      ],
-      "relatedConfig": [
-        "CONFIG-004"
-      ],
-      "relatedPermissionsRoles": [
-        "loopback host check",
-        "bearer token for mutations"
-      ],
+      "relatedComponents": ["AppShell", "CommandPalette", "DispatchControl", "StatusChip", "Toast"],
+      "relatedApis": ["API-001"],
+      "relatedDataModels": ["DATA-001"],
+      "relatedConfig": ["CONFIG-004"],
+      "relatedPermissionsRoles": ["loopback host check", "bearer token for mutations"],
       "userStory": "As an operator, inspect live fleet state and safely issue control commands from a local browser.",
       "actualImplementedBehavior": "Daemon serves SPA/static assets and typed HTTP API on 127.0.0.1 with security headers, loopback host guard, token injection, and command bus mutations.",
       "expectedBehaviorFromCode": "Read endpoints are loopback-only; mutating endpoints require bearer token and loopback origin/host.",
@@ -407,23 +372,11 @@
         "src/core/observability/recent-events.ts",
         "src/core/observability/recent-completions.ts"
       ],
-      "relatedRoutes": [
-        "/api/v1/state"
-      ],
-      "relatedComponents": [
-        "FleetView",
-        "EventsView",
-        "KanbanView"
-      ],
-      "relatedApis": [
-        "API-001"
-      ],
-      "relatedDataModels": [
-        "DATA-001"
-      ],
-      "relatedConfig": [
-        "CONFIG-002"
-      ],
+      "relatedRoutes": ["/api/v1/state"],
+      "relatedComponents": ["FleetView", "EventsView", "KanbanView"],
+      "relatedApis": ["API-001"],
+      "relatedDataModels": ["DATA-001"],
+      "relatedConfig": ["CONFIG-002"],
       "relatedPermissionsRoles": [],
       "userStory": "As an operator, see accurate live state, events, completions, restore facts, budget status, and rate limits.",
       "actualImplementedBehavior": "Observer tee records recent activity while snapshot projection reads the authoritative store and display-only mirrors.",
@@ -454,23 +407,10 @@
       "businessGoal": "Continuously move issue work through autonomous Copilot sessions.",
       "entryPoint": "pnpm dev ./WORKFLOW.md",
       "exitPoint": "Issues completed, retried, abandoned, or waiting for input according to configured rules.",
-      "featuresCovered": [
-        "FEAT-001",
-        "FEAT-002",
-        "FEAT-003",
-        "FEAT-004",
-        "FEAT-005",
-        "FEAT-007"
-      ],
+      "featuresCovered": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005", "FEAT-007"],
       "primaryRoutesScreens": [],
-      "primaryApis": [
-        "API-002",
-        "API-003"
-      ],
-      "primaryDataModels": [
-        "DATA-001",
-        "DATA-002"
-      ],
+      "primaryApis": ["API-002", "API-003"],
+      "primaryDataModels": ["DATA-001", "DATA-002"],
       "steps": [
         "Parse args and workflow",
         "Load layers",
@@ -499,22 +439,10 @@
       "businessGoal": "See current fleet state and apply safe dispatch/settings controls.",
       "entryPoint": "http://127.0.0.1:<port>/",
       "exitPoint": "Read state or receive a command result from the daemon.",
-      "featuresCovered": [
-        "FEAT-006",
-        "FEAT-007"
-      ],
-      "primaryRoutesScreens": [
-        "/",
-        "/events",
-        "/kanban",
-        "/settings"
-      ],
-      "primaryApis": [
-        "API-001"
-      ],
-      "primaryDataModels": [
-        "DATA-001"
-      ],
+      "featuresCovered": ["FEAT-006", "FEAT-007"],
+      "primaryRoutesScreens": ["/", "/events", "/kanban", "/settings"],
+      "primaryApis": ["API-001"],
+      "primaryDataModels": ["DATA-001"],
       "steps": [
         "Open SPA",
         "Poll state/settings",
@@ -538,19 +466,10 @@
       "businessGoal": "Resume safe scheduling after process interruption.",
       "entryPoint": "Daemon boot with existing .orchestra/state.json",
       "exitPoint": "Store restored, orphaned running work converted to continuation retries, and cockpit snapshot indicates restore.",
-      "featuresCovered": [
-        "FEAT-002",
-        "FEAT-007"
-      ],
-      "primaryRoutesScreens": [
-        "/api/v1/state"
-      ],
-      "primaryApis": [
-        "API-002"
-      ],
-      "primaryDataModels": [
-        "DATA-001"
-      ],
+      "featuresCovered": ["FEAT-002", "FEAT-007"],
+      "primaryRoutesScreens": ["/api/v1/state"],
+      "primaryApis": ["API-002"],
+      "primaryDataModels": ["DATA-001"],
       "steps": [
         "Load durable state",
         "Decode/migrate state",
@@ -576,22 +495,15 @@
       "endpointOperation": "GET /api/v1/state; GET/PUT /api/v1/settings; POST /api/v1/control/pause|resume; POST /api/v1/issues/:id/retry|cancel",
       "method": "GET/PUT/POST",
       "authRequired": "Mutations require bearer token plus loopback host/origin; reads require loopback host.",
-      "permissionsRoles": [
-        "Local loopback operator"
-      ],
+      "permissionsRoles": ["Local loopback operator"],
       "primaryFiles": [
         "src/core/cockpit/api.ts",
         "src/core/cockpit/handlers.ts",
         "src/core/cockpit/auth.ts",
         "src/core/cockpit/security.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-006",
-        "FEAT-007"
-      ],
-      "relatedDataModels": [
-        "DATA-001"
-      ],
+      "relatedFeatures": ["FEAT-006", "FEAT-007"],
+      "relatedDataModels": ["DATA-001"],
       "requestInputs": "HTTP request, optional JSON settings/control payload, bearer token.",
       "responseOutputs": "Snapshot/settings/control result JSON or typed error.",
       "validationRules": "HttpApi schema, hostIsLoopbackHeader, CockpitAuth, settings whitelist.",
@@ -614,21 +526,14 @@
       "endpointOperation": "List/fetch GitHub Issues via Octokit REST",
       "method": "GitHub REST client calls",
       "authRequired": "tracker.api_key resolved from env",
-      "permissionsRoles": [
-        "GitHub token with issue read permissions"
-      ],
+      "permissionsRoles": ["GitHub token with issue read permissions"],
       "primaryFiles": [
         "src/adapters/tracker-github/github-tracker.ts",
         "src/adapters/tracker-github/normalize.ts",
         "src/core/ports/issue-tracker.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-002",
-        "FEAT-003"
-      ],
-      "relatedDataModels": [
-        "DATA-002"
-      ],
+      "relatedFeatures": ["FEAT-002", "FEAT-003"],
+      "relatedDataModels": ["DATA-002"],
       "requestInputs": "Repository owner/name, labels/states, API token.",
       "responseOutputs": "Schema-normalized Issue records.",
       "validationRules": "Issue schema and GitHub normalizer.",
@@ -651,18 +556,13 @@
       "endpointOperation": "Spawn headless copilot CLI with prompt/session parameters",
       "method": "child process",
       "authRequired": "copilot.github_token or ambient Copilot login",
-      "permissionsRoles": [
-        "Agent GitHub credential"
-      ],
+      "permissionsRoles": ["Agent GitHub credential"],
       "primaryFiles": [
         "src/adapters/agent-copilot/copilot-runner.ts",
         "src/adapters/agent-copilot/map.ts",
         "src/core/ports/agent-runner.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-004",
-        "FEAT-005"
-      ],
+      "relatedFeatures": ["FEAT-004", "FEAT-005"],
       "relatedDataModels": [],
       "requestInputs": "Prompt, cwd, resume session id, environment, timeout/max turn behavior.",
       "responseOutputs": "Agent events, outcome, usage, session id.",
@@ -685,20 +585,9 @@
       "required": "Yes",
       "defaultValue": "Most blocks have schema defaults; path itself is required.",
       "allowedValues": "Schema-defined tracker, polling, agent, workspace, persistence, budget values.",
-      "usedIn": [
-        "src/core/workflow/loader.ts",
-        "src/core/domain/workflow.ts",
-        "src/cli/daemon.ts"
-      ],
-      "relatedFeatures": [
-        "FEAT-001",
-        "FEAT-002",
-        "FEAT-003"
-      ],
-      "relatedApis": [
-        "API-002",
-        "API-003"
-      ],
+      "usedIn": ["src/core/workflow/loader.ts", "src/core/domain/workflow.ts", "src/cli/daemon.ts"],
+      "relatedFeatures": ["FEAT-001", "FEAT-002", "FEAT-003"],
+      "relatedApis": ["API-002", "API-003"],
       "behaviorWhenPresent": "Decoded into ServiceConfig and prompt template.",
       "behaviorWhenMissing": "CLI/config loading fails.",
       "behaviorWhenInvalid": "Schema decode failure.",
@@ -728,10 +617,7 @@
         "src/core/orchestrator/backoff.ts",
         "src/core/orchestrator/budget.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-002",
-        "FEAT-007"
-      ],
+      "relatedFeatures": ["FEAT-002", "FEAT-007"],
       "relatedApis": [],
       "behaviorWhenPresent": "Controls dispatch and retry behavior.",
       "behaviorWhenMissing": "Defaults apply.",
@@ -761,14 +647,8 @@
         "src/adapters/tracker-github/github-tracker.ts",
         "src/adapters/agent-copilot/copilot-runner.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-003",
-        "FEAT-005"
-      ],
-      "relatedApis": [
-        "API-002",
-        "API-003"
-      ],
+      "relatedFeatures": ["FEAT-003", "FEAT-005"],
+      "relatedApis": ["API-002", "API-003"],
       "behaviorWhenPresent": "Tracker and agent authenticate with deliberately separate credentials.",
       "behaviorWhenMissing": "Config/adapters fail without serializing the secret value.",
       "behaviorWhenInvalid": "External API/CLI auth fails.",
@@ -792,16 +672,9 @@
       "required": "No",
       "defaultValue": "ORCHESTRA_COCKPIT_TOKEN absent generates a random token; ORCHESTRA_PORT defaults to 4317 for Vite proxy.",
       "allowedValues": "Trimmed non-empty token string; positive integer dev port.",
-      "usedIn": [
-        "src/core/cockpit/token.ts",
-        "vite.config.ts"
-      ],
-      "relatedFeatures": [
-        "FEAT-006"
-      ],
-      "relatedApis": [
-        "API-001"
-      ],
+      "usedIn": ["src/core/cockpit/token.ts", "vite.config.ts"],
+      "relatedFeatures": ["FEAT-006"],
+      "relatedApis": ["API-001"],
       "behaviorWhenPresent": "Token is logged/injected for cockpit mutations; Vite proxies to configured daemon port.",
       "behaviorWhenMissing": "Daemon generates token; Vite dev proxy uses 4317.",
       "behaviorWhenInvalid": "Whitespace token treated as absent; invalid port falls back.",
@@ -829,14 +702,8 @@
         "src/core/observability/snapshot.ts",
         "src/core/observability/snapshot-wire.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-002",
-        "FEAT-006",
-        "FEAT-007"
-      ],
-      "relatedApis": [
-        "API-001"
-      ],
+      "relatedFeatures": ["FEAT-002", "FEAT-006", "FEAT-007"],
+      "relatedApis": ["API-001"],
       "fieldsShape": "Running/retrying/completed/abandoned state, totals, rate limits, restore/budget/control display fields, snapshot wire projection.",
       "constraints": "Versioned schema; dates parsed/serialized; atomic temp-file rename; bad checkpoint renamed aside.",
       "relationships": "Orchestrator state is authoritative; cockpit snapshot is derived.",
@@ -867,14 +734,8 @@
         "src/core/domain/run-attempt.ts",
         "src/core/domain/retry-entry.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-002",
-        "FEAT-005"
-      ],
-      "relatedApis": [
-        "API-002",
-        "API-003"
-      ],
+      "relatedFeatures": ["FEAT-002", "FEAT-005"],
+      "relatedApis": ["API-002", "API-003"],
       "fieldsShape": "Schema-validated Issue, AgentEvent, RunAttempt, RetryEntry, and related state references.",
       "constraints": "Strict TypeScript and Effect Schema decode at trust boundaries.",
       "relationships": "Tracker adapter normalizes issues; Copilot adapter normalizes events; orchestrator stores attempts/retries.",
@@ -899,16 +760,8 @@
       "ruleName": "Core I/O uses Effect and typed errors",
       "status": "Documented",
       "ruleType": "Business",
-      "primaryFiles": [
-        "AGENTS.md",
-        "docs/effect-guide.md",
-        "src/core/errors.ts"
-      ],
-      "relatedFeatures": [
-        "FEAT-001",
-        "FEAT-002",
-        "FEAT-003"
-      ],
+      "primaryFiles": ["AGENTS.md", "docs/effect-guide.md", "src/core/errors.ts"],
+      "relatedFeatures": ["FEAT-001", "FEAT-002", "FEAT-003"],
       "relatedApis": [],
       "relatedDataModels": [],
       "ruleDescription": "Everything that can fail, block, or touch I/O in core is modeled as Effect with tagged errors.",
@@ -940,16 +793,9 @@
         "src/core/orchestrator/command.ts",
         "src/core/orchestrator/state.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-002",
-        "FEAT-006"
-      ],
-      "relatedApis": [
-        "API-001"
-      ],
-      "relatedDataModels": [
-        "DATA-001"
-      ],
+      "relatedFeatures": ["FEAT-002", "FEAT-006"],
+      "relatedApis": ["API-001"],
+      "relatedDataModels": ["DATA-001"],
       "ruleDescription": "Only the orchestrator owner fiber mutates orchestrator state; cockpit commands enter through CommandBus.",
       "inputs": "Worker outcomes, retry timers, cockpit commands.",
       "allowedConditions": "Messages posted to mailbox/command bus and processed by owner fiber.",
@@ -980,20 +826,9 @@
         "src/core/cockpit/handlers.ts",
         "src/core/cockpit/token.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-003",
-        "FEAT-005",
-        "FEAT-006",
-        "FEAT-007"
-      ],
-      "relatedApis": [
-        "API-001",
-        "API-002",
-        "API-003"
-      ],
-      "relatedDataModels": [
-        "DATA-001"
-      ],
+      "relatedFeatures": ["FEAT-003", "FEAT-005", "FEAT-006", "FEAT-007"],
+      "relatedApis": ["API-001", "API-002", "API-003"],
+      "relatedDataModels": ["DATA-001"],
       "ruleDescription": "Resolved tracker/Copilot/cockpit secrets are protected from serialization and accidental inheritance.",
       "inputs": "Env vars, config, cockpit token, child process env.",
       "allowedConditions": "Use references or generated process-local token; scrub child env.",
@@ -1022,12 +857,8 @@
         "src/core/workspace/safety.ts",
         "src/adapters/workspace/workspace-manager.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-004"
-      ],
-      "relatedApis": [
-        "API-003"
-      ],
+      "relatedFeatures": ["FEAT-004"],
+      "relatedApis": ["API-003"],
       "relatedDataModels": [],
       "ruleDescription": "Issue workspace paths are sanitized and contained under the configured workspace root.",
       "inputs": "Issue identifier and workspace root.",
@@ -1059,12 +890,8 @@
         "src/core/cockpit/handlers.ts",
         "src/core/workflow/workflow-file.ts"
       ],
-      "relatedFeatures": [
-        "FEAT-006"
-      ],
-      "relatedApis": [
-        "API-001"
-      ],
+      "relatedFeatures": ["FEAT-006"],
+      "relatedApis": ["API-001"],
       "relatedDataModels": [],
       "ruleDescription": "Local cockpit requests must satisfy loopback host checks; mutations also require bearer auth and whitelisted payloads.",
       "inputs": "HTTP Host/Origin/Auth headers and settings patch.",
@@ -1086,35 +913,421 @@
     }
   ],
   "tests": {
-    "cases": [],
-    "runs": []
+    "cases": [
+      {
+        "id": "TC-001",
+        "title": "Full repository quality gate",
+        "status": "Passed",
+        "testType": "Regression",
+        "priority": "Critical",
+        "relatedFeatures": [
+          "FEAT-001",
+          "FEAT-002",
+          "FEAT-003",
+          "FEAT-004",
+          "FEAT-005",
+          "FEAT-006",
+          "FEAT-007"
+        ],
+        "relatedJourney": "JOURNEY-001",
+        "relatedApis": ["API-001", "API-002", "API-003"],
+        "relatedRules": ["RULE-001", "RULE-002", "RULE-003", "RULE-004", "RULE-005"],
+        "relatedDataModels": ["DATA-001", "DATA-002"],
+        "automationRequired": "Yes",
+        "automationCandidate": "Already Automated",
+        "automatedTestLocation": "package.json script: pnpm check",
+        "runtimeProofRequired": "No",
+        "preconditions": "Dependencies installed and lockfile current.",
+        "testData": "Repository test suite and React Doctor config.",
+        "steps": ["Run pnpm check"],
+        "expectedResult": "Typecheck, lint, tests, and doctor:score all pass.",
+        "actualResult": "Passed after remediation: 40 test files / 464 tests passed; React Doctor 100/100.",
+        "passFailCriteria": "Exit code 0.",
+        "edgeCasesCovered": "Type safety, formatting, unit/integration behavior, cockpit quality rules.",
+        "defectsRaised": [],
+        "lastExecuted": "2026-07-03T14:38:00Z",
+        "notes": ""
+      },
+      {
+        "id": "TC-002",
+        "title": "Required-label removal reconciliation regression",
+        "status": "Passed",
+        "testType": "Regression",
+        "priority": "High",
+        "relatedFeatures": ["FEAT-002"],
+        "relatedJourney": "JOURNEY-001",
+        "relatedApis": ["API-002"],
+        "relatedRules": ["RULE-002"],
+        "relatedDataModels": ["DATA-001", "DATA-002"],
+        "automationRequired": "Yes",
+        "automationCandidate": "Already Automated",
+        "automatedTestLocation": "test/orchestrator-pure.test.ts; test/orchestrator-loop.test.ts",
+        "runtimeProofRequired": "No",
+        "preconditions": "Issue starts with required label and later refresh loses it.",
+        "testData": "Fake tracker state refs and TestClock-driven fake runner.",
+        "steps": ["Run focused vitest for orchestrator pure and loop tests"],
+        "expectedResult": "Running, retrying, and abandoned active issues missing required labels reconcile to NeitherKill/release.",
+        "actualResult": "Passed: 56 focused tests passed.",
+        "passFailCriteria": "Focused tests exit 0 and assertions prove release.",
+        "edgeCasesCovered": "Running worker, retrying backoff, abandoned parked issue.",
+        "defectsRaised": ["DEF-001"],
+        "lastExecuted": "2026-07-03T14:38:00Z",
+        "notes": ""
+      },
+      {
+        "id": "TC-003",
+        "title": "Production build",
+        "status": "Passed",
+        "testType": "Regression",
+        "priority": "High",
+        "relatedFeatures": ["FEAT-001", "FEAT-006"],
+        "relatedJourney": "JOURNEY-002",
+        "relatedApis": ["API-001"],
+        "relatedRules": [],
+        "relatedDataModels": [],
+        "automationRequired": "Yes",
+        "automationCandidate": "Already Automated",
+        "automatedTestLocation": "package.json script: pnpm build",
+        "runtimeProofRequired": "No",
+        "preconditions": "Dependencies installed.",
+        "testData": "tsup CLI entry and Vite cockpit bundle.",
+        "steps": ["Run pnpm build"],
+        "expectedResult": "CLI and cockpit production artifacts build.",
+        "actualResult": "Passed; dist/cli/main.js and dist/cockpit assets built.",
+        "passFailCriteria": "Exit code 0.",
+        "edgeCasesCovered": "Production compile/bundle integration.",
+        "defectsRaised": [],
+        "lastExecuted": "2026-07-03T14:38:00Z",
+        "notes": ""
+      },
+      {
+        "id": "TC-004",
+        "title": "Dependency security audit",
+        "status": "Passed",
+        "testType": "Security",
+        "priority": "High",
+        "relatedFeatures": ["FEAT-001", "FEAT-006"],
+        "relatedJourney": "",
+        "relatedApis": [],
+        "relatedRules": ["RULE-003"],
+        "relatedDataModels": [],
+        "automationRequired": "Yes",
+        "automationCandidate": "Already Automated",
+        "automatedTestLocation": "pnpm audit --audit-level=low",
+        "runtimeProofRequired": "No",
+        "preconditions": "Lockfile current.",
+        "testData": "pnpm dependency graph.",
+        "steps": ["Run pnpm audit --audit-level=low"],
+        "expectedResult": "No known vulnerabilities.",
+        "actualResult": "Passed: No known vulnerabilities found.",
+        "passFailCriteria": "Exit code 0.",
+        "edgeCasesCovered": "Includes low severity advisories.",
+        "defectsRaised": [],
+        "lastExecuted": "2026-07-03T14:38:00Z",
+        "notes": ""
+      },
+      {
+        "id": "TC-005",
+        "title": "Built daemon and cockpit smoke",
+        "status": "Blocked",
+        "testType": "E2E",
+        "priority": "High",
+        "relatedFeatures": ["FEAT-001", "FEAT-002", "FEAT-006", "FEAT-007"],
+        "relatedJourney": "JOURNEY-001",
+        "relatedApis": ["API-001", "API-002"],
+        "relatedRules": ["RULE-003", "RULE-005"],
+        "relatedDataModels": ["DATA-001"],
+        "automationRequired": "Yes",
+        "automationCandidate": "Blocked",
+        "automatedTestLocation": "node dist/cli/main.js ./WORKFLOW.md --port 4329 plus curl probes",
+        "runtimeProofRequired": "Yes",
+        "preconditions": "Built dist and valid gitignored WORKFLOW.md tracker credentials/repo access.",
+        "testData": "Local WORKFLOW.md and ORCHESTRA_COCKPIT_TOKEN set to a redacted smoke value.",
+        "steps": ["Run built daemon", "GET /api/v1/state", "GET /"],
+        "expectedResult": "Daemon starts, cockpit serves, state endpoint works, and live dispatch can be proven with valid tracker credentials.",
+        "actualResult": "Partial: daemon started, cockpit/state served, but tracker fetch/preflight failed with Not Found and MissingTrackerApiKey from local operator config.",
+        "passFailCriteria": "Full pass requires valid tracker credentials and a dispatch-capable test issue.",
+        "edgeCasesCovered": "Tracker unavailable/preflight failure does not crash daemon; cockpit remains available.",
+        "defectsRaised": [],
+        "lastExecuted": "2026-07-03T14:38:00Z",
+        "notes": "External blocker BLOCKER-001."
+      },
+      {
+        "id": "TC-006",
+        "title": "Quality-autonomy canvas opens and streams tracker",
+        "status": "Passed",
+        "testType": "Manual",
+        "priority": "Medium",
+        "relatedFeatures": [],
+        "relatedJourney": "",
+        "relatedApis": [],
+        "relatedRules": [],
+        "relatedDataModels": [],
+        "automationRequired": "No",
+        "automationCandidate": "Not Practical",
+        "automatedTestLocation": "",
+        "runtimeProofRequired": "Yes",
+        "preconditions": ".quality/tracker.json exists.",
+        "testData": "Canvas server launched via quality-autonomy plugin.",
+        "steps": ["Launch canvas-cli.mjs", "Open tokened URL in Codex in-app Browser"],
+        "expectedResult": "Canvas shows live stream, controls, readiness, inventory, tests, remediation, reviews.",
+        "actualResult": "Passed: page title Continuous-quality loop, stream connected, Pending/Blocked tracker data rendered. Only favicon.ico 404 observed.",
+        "passFailCriteria": "Page loads and displays tracker sections.",
+        "edgeCasesCovered": "Tokened local URL and SSE tracker stream.",
+        "defectsRaised": [],
+        "lastExecuted": "2026-07-03T14:38:00Z",
+        "notes": "Detached launchctl job label quality-autonomy-canvas-orchestra serves the canvas."
+      }
+    ],
+    "runs": [
+      {
+        "id": "RUN-001",
+        "date": "2026-07-03T14:38:00Z",
+        "tester": "AI Agent",
+        "environment": "macOS local workspace, Node >=22, pnpm 11.7.0 executing repo scripts",
+        "commandMethod": "pnpm exec vitest run test/orchestrator-pure.test.ts test/orchestrator-loop.test.ts",
+        "scope": "Focused required-label reconciliation regression",
+        "relatedTestCases": ["TC-002"],
+        "result": "Passed",
+        "duration": "1.45s",
+        "evidence": "2 files passed, 56 tests passed.",
+        "failures": "",
+        "blockers": "",
+        "notes": ""
+      },
+      {
+        "id": "RUN-002",
+        "date": "2026-07-03T14:38:00Z",
+        "tester": "AI Agent",
+        "environment": "macOS local workspace, Node >=22, pnpm 11.7.0 executing repo scripts",
+        "commandMethod": "pnpm check",
+        "scope": "Full merge gate",
+        "relatedTestCases": ["TC-001", "TC-002"],
+        "result": "Passed",
+        "duration": "4.32s test phase plus type/lint/doctor",
+        "evidence": "Typecheck passed, Biome/Prettier passed, 40 test files / 464 tests passed, React Doctor score 100/100.",
+        "failures": "",
+        "blockers": "",
+        "notes": ""
+      },
+      {
+        "id": "RUN-003",
+        "date": "2026-07-03T14:38:00Z",
+        "tester": "AI Agent",
+        "environment": "macOS local workspace",
+        "commandMethod": "pnpm build",
+        "scope": "Production CLI and cockpit build",
+        "relatedTestCases": ["TC-003"],
+        "result": "Passed",
+        "duration": "<1s final run",
+        "evidence": "tsup built dist/cli/main.js; Vite built dist/cockpit assets.",
+        "failures": "",
+        "blockers": "",
+        "notes": ""
+      },
+      {
+        "id": "RUN-004",
+        "date": "2026-07-03T14:38:00Z",
+        "tester": "AI Agent",
+        "environment": "macOS local workspace",
+        "commandMethod": "pnpm audit --audit-level=low",
+        "scope": "Dependency advisory audit",
+        "relatedTestCases": ["TC-004"],
+        "result": "Passed",
+        "duration": "<1s",
+        "evidence": "No known vulnerabilities found.",
+        "failures": "",
+        "blockers": "",
+        "notes": "An earlier stale dependency graph reported esbuild@0.27.7 low advisory; after lock/dependency refresh audit is clean and no dependency diff remains."
+      },
+      {
+        "id": "RUN-005",
+        "date": "2026-07-03T14:38:00Z",
+        "tester": "AI Agent",
+        "environment": "Built dist on local machine with ORCHESTRA_COCKPIT_TOKEN set to a redacted smoke value.",
+        "commandMethod": "node dist/cli/main.js ./WORKFLOW.md --port 4329; curl /api/v1/state; curl /",
+        "scope": "Built daemon/cockpit runtime smoke",
+        "relatedTestCases": ["TC-005"],
+        "result": "Partial",
+        "duration": "~4m while other checks ran",
+        "evidence": "Daemon started, restored checkpoint, cockpit token loaded, /api/v1/state returned JSON, / returned 200 text/html.",
+        "failures": "Tracker fetch returned Not Found and preflight reported MissingTrackerApiKey from local gitignored WORKFLOW.md.",
+        "blockers": "BLOCKER-001",
+        "notes": "Server stopped after smoke."
+      },
+      {
+        "id": "RUN-006",
+        "date": "2026-07-03T14:38:00Z",
+        "tester": "AI Agent",
+        "environment": "Codex Desktop in-app Browser plus launchctl local server",
+        "commandMethod": "node quality-autonomy core/lib/canvas-cli.mjs via launchctl; Playwright navigate to tokened URL",
+        "scope": "Canvas open request",
+        "relatedTestCases": ["TC-006"],
+        "result": "Passed",
+        "duration": "Immediate",
+        "evidence": "Page title Continuous-quality loop; snapshot showed Live — stream connected and tracker sections.",
+        "failures": "Only favicon.ico 404, non-functional.",
+        "blockers": "",
+        "notes": "Canvas remains running under launchctl label quality-autonomy-canvas-orchestra."
+      }
+    ]
   },
   "remediation": {
-    "defects": [],
-    "fixes": [],
-    "regressions": []
+    "defects": [
+      {
+        "id": "DEF-001",
+        "title": "Required-label removal is ignored during active-run reconciliation",
+        "status": "Verified",
+        "severity": "High",
+        "priority": "High",
+        "relatedFeatures": ["FEAT-002"],
+        "relatedJourney": "JOURNEY-001",
+        "relatedTestCases": ["TC-002"],
+        "relatedApis": ["API-002"],
+        "relatedRules": ["RULE-002"],
+        "relatedDataModels": ["DATA-001", "DATA-002"],
+        "discoveredInRun": "q-20260703-142107",
+        "primaryFilesSuspected": [
+          "src/core/orchestrator/reconcile.ts",
+          "src/core/orchestrator/loop.ts"
+        ],
+        "summary": "Reconciliation refreshed issue state/labels but only evaluated state, so a running, retrying, or abandoned issue that lost a required orchestration label stayed claimed/active.",
+        "environment": "Pure reconciler and fake-loop TestClock scenario.",
+        "preconditions": "Workflow config has tracker.required_labels; issue is already running/retrying/abandoned; tracker refresh returns active state without the required label.",
+        "reproductionSteps": [
+          "Dispatch an issue with required label orchestra",
+          "Remove the label while state remains Todo/In Progress",
+          "Run reconciliation tick"
+        ],
+        "expectedResult": "Issue is released/killed as NeitherKill because it no longer matches required orchestration scope.",
+        "actualResult": "Before fix, active state produced UpdateActive or no action for retrying/abandoned views.",
+        "evidence": "Core lane evidence: IssueStateRef includes labels, fetchIssueStatesByIds returns labels, selection checked labels only before initial dispatch, and planReconciliation ignored labels.",
+        "userImpact": "Operators cannot opt a running/retrying issue out by removing a required label; the daemon may continue spending agent time on out-of-scope work.",
+        "businessImpact": "Wasted agent spend and surprising control-plane behavior.",
+        "accessibilityImpact": "None.",
+        "securityImpact": "Scope-control weakness for autonomous execution.",
+        "dataIntegrityImpact": "No direct data corruption, but issue ownership/claim state can remain wrong.",
+        "frequency": "Any configured required_labels workflow when labels change after dispatch.",
+        "rootCauseHypothesis": "Reconciliation duplicated only state eligibility and did not share the required-label eligibility condition used by initial selection.",
+        "proposedFix": "Pass normalized required labels into reconciliation and classify active refs missing labels as NeitherKill for running, retrying, and abandoned views.",
+        "fixId": "FIX-001",
+        "verificationSteps": "Focused vitest, full pnpm check.",
+        "regressionRisk": "Low; behavior aligns reconciliation with existing selection scope.",
+        "notes": ""
+      }
+    ],
+    "fixes": [
+      {
+        "id": "FIX-001",
+        "title": "Reconcile required-label loss for running and slot-holding issues",
+        "status": "Regression Passed",
+        "relatedDefects": ["DEF-001"],
+        "relatedFeatures": ["FEAT-002"],
+        "filesChanged": [
+          "src/core/orchestrator/reconcile.ts",
+          "src/core/orchestrator/loop.ts",
+          "test/orchestrator-pure.test.ts",
+          "test/orchestrator-loop.test.ts"
+        ],
+        "fixType": "Code",
+        "rootCause": "Reconciliation did not evaluate required labels even though refreshed state refs include labels.",
+        "changeSummary": "Added required-label evaluation to planReconciliation/classifyTrackerOnly, passed normalized config labels from the loop, and covered running/retrying/abandoned release behavior.",
+        "whyCleanestSafeFix": "One shared reconciler check fixes all active-run surfaces instead of adding per-call guards.",
+        "testsAddedUpdated": "Added pure tests and a loop-level TestClock regression.",
+        "verificationPerformed": "RUN-001 and RUN-002 passed.",
+        "regressionTestingPerformed": "RUN-001 focused regression and RUN-002 full gate.",
+        "residualRisk": "None known for repo-controlled behavior.",
+        "notes": "",
+        "breakingChange": "No",
+        "oldPathDeleted": "N/A",
+        "inRepoCallersUpdated": "Yes",
+        "testsDocsConfigUpdated": "Tests updated; tracker updated.",
+        "compatibilityRemoved": "N/A",
+        "performanceEvidence": "O(required_labels + labels) set membership during reconciliation; negligible and bounded by issue label count.",
+        "externalBoundary": "internal",
+        "autonomyCheckpoint": "N/A",
+        "revertPath": "Revert the four source/test file changes in this fix batch."
+      }
+    ],
+    "regressions": [
+      {
+        "id": "REG-001",
+        "date": "2026-07-03T14:38:00Z",
+        "status": "Regression Passed",
+        "relatedFixes": ["FIX-001"],
+        "relatedDefects": ["DEF-001"],
+        "relatedTestCases": ["TC-001", "TC-002", "TC-003", "TC-004"],
+        "regressionScope": "Required-label reconciliation plus whole repo gate/build/audit.",
+        "commandsMethodsUsed": "pnpm exec vitest run test/orchestrator-pure.test.ts test/orchestrator-loop.test.ts; pnpm check; pnpm build; pnpm audit --audit-level=low",
+        "environment": "macOS local workspace",
+        "results": "Focused 56 tests passed; full 464 tests passed; build passed; audit found no vulnerabilities.",
+        "newDefectsFound": [],
+        "remainingRisks": "BLOCKER-001 for live dispatch proof only.",
+        "notes": ""
+      }
+    ]
   },
   "reviews": [],
   "readiness": {
-    "verdict": "Pending",
-    "confidence": 20,
-    "assessment": null,
+    "verdict": "Blocked",
+    "confidence": 88,
+    "assessment": {
+      "date": "2026-07-03T14:38:00Z",
+      "overallStatus": "Blocked",
+      "finalConfidence": 88,
+      "summary": "Quality-autonomy canvas is open. The run found and fixed one High repo-controlled reconciliation defect. All repo-controlled gates now pass, but Ready is blocked by external live tracker credential/config proof.",
+      "coverageSummary": "Inventory covers CLI daemon, orchestrator, workflow/config, workspace isolation, Copilot runner, cockpit, observability, APIs, data models, and rules. Tests cover focused regression, full gate, build, audit, canvas, and partial runtime smoke.",
+      "discoverySurfacesInspected": "README, ARCHITECTURE, AGENTS, package scripts, src/cli, src/core/orchestrator, src/core/workflow, src/core/cockpit, src/adapters, src/cockpit, test suite, docs/qa, CI/config, dependency audit, local runtime smoke, quality-autonomy canvas.",
+      "testsDesignedAutomatedExecutedBlockedRemoved": "6 test cases recorded; 5 passed/partial executable runs and 1 blocked live-dispatch proof. Added 3 automated regression assertions across pure and loop tests. No tests removed.",
+      "runtimeProofPerformed": "Canvas opened and streamed tracker; built daemon served /api/v1/state and static cockpit. Full live dispatch proof blocked by local WORKFLOW.md tracker credentials/preflight.",
+      "defectCountsByCategory": {
+        "DEF": {
+          "Verified": 1
+        },
+        "A11Y": {},
+        "SEC": {},
+        "PERF": {},
+        "UX": {}
+      },
+      "breakingChangesMade": "None.",
+      "obsoleteCodeRemoved": "None.",
+      "majorSimplifications": "One shared reconciliation label check replaces any need for caller-specific label guards.",
+      "performanceImprovements": "Security/dependency audit now resolves with no known vulnerabilities in the current dependency graph; reconciliation label check is bounded and negligible.",
+      "dependenciesToolsAbstractionsChanged": "No tracked dependency change remained after lock/dependency refresh; audit is clean at low.",
+      "docsTestsConfigChanged": "Added regression tests; added .quality/tracker.json evidence artifact.",
+      "migrationsPerformed": "None.",
+      "externalBlockers": "BLOCKER-001 live dispatch proof requires valid local tracker credentials/repo access in gitignored operator config.",
+      "exactUnblockActions": "Provide valid WORKFLOW.md/environment for a disposable GitHub issue and rerun built-daemon dispatch smoke.",
+      "gitStatusClean": false,
+      "runCommitSummary": [],
+      "residualRisk": "RISK-002 delegated lanes timed out before returning; local sweeps and gates mitigate but do not fully replace them.",
+      "recommendation": "Review the local commit, keep the canvas open for steering, then unblock live dispatch proof with valid operator credentials if Ready is required.",
+      "rationale": "Repo-controlled defect is fixed and verified; external proof boundary prevents a truthful Ready verdict."
+    },
     "risks": [
       {
         "id": "RISK-001",
         "title": "Agent subprocesses are intentionally unsandboxed",
         "status": "Open",
         "severity": "Informational",
-        "affectedIds": [
-          "FEAT-004",
-          "FEAT-005",
-          "API-003"
-        ],
+        "affectedIds": ["FEAT-004", "FEAT-005", "API-003"],
         "descriptionEvidence": "README Security & trust posture says agents run unsandboxed with --allow-all-tools; workspace and credentials are the intended v1 boundaries.",
         "impact": "Operators must run the daemon in a low-privilege OS/container boundary when processing untrusted issues.",
         "mitigationPlan": "Preserve the documented boundary and verify credential/workspace separation; do not mark as a repo defect unless code contradicts the documented v1 trust model.",
         "owner": "Project/operator",
         "notes": "Architecture decision, not a current defect."
+      },
+      {
+        "id": "RISK-002",
+        "title": "Some delegated read-only lanes timed out",
+        "status": "Open",
+        "severity": "Low",
+        "affectedIds": [],
+        "descriptionEvidence": "Core lane returned a material finding; adapters/security, cleanup, cockpit, and tests/docs lanes were interrupted after repeated wait timeouts. Local cross-cutting sweeps and full gates were run instead.",
+        "impact": "Residual review confidence is lower than a fully completed parallel-lane closeout.",
+        "mitigationPlan": "Rerun the timed-out lanes or continue the quality loop after external runtime proof is unblocked.",
+        "owner": "AI Agent / operator",
+        "notes": ""
       }
     ],
     "waivers": [],
@@ -1126,10 +1339,7 @@
         "basisEvidence": "AGENTS.md says do not edit WORKFLOW.md, .impeccable/, .claude/, .deepsec/, or .cockpit-shots/.",
         "confidence": "High",
         "whatWouldInvalidate": "User explicitly asks to modify one of those surfaces.",
-        "relatedIds": [
-          "FEAT-001",
-          "CONFIG-001"
-        ]
+        "relatedIds": ["FEAT-001", "CONFIG-001"]
       },
       {
         "id": "ASSUME-002",
@@ -1151,6 +1361,17 @@
         "relatedIds": []
       }
     ],
-    "blockers": []
+    "blockers": [
+      {
+        "id": "BLOCKER-001",
+        "title": "Live dispatch proof requires valid local tracker credentials and repo access",
+        "status": "Open",
+        "externalBoundary": "GitHub tracker credentials and gitignored WORKFLOW.md operator config",
+        "whatIsBlocked": "End-to-end live dispatch proof against the built daemon with a real dispatch-capable issue.",
+        "evidence": "RUN-005: built daemon and cockpit served, but tracker fetch returned Not Found and preflight emitted MissingTrackerApiKey from local WORKFLOW.md/environment.",
+        "exactUnblockAction": "Provide a valid gitignored WORKFLOW.md and environment with tracker.api_key/repo access to a disposable test issue, then rerun node dist/cli/main.js ./WORKFLOW.md --port <free-port> and verify dispatch/reconcile through the cockpit/API.",
+        "relatedIds": ["TC-005", "JOURNEY-001", "API-002"]
+      }
+    ]
   }
 }

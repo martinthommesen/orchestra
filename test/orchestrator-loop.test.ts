@@ -265,6 +265,52 @@ describe("orchestrator loop (fakes + TestClock)", () => {
     }),
   );
 
+  it.scoped("required-label removal releases a running issue on reconciliation", () =>
+    Effect.gen(function* () {
+      const issue = makeIssue({
+        id: "i1",
+        identifier: "ORC-1",
+        state: "Todo",
+        labels: ["orchestra"],
+      });
+      const tracker = yield* makeFakeTracker({
+        candidates: [issue],
+        states: [makeStateRef("i1", "Todo", ["orchestra"])],
+      });
+      const runner = yield* makeFakeAgentRunner();
+      const wsm = yield* makeFakeWorkspaceManager(TEST_ROOT);
+      const obs = yield* makeRecordingObserver();
+      yield* runner.control.pushScript("i1", [Ev.sessionStarted("s1"), { _tag: "stall" }]);
+
+      const def = buildDef({ requiredLabels: ["orchestra"], stallTimeoutMs: 0 });
+      const env = loopLayer(def, {
+        tracker: tracker.layer,
+        runner: runner.layer,
+        workspace: wsm.layer,
+        observer: obs.layer,
+      });
+
+      yield* Effect.gen(function* () {
+        const fiber = yield* Effect.forkScoped(runOrchestrator(def));
+        yield* waitFor(obs.queue, isDispatched("i1"));
+
+        yield* tracker.control.setStates([makeStateRef("i1", "Todo", [])]);
+        yield* TestClock.adjust(Duration.millis(30_000));
+        yield* waitFor(
+          obs.queue,
+          (o) => o._tag === "WorkerKilled" && o.issueId === "i1" && o.reason === "neither",
+        );
+
+        const store = yield* OrchestratorStore;
+        const state = yield* store.get;
+        expect(state.running.i1).toBeUndefined();
+        expect(state.claimed).not.toContain("i1");
+
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(env));
+    }),
+  );
+
   it.scoped("max_failure_retries=0 parks on the FIRST failure (fail-fast, no retry)", () =>
     Effect.gen(function* () {
       const issue = makeIssue({ id: "i1", identifier: "ORC-1", state: "Todo" });

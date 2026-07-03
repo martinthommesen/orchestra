@@ -435,6 +435,40 @@ describe("reconciliation", () => {
     ]);
   });
 
+  it("releases an active running issue that lost a required label", () => {
+    const actions = planReconciliation({
+      running: [{ issueId: "act", lastEventAt: 9_999 }],
+      refreshed: new Map([["act", makeStateRef("act", "In Progress", ["bug"])]]),
+      now: 10_000,
+      stallTimeoutMs: 5_000,
+      activeStates: active,
+      terminalStates: terminal,
+      requiredLabels: new Set(["orchestra"]),
+    });
+    expect(actions).toEqual([{ _tag: "NeitherKill", issueId: "act" }]);
+  });
+
+  it("releases retrying and abandoned issues that lost a required label", () => {
+    const actions = planReconciliation({
+      running: [],
+      retrying: [{ issueId: "retry" }],
+      abandoned: [{ issueId: "parked" }],
+      refreshed: new Map([
+        ["retry", makeStateRef("retry", "In Progress", [])],
+        ["parked", makeStateRef("parked", "Todo", ["other"])],
+      ]),
+      now: 10_000,
+      stallTimeoutMs: 5_000,
+      activeStates: active,
+      terminalStates: terminal,
+      requiredLabels: new Set(["orchestra"]),
+    });
+    expect(actions).toEqual([
+      { _tag: "NeitherKill", issueId: "retry" },
+      { _tag: "NeitherKill", issueId: "parked" },
+    ]);
+  });
+
   it("property: never emits more actions than running workers", () => {
     const arbRunning = fc.array(
       fc.record({

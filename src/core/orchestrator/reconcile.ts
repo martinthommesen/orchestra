@@ -64,6 +64,7 @@ export interface ReconcileInput {
   readonly stallTimeoutMs: number;
   readonly activeStates: ReadonlySet<string>;
   readonly terminalStates: ReadonlySet<string>;
+  readonly requiredLabels?: ReadonlySet<string>;
 }
 
 /**
@@ -77,6 +78,7 @@ export const classifyTrackerOnly = (
   refreshed: ReadonlyMap<string, IssueStateRef>,
   activeStates: ReadonlySet<string>,
   terminalStates: ReadonlySet<string>,
+  requiredLabels: ReadonlySet<string> = new Set(),
 ): ReconcileAction | null => {
   const ref = refreshed.get(issueId);
   if (ref === undefined) {
@@ -89,7 +91,26 @@ export const classifyTrackerOnly = (
   if (!activeStates.has(state)) {
     return { _tag: "NeitherKill", issueId };
   }
+  if (!hasRequiredLabels(ref, requiredLabels)) {
+    return { _tag: "NeitherKill", issueId };
+  }
   return null;
+};
+
+const hasRequiredLabels = (
+  ref: IssueStateRef,
+  requiredLabels: ReadonlySet<string> = new Set(),
+): boolean => {
+  if (requiredLabels.size === 0) {
+    return true;
+  }
+  const labels = new Set(ref.labels);
+  for (const label of requiredLabels) {
+    if (!labels.has(label)) {
+      return false;
+    }
+  }
+  return true;
 };
 
 /** Decide the reconciliation actions for one tick (SPEC §8.5). */
@@ -113,7 +134,7 @@ export const planReconciliation = (input: ReconcileInput): ReadonlyArray<Reconci
     const state = normalizeState(ref.state);
     if (input.terminalStates.has(state)) {
       actions.push({ _tag: "TerminalKill", issueId: worker.issueId });
-    } else if (input.activeStates.has(state)) {
+    } else if (input.activeStates.has(state) && hasRequiredLabels(ref, input.requiredLabels)) {
       actions.push({ _tag: "UpdateActive", issueId: worker.issueId, ref });
     } else {
       actions.push({ _tag: "NeitherKill", issueId: worker.issueId });
@@ -129,6 +150,7 @@ export const planReconciliation = (input: ReconcileInput): ReadonlyArray<Reconci
         input.refreshed,
         input.activeStates,
         input.terminalStates,
+        input.requiredLabels,
       );
       if (action !== null) {
         actions.push(action);

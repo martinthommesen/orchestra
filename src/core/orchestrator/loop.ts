@@ -10,7 +10,7 @@ import {
   Stream,
 } from "effect";
 import type { AgentEvent, Usage } from "../domain/agent-event";
-import { Issue, type IssueStateRef, normalizeState } from "../domain/issue";
+import { Issue, type IssueStateRef, normalizeLabel, normalizeState } from "../domain/issue";
 import type { OrchestratorState } from "../domain/orchestrator-state";
 import type { RetryEntry } from "../domain/retry-entry";
 import { RunAttempt } from "../domain/run-attempt";
@@ -632,6 +632,7 @@ export const runOrchestrator = (
           stallTimeoutMs: config.copilot.stall_timeout_ms,
           activeStates,
           terminalStates,
+          requiredLabels: new Set(config.tracker.required_labels.map(normalizeLabel)),
         });
         for (const action of actions) {
           yield* applyReconcileAction(action);
