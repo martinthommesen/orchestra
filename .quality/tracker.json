@@ -24,7 +24,7 @@
       "runtimeProof": "node dist/cli/main.js ./WORKFLOW.md --port 4317"
     },
     "preservationCommits": [],
-    "commits": [],
+    "commits": ["ca2c39e fix(orchestrator): reconcile required-label removal"],
     "nextIds": {
       "FEAT": 8,
       "JOURNEY": 4,
@@ -1298,8 +1298,8 @@
       "migrationsPerformed": "None.",
       "externalBlockers": "BLOCKER-001 live dispatch proof requires valid local tracker credentials/repo access in gitignored operator config.",
       "exactUnblockActions": "Provide valid WORKFLOW.md/environment for a disposable GitHub issue and rerun built-daemon dispatch smoke.",
-      "gitStatusClean": false,
-      "runCommitSummary": [],
+      "gitStatusClean": true,
+      "runCommitSummary": ["ca2c39e fix(orchestrator): reconcile required-label removal"],
       "residualRisk": "RISK-002 delegated lanes timed out before returning; local sweeps and gates mitigate but do not fully replace them.",
       "recommendation": "Review the local commit, keep the canvas open for steering, then unblock live dispatch proof with valid operator credentials if Ready is required.",
       "rationale": "Repo-controlled defect is fixed and verified; external proof boundary prevents a truthful Ready verdict."
