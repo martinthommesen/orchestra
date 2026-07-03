@@ -1,0 +1,1156 @@
+{
+  "formatVersion": 1,
+  "core": {
+    "runId": "q-20260703-142107",
+    "startedAt": "2026-07-03T14:21:07Z",
+    "updatedAt": "2026-07-03T14:31:37.051Z",
+    "status": "discovery",
+    "phase": "01-discovery",
+    "branch": "codex/continuous-quality-loop",
+    "scope": "Whole repository continuous-quality loop for Orchestra.",
+    "repoOverview": "Orchestra is a Node >=22 / TypeScript strict daemon built on Effect. The CLI entry point is src/cli/main.ts, runDaemon wires Effect layers in src/cli/daemon.ts, the core orchestrator owns a single state fiber in src/core/orchestrator/loop.ts, adapters integrate GitHub Issues, Copilot CLI, and per-issue workspaces, and src/cockpit is a React 19 + Vite operator cockpit served by the daemon on loopback. Durable state lives under <workspace.root>/.orchestra/state.json at runtime. Config is WORKFLOW.md YAML front matter plus Liquid prompt body, decoded via Effect Schema. The repo has Vitest tests, Biome/Prettier lint, TypeScript checks, Vite/tsup build, React Doctor, and a checked-in .deepsec workspace.",
+    "commandInventory": {
+      "install": "pnpm install",
+      "build": "pnpm build",
+      "run": "pnpm dev ./WORKFLOW.md --port 4317",
+      "seed": null,
+      "test": "pnpm test",
+      "lint": "pnpm lint",
+      "typecheck": "pnpm typecheck",
+      "format": "pnpm lint:fix",
+      "staticAnalysis": "pnpm doctor:score",
+      "security": "pnpm audit --audit-level=moderate",
+      "performance": null,
+      "runtimeProof": "node dist/cli/main.js ./WORKFLOW.md --port 4317"
+    },
+    "preservationCommits": [],
+    "commits": [],
+    "nextIds": {
+      "FEAT": 8,
+      "JOURNEY": 4,
+      "API": 4,
+      "CONFIG": 5,
+      "DATA": 3,
+      "RULE": 6,
+      "TC": 1,
+      "RUN": 1,
+      "DEF": 1,
+      "FIX": 1,
+      "REG": 1,
+      "A11Y": 1,
+      "SEC": 1,
+      "PERF": 1,
+      "UX": 1,
+      "RISK": 2,
+      "WAIVER": 1,
+      "ASSUME": 4,
+      "BLOCKER": 1,
+      "CHK": 1
+    },
+    "appliedInboxThrough": 0,
+    "checkpoints": [],
+    "iterations": [
+      {
+        "n": 1,
+        "date": "2026-07-03T14:21:07Z",
+        "scope": "Orient and initial discovery.",
+        "discoveredOrUpdated": "Created JSON tracker. Confirmed clean git baseline on main. Loaded quality-autonomy protocol, repo instructions, package scripts, README, architecture docs, source/test layout, and prior memory for this repo.",
+        "testsAddedExecuted": "Pending.",
+        "testsPassedFailedBlocked": "Pending.",
+        "defectsFoundFixedVerified": "None yet.",
+        "regressionResult": "Pending.",
+        "remainingBySeverity": {
+          "Critical": 0,
+          "High": 0,
+          "Medium": 0,
+          "Low": 0
+        },
+        "remainingReviewIssues": "Cross-cutting reviews pending.",
+        "remainingRisks": "Runtime proof and security audit not yet executed in this run.",
+        "blockers": "None.",
+        "confidence": 20,
+        "confidenceRationale": "Repo orientation is complete enough to run gates, but discovery, execution, runtime proof, and adversarial closeout are still pending.",
+        "nextActions": "Complete inventory/test mapping, run quality gates, fix any failures, then perform cross-cutting review and runtime proof."
+      },
+      {
+        "n": 2,
+        "date": "2026-07-03T14:31:17.498Z",
+        "scope": "Resume, canvas attach, branch setup, and baseline preservation preparation.",
+        "discoveredOrUpdated": "Created branch codex/continuous-quality-loop. Canvas server is live on loopback with its token omitted from the tracker. User explicitly authorized subagents/Codex sessions, superseding the prior serial-lane assumption. Dirty baseline now includes .quality plus pnpm workspace/lockfile changes and will be preserved before quality edits.",
+        "testsAddedExecuted": "No tests executed in this checkpoint.",
+        "testsPassedFailedBlocked": "Pending.",
+        "defectsFoundFixedVerified": "None yet.",
+        "regressionResult": "Pending.",
+        "remainingBySeverity": {
+          "Critical": 0,
+          "High": 0,
+          "Medium": 0,
+          "Low": 0
+        },
+        "remainingReviewIssues": "Discovery, test execution, remediation, cross-cutting review, runtime proof, and closeout pending.",
+        "remainingRisks": "Runtime proof/security audit not yet executed in this run. In-app Codex browser unavailable for canvas opening.",
+        "blockers": "No repo-quality blocker; canvas in Codex UI is partially blocked by missing iab backend.",
+        "confidence": 25,
+        "confidenceRationale": "The run has a canonical tracker and live canvas, but substantive quality proof is still pending.",
+        "nextActions": "Create baseline preservation commit, dispatch read-only lanes, run quality gates, remediate findings, and repeat until readiness rule holds."
+      }
+    ]
+  },
+  "inventory": [
+    {
+      "id": "FEAT-001",
+      "type": "FEAT",
+      "featureName": "CLI daemon startup",
+      "status": "Documented",
+      "discoveredIn": "README.md; src/cli/main.ts; src/cli/daemon.ts; test/example-workflow.test.ts",
+      "primaryFiles": [
+        "src/cli/main.ts",
+        "src/cli/daemon.ts",
+        "src/cli/args.ts"
+      ],
+      "relatedRoutes": [],
+      "relatedComponents": [],
+      "relatedApis": [
+        "API-001"
+      ],
+      "relatedDataModels": [
+        "DATA-001"
+      ],
+      "relatedConfig": [
+        "CONFIG-001",
+        "CONFIG-002",
+        "CONFIG-003"
+      ],
+      "relatedPermissionsRoles": [],
+      "userStory": "As an operator, run orchestra against a WORKFLOW.md file and optionally expose the cockpit.",
+      "actualImplementedBehavior": "runDaemon parses argv, loads workflow config, builds Effect layers, forks cockpit when --port is present, then runs the orchestrator.",
+      "expectedBehaviorFromCode": "Invalid args/config fail through tagged errors; SIGINT/SIGTERM interrupt the Effect runtime and scoped fibers.",
+      "inputs": "WORKFLOW.md path, optional --port.",
+      "outputs": "Logfmt events, orchestrator execution, optional cockpit server.",
+      "validationRules": "Argument parser and workflow loader validate required path and typed config.",
+      "businessRules": "Single daemon process owns the run.",
+      "edgeCases": "Missing workflow file, invalid port, bind failure, invalid YAML/front matter, missing secrets.",
+      "dependencies": "Effect runtime, Node platform, tsx/tsup build output.",
+      "assumptions": [
+        "ASSUME-001"
+      ],
+      "knownRisks": [],
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "package.json bin maps orchestra to dist/cli/main.js; src/cli/main.ts calls runDaemon.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "FEAT-002",
+      "type": "FEAT",
+      "featureName": "Issue polling, selection, dispatch, retry, and reconciliation",
+      "status": "Documented",
+      "discoveredIn": "ARCHITECTURE.md; src/core/orchestrator; test/orchestrator-loop.test.ts; test/orchestrator-pure.test.ts",
+      "primaryFiles": [
+        "src/core/orchestrator/loop.ts",
+        "src/core/orchestrator/selection.ts",
+        "src/core/orchestrator/concurrency.ts",
+        "src/core/orchestrator/reconcile.ts",
+        "src/core/orchestrator/backoff.ts"
+      ],
+      "relatedRoutes": [],
+      "relatedComponents": [],
+      "relatedApis": [
+        "API-002",
+        "API-003"
+      ],
+      "relatedDataModels": [
+        "DATA-001",
+        "DATA-002"
+      ],
+      "relatedConfig": [
+        "CONFIG-001",
+        "CONFIG-002"
+      ],
+      "relatedPermissionsRoles": [],
+      "userStory": "As an operator, let the daemon schedule issue work with bounded concurrency and durable retry behavior.",
+      "actualImplementedBehavior": "A single owner fiber drains messages, reconciles tracker state, preflights, selects candidates, dispatches workers, records running/retry/completed state, and applies backoff.",
+      "expectedBehaviorFromCode": "Workers and retry timers only post messages; state mutation is serialized by the owner fiber.",
+      "inputs": "Tracker issues, workflow config, worker outcomes, command bus messages.",
+      "outputs": "Agent subprocesses, workspace operations, tracker reconciliation decisions, observer events, persisted state.",
+      "validationRules": "Schema-validated issue/config/event data; active/terminal state normalization.",
+      "businessRules": "Respect max concurrency, per-state concurrency, max turns, max failure retries, continuation delay, and budget/operator pause rules.",
+      "edgeCases": "Tracker issue disappears, terminal state while running, orphaned state after restart, stalled run, exhausted retries, budget pause, operator pause, input-required continuation.",
+      "dependencies": "IssueTracker, AgentRunner, WorkspaceManager, Clock, OrchestratorStore, Observer ports.",
+      "assumptions": [],
+      "knownRisks": [],
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "src/cli/daemon.ts provides appLayer; runOrchestrator is called from runDaemon.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "FEAT-003",
+      "type": "FEAT",
+      "featureName": "Workflow loading, templating, settings hot reload, and secret resolution",
+      "status": "Documented",
+      "discoveredIn": "README.md; WORKFLOW.example.md; src/core/workflow; test/workflow.test.ts; test/settings.test.ts",
+      "primaryFiles": [
+        "src/core/workflow/loader.ts",
+        "src/core/workflow/render.ts",
+        "src/core/workflow/var.ts",
+        "src/core/workflow/workflow-file.ts",
+        "src/core/domain/workflow.ts"
+      ],
+      "relatedRoutes": [],
+      "relatedComponents": [],
+      "relatedApis": [
+        "API-001"
+      ],
+      "relatedDataModels": [],
+      "relatedConfig": [
+        "CONFIG-001",
+        "CONFIG-002",
+        "CONFIG-003",
+        "CONFIG-004"
+      ],
+      "relatedPermissionsRoles": [],
+      "userStory": "As an operator, describe how issues are selected and prompted without leaking secrets.",
+      "actualImplementedBehavior": "WORKFLOW.md front matter is decoded with defaults; Liquid body renders prompts; safe cockpit settings writes persist whitelisted raw config while preserving the Liquid body.",
+      "expectedBehaviorFromCode": "Secrets are resolved from $VAR at load and never serialized through settings/state APIs.",
+      "inputs": "WORKFLOW.md, environment variables, settings patch.",
+      "outputs": "WorkflowDefinition, prompt strings, persisted settings file updates.",
+      "validationRules": "Effect Schema validates types/defaults and rejects non-whitelisted settings patches.",
+      "businessRules": "Separate tracker and Copilot credentials; no resolved secrets in errors/API.",
+      "edgeCases": "Missing env var, invalid YAML, invalid Liquid, unsafe settings key, whitespace token value, invalid concurrency/backoff values.",
+      "dependencies": "yaml, liquidjs, Effect Schema.",
+      "assumptions": [],
+      "knownRisks": [],
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "loadWorkflow is called by runDaemon; WorkflowFileLive is provided to cockpit handlers.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": "WORKFLOW.md itself is gitignored operator config and not edited by this run."
+    },
+    {
+      "id": "FEAT-004",
+      "type": "FEAT",
+      "featureName": "Per-issue workspace isolation and safety",
+      "status": "Documented",
+      "discoveredIn": "README.md; src/adapters/workspace; src/core/workspace/safety.ts; test/workspace-safety.test.ts; test/workspace-manager.test.ts",
+      "primaryFiles": [
+        "src/adapters/workspace/workspace-manager.ts",
+        "src/core/workspace/safety.ts",
+        "src/core/domain/workspace.ts"
+      ],
+      "relatedRoutes": [],
+      "relatedComponents": [],
+      "relatedApis": [
+        "API-003"
+      ],
+      "relatedDataModels": [],
+      "relatedConfig": [
+        "CONFIG-002"
+      ],
+      "relatedPermissionsRoles": [],
+      "userStory": "As an operator, each issue should run in its own workspace with the agent cwd set to that workspace.",
+      "actualImplementedBehavior": "WorkspaceManager computes sanitized per-issue paths, runs hooks, and gives the agent runner a workspace cwd.",
+      "expectedBehaviorFromCode": "Safety invariant: the agent cwd is the issue workspace.",
+      "inputs": "Issue identity and workspace config.",
+      "outputs": "Workspace directories and hook execution.",
+      "validationRules": "Path sanitization and containment checks.",
+      "businessRules": "Isolation is workspace-level, not OS sandboxing.",
+      "edgeCases": "Path traversal, duplicate identifiers, hook failure, pre-existing workspace, missing root.",
+      "dependencies": "Node filesystem and command executor through @effect/platform-node.",
+      "assumptions": [],
+      "knownRisks": [
+        "RISK-001"
+      ],
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "layerWorkspaceManager is wired in src/cli/daemon.ts.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "FEAT-005",
+      "type": "FEAT",
+      "featureName": "Copilot CLI runner and agent event normalization",
+      "status": "Documented",
+      "discoveredIn": "README.md; docs/sprint-7; src/adapters/agent-copilot; src/core/domain/agent-event.ts; test/agent-copilot.test.ts",
+      "primaryFiles": [
+        "src/adapters/agent-copilot/copilot-runner.ts",
+        "src/adapters/agent-copilot/map.ts",
+        "src/core/domain/agent-event.ts"
+      ],
+      "relatedRoutes": [],
+      "relatedComponents": [],
+      "relatedApis": [
+        "API-003"
+      ],
+      "relatedDataModels": [],
+      "relatedConfig": [
+        "CONFIG-003"
+      ],
+      "relatedPermissionsRoles": [],
+      "userStory": "As the daemon, run headless Copilot sessions and normalize streaming events.",
+      "actualImplementedBehavior": "The adapter spawns Copilot with configured credentials/environment, maps JSONL events, and returns a worker outcome.",
+      "expectedBehaviorFromCode": "Tracker token is not injected into the agent environment; Copilot credential is separate.",
+      "inputs": "AgentRunParams, prompt, workspace cwd, optional resume session id.",
+      "outputs": "AgentEvent stream, usage, outcome status, session id.",
+      "validationRules": "Agent events decoded by schema/map logic.",
+      "businessRules": "max_turns and retry policy are orchestrator-owned.",
+      "edgeCases": "Malformed JSONL, process failure, timeout, input-required, stale resume session, missing copilot auth.",
+      "dependencies": "GitHub Copilot CLI available in environment.",
+      "assumptions": [],
+      "knownRisks": [
+        "RISK-001"
+      ],
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "layerCopilotRunner is wired in src/cli/daemon.ts.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "FEAT-006",
+      "type": "FEAT",
+      "featureName": "Loopback cockpit UI and command API",
+      "status": "Documented",
+      "discoveredIn": "README.md; src/core/cockpit; src/cockpit; test/cockpit-*.test.ts",
+      "primaryFiles": [
+        "src/core/cockpit/server.ts",
+        "src/core/cockpit/handlers.ts",
+        "src/core/cockpit/api.ts",
+        "src/cockpit/App.tsx",
+        "src/cockpit/views/FleetView.tsx",
+        "src/cockpit/views/EventsView.tsx",
+        "src/cockpit/views/KanbanView.tsx",
+        "src/cockpit/views/SettingsView.tsx"
+      ],
+      "relatedRoutes": [
+        "/",
+        "/events",
+        "/kanban",
+        "/settings",
+        "/api/v1/state",
+        "/api/v1/settings",
+        "/api/v1/control/pause",
+        "/api/v1/control/resume",
+        "/api/v1/issues/:id/retry",
+        "/api/v1/issues/:id/cancel"
+      ],
+      "relatedComponents": [
+        "AppShell",
+        "CommandPalette",
+        "DispatchControl",
+        "StatusChip",
+        "Toast"
+      ],
+      "relatedApis": [
+        "API-001"
+      ],
+      "relatedDataModels": [
+        "DATA-001"
+      ],
+      "relatedConfig": [
+        "CONFIG-004"
+      ],
+      "relatedPermissionsRoles": [
+        "loopback host check",
+        "bearer token for mutations"
+      ],
+      "userStory": "As an operator, inspect live fleet state and safely issue control commands from a local browser.",
+      "actualImplementedBehavior": "Daemon serves SPA/static assets and typed HTTP API on 127.0.0.1 with security headers, loopback host guard, token injection, and command bus mutations.",
+      "expectedBehaviorFromCode": "Read endpoints are loopback-only; mutating endpoints require bearer token and loopback origin/host.",
+      "inputs": "Browser route, API request, bearer token, settings patch.",
+      "outputs": "Rendered fleet/events/kanban/settings views, command acknowledgements, persisted whitelisted settings.",
+      "validationRules": "Host loopback guard, CockpitAuth, settings schema/whitelist.",
+      "businessRules": "Cockpit never mutates orchestrator state directly; all mutations flow through CommandBus.",
+      "edgeCases": "Missing token, wrong origin/host, malformed settings patch, stale state polling, static asset 404, mobile/responsive layout.",
+      "dependencies": "React 19, Vite, lucide-react, @effect/platform HttpApi.",
+      "assumptions": [],
+      "knownRisks": [],
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "runCockpit is forked by runDaemon when --port is supplied; Vite emits dist/cockpit for static serving.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "FEAT-007",
+      "type": "FEAT",
+      "featureName": "Observability, snapshots, telemetry, and operator display state",
+      "status": "Documented",
+      "discoveredIn": "README.md; src/core/observability; test/snapshot*.test.ts; test/live-*.test.ts; test/telemetry.test.ts",
+      "primaryFiles": [
+        "src/core/observability/snapshot.ts",
+        "src/core/observability/snapshot-wire.ts",
+        "src/core/observability/live-observer.ts",
+        "src/core/observability/observer-tee.ts",
+        "src/core/observability/telemetry.ts",
+        "src/core/observability/recent-events.ts",
+        "src/core/observability/recent-completions.ts"
+      ],
+      "relatedRoutes": [
+        "/api/v1/state"
+      ],
+      "relatedComponents": [
+        "FleetView",
+        "EventsView",
+        "KanbanView"
+      ],
+      "relatedApis": [
+        "API-001"
+      ],
+      "relatedDataModels": [
+        "DATA-001"
+      ],
+      "relatedConfig": [
+        "CONFIG-002"
+      ],
+      "relatedPermissionsRoles": [],
+      "userStory": "As an operator, see accurate live state, events, completions, restore facts, budget status, and rate limits.",
+      "actualImplementedBehavior": "Observer tee records recent activity while snapshot projection reads the authoritative store and display-only mirrors.",
+      "expectedBehaviorFromCode": "Display state does not drive orchestration decisions except explicit command bus/operator pause inputs.",
+      "inputs": "Orchestrator state, observer events, completion records, budget/control/restore services.",
+      "outputs": "Logfmt lines and snapshot JSON.",
+      "validationRules": "Snapshot wire schema and test coverage.",
+      "businessRules": "No secrets exposed in snapshots or logs.",
+      "edgeCases": "Unknown event tags, large event rings, restart restore gap, no budget configured.",
+      "dependencies": "Effect Logger/logfmt and optional OpenTelemetry packages.",
+      "assumptions": [],
+      "knownRisks": [],
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "ObservabilityLive and related live services are wired in appLayer.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "JOURNEY-001",
+      "type": "JOURNEY",
+      "journeyName": "Operator starts daemon and agents process GitHub issues",
+      "status": "Documented",
+      "userTypeRole": "Local operator",
+      "businessGoal": "Continuously move issue work through autonomous Copilot sessions.",
+      "entryPoint": "pnpm dev ./WORKFLOW.md",
+      "exitPoint": "Issues completed, retried, abandoned, or waiting for input according to configured rules.",
+      "featuresCovered": [
+        "FEAT-001",
+        "FEAT-002",
+        "FEAT-003",
+        "FEAT-004",
+        "FEAT-005",
+        "FEAT-007"
+      ],
+      "primaryRoutesScreens": [],
+      "primaryApis": [
+        "API-002",
+        "API-003"
+      ],
+      "primaryDataModels": [
+        "DATA-001",
+        "DATA-002"
+      ],
+      "steps": [
+        "Parse args and workflow",
+        "Load layers",
+        "Poll tracker",
+        "Select candidates",
+        "Ensure workspace",
+        "Render prompt",
+        "Run Copilot",
+        "Reconcile outcome",
+        "Persist state"
+      ],
+      "expectedOutcome": "Work proceeds within concurrency/retry/budget limits and state is durable.",
+      "alternatePaths": "Continuation turns, retry backoff, operator pause, budget pause, restart restore.",
+      "failurePaths": "Config error, tracker failure, workspace hook failure, Copilot failure, max failure retries reached.",
+      "edgeCases": "SIGTERM, corrupted durable state, tracker terminal state mid-run, session resume stale.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "notes": ""
+    },
+    {
+      "id": "JOURNEY-002",
+      "type": "JOURNEY",
+      "journeyName": "Operator monitors and controls fleet in cockpit",
+      "status": "Documented",
+      "userTypeRole": "Local browser operator",
+      "businessGoal": "See current fleet state and apply safe dispatch/settings controls.",
+      "entryPoint": "http://127.0.0.1:<port>/",
+      "exitPoint": "Read state or receive a command result from the daemon.",
+      "featuresCovered": [
+        "FEAT-006",
+        "FEAT-007"
+      ],
+      "primaryRoutesScreens": [
+        "/",
+        "/events",
+        "/kanban",
+        "/settings"
+      ],
+      "primaryApis": [
+        "API-001"
+      ],
+      "primaryDataModels": [
+        "DATA-001"
+      ],
+      "steps": [
+        "Open SPA",
+        "Poll state/settings",
+        "Navigate views",
+        "Optionally pause/resume/retry/cancel/edit settings"
+      ],
+      "expectedOutcome": "Read views render without credentials on loopback; mutations require token and go through CommandBus.",
+      "alternatePaths": "Vite dev cockpit proxies /api/v1 to daemon; static production cockpit is served from dist/cockpit.",
+      "failurePaths": "Forbidden host, unauthorized mutation, invalid settings patch, API/server unavailable.",
+      "edgeCases": "Mobile layout, keyboard command palette, stale polling response, empty fleet, many events.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "notes": ""
+    },
+    {
+      "id": "JOURNEY-003",
+      "type": "JOURNEY",
+      "journeyName": "Daemon restarts and restores durable state",
+      "status": "Documented",
+      "userTypeRole": "Local operator",
+      "businessGoal": "Resume safe scheduling after process interruption.",
+      "entryPoint": "Daemon boot with existing .orchestra/state.json",
+      "exitPoint": "Store restored, orphaned running work converted to continuation retries, and cockpit snapshot indicates restore.",
+      "featuresCovered": [
+        "FEAT-002",
+        "FEAT-007"
+      ],
+      "primaryRoutesScreens": [
+        "/api/v1/state"
+      ],
+      "primaryApis": [
+        "API-002"
+      ],
+      "primaryDataModels": [
+        "DATA-001"
+      ],
+      "steps": [
+        "Load durable state",
+        "Decode/migrate state",
+        "Rename corrupt file if needed",
+        "Reconcile restored records",
+        "Continue poll loop"
+      ],
+      "expectedOutcome": "Bookkeeping survives; unsafe in-flight work is re-derived through the normal retry path.",
+      "alternatePaths": "Missing/corrupt state boots clean.",
+      "failurePaths": "Filesystem error, invalid persisted payload.",
+      "edgeCases": "Retries due during downtime, completed issue while daemon down, resume_sessions enabled with stale Copilot session.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "notes": ""
+    },
+    {
+      "id": "API-001",
+      "type": "API",
+      "name": "Cockpit HTTP API",
+      "status": "Documented",
+      "apiType": "Internal",
+      "direction": "Incoming",
+      "endpointOperation": "GET /api/v1/state; GET/PUT /api/v1/settings; POST /api/v1/control/pause|resume; POST /api/v1/issues/:id/retry|cancel",
+      "method": "GET/PUT/POST",
+      "authRequired": "Mutations require bearer token plus loopback host/origin; reads require loopback host.",
+      "permissionsRoles": [
+        "Local loopback operator"
+      ],
+      "primaryFiles": [
+        "src/core/cockpit/api.ts",
+        "src/core/cockpit/handlers.ts",
+        "src/core/cockpit/auth.ts",
+        "src/core/cockpit/security.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-006",
+        "FEAT-007"
+      ],
+      "relatedDataModels": [
+        "DATA-001"
+      ],
+      "requestInputs": "HTTP request, optional JSON settings/control payload, bearer token.",
+      "responseOutputs": "Snapshot/settings/control result JSON or typed error.",
+      "validationRules": "HttpApi schema, hostIsLoopbackHeader, CockpitAuth, settings whitelist.",
+      "errorResponses": "401 unauthorized, 403 forbidden, validation errors, API 404.",
+      "retryTimeoutBehavior": "Client polling handles repeated reads; command bus handles ack/failure.",
+      "rateLimitHandling": "None; loopback-only trusted local operator surface.",
+      "securityConsiderations": "DNS rebinding host guard, anti-framing/nosniff headers, bearer token for mutations, no secret serialization.",
+      "edgeCases": "Non-loopback Host, missing Origin, invalid token, malformed JSON, command for unknown issue.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "notes": ""
+    },
+    {
+      "id": "API-002",
+      "type": "API",
+      "name": "GitHub issue tracker adapter",
+      "status": "Documented",
+      "apiType": "External",
+      "direction": "Outgoing",
+      "endpointOperation": "List/fetch GitHub Issues via Octokit REST",
+      "method": "GitHub REST client calls",
+      "authRequired": "tracker.api_key resolved from env",
+      "permissionsRoles": [
+        "GitHub token with issue read permissions"
+      ],
+      "primaryFiles": [
+        "src/adapters/tracker-github/github-tracker.ts",
+        "src/adapters/tracker-github/normalize.ts",
+        "src/core/ports/issue-tracker.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-002",
+        "FEAT-003"
+      ],
+      "relatedDataModels": [
+        "DATA-002"
+      ],
+      "requestInputs": "Repository owner/name, labels/states, API token.",
+      "responseOutputs": "Schema-normalized Issue records.",
+      "validationRules": "Issue schema and GitHub normalizer.",
+      "errorResponses": "Tracker errors converted to tagged errors without secret payloads.",
+      "retryTimeoutBehavior": "Poll loop skips dispatch on per-tick tracker failure; retry policy applies to agent outcomes.",
+      "rateLimitHandling": "Rate limit data appears in snapshot if exposed by adapter/state.",
+      "securityConsiderations": "Tracker token not passed to agent subprocess.",
+      "edgeCases": "Rate limit, deleted issue, state label normalization, missing fields.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "notes": ""
+    },
+    {
+      "id": "API-003",
+      "type": "API",
+      "name": "Copilot CLI subprocess boundary",
+      "status": "Documented",
+      "apiType": "External",
+      "direction": "Outgoing",
+      "endpointOperation": "Spawn headless copilot CLI with prompt/session parameters",
+      "method": "child process",
+      "authRequired": "copilot.github_token or ambient Copilot login",
+      "permissionsRoles": [
+        "Agent GitHub credential"
+      ],
+      "primaryFiles": [
+        "src/adapters/agent-copilot/copilot-runner.ts",
+        "src/adapters/agent-copilot/map.ts",
+        "src/core/ports/agent-runner.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-004",
+        "FEAT-005"
+      ],
+      "relatedDataModels": [],
+      "requestInputs": "Prompt, cwd, resume session id, environment, timeout/max turn behavior.",
+      "responseOutputs": "Agent events, outcome, usage, session id.",
+      "validationRules": "Event mapping and tagged outcome handling.",
+      "errorResponses": "TurnTimeout, TurnInputRequired, process failure, malformed event.",
+      "retryTimeoutBehavior": "Orchestrator backoff and continuation logic.",
+      "rateLimitHandling": "Usage/rate-limit data included in observability where available.",
+      "securityConsiderations": "Agent process is unsandboxed; env scrub prevents tracker token inheritance.",
+      "edgeCases": "CLI missing, auth expired, JSONL tool-use payload variants, stale resume session.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "notes": ""
+    },
+    {
+      "id": "CONFIG-001",
+      "type": "CONFIG",
+      "name": "WORKFLOW.md service configuration",
+      "status": "Documented",
+      "configType": "Runtime",
+      "required": "Yes",
+      "defaultValue": "Most blocks have schema defaults; path itself is required.",
+      "allowedValues": "Schema-defined tracker, polling, agent, workspace, persistence, budget values.",
+      "usedIn": [
+        "src/core/workflow/loader.ts",
+        "src/core/domain/workflow.ts",
+        "src/cli/daemon.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-001",
+        "FEAT-002",
+        "FEAT-003"
+      ],
+      "relatedApis": [
+        "API-002",
+        "API-003"
+      ],
+      "behaviorWhenPresent": "Decoded into ServiceConfig and prompt template.",
+      "behaviorWhenMissing": "CLI/config loading fails.",
+      "behaviorWhenInvalid": "Schema decode failure.",
+      "validation": "Effect Schema decode.",
+      "securitySensitivity": "Sensitive",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "runDaemon requires workflowPath and calls loadWorkflow.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "CONFIG-002",
+      "type": "CONFIG",
+      "name": "Agent scheduling and retry knobs",
+      "status": "Documented",
+      "configType": "Runtime",
+      "required": "No",
+      "defaultValue": "Schema defaults in src/core/domain/workflow.ts.",
+      "allowedValues": "Positive bounded integers and state maps for polling/concurrency/max turns/max retry backoff/max failure retries/budget.",
+      "usedIn": [
+        "src/core/orchestrator/loop.ts",
+        "src/core/orchestrator/concurrency.ts",
+        "src/core/orchestrator/backoff.ts",
+        "src/core/orchestrator/budget.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-002",
+        "FEAT-007"
+      ],
+      "relatedApis": [],
+      "behaviorWhenPresent": "Controls dispatch and retry behavior.",
+      "behaviorWhenMissing": "Defaults apply.",
+      "behaviorWhenInvalid": "Config decode rejects.",
+      "validation": "Effect Schema decode and settings whitelist.",
+      "securitySensitivity": "Public",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "Workflow config is passed to appLayer/runOrchestrator.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "CONFIG-003",
+      "type": "CONFIG",
+      "name": "Tracker and Copilot credentials",
+      "status": "Documented",
+      "configType": "Secret",
+      "required": "Yes",
+      "defaultValue": "No secret default.",
+      "allowedValues": "$VAR references resolved from environment.",
+      "usedIn": [
+        "src/core/workflow/var.ts",
+        "src/adapters/tracker-github/github-tracker.ts",
+        "src/adapters/agent-copilot/copilot-runner.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-003",
+        "FEAT-005"
+      ],
+      "relatedApis": [
+        "API-002",
+        "API-003"
+      ],
+      "behaviorWhenPresent": "Tracker and agent authenticate with deliberately separate credentials.",
+      "behaviorWhenMissing": "Config/adapters fail without serializing the secret value.",
+      "behaviorWhenInvalid": "External API/CLI auth fails.",
+      "validation": "Env var resolution and no-secret error payload convention.",
+      "securitySensitivity": "Secret",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "README and code separate tracker.api_key from copilot.github_token.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "CONFIG-004",
+      "type": "CONFIG",
+      "name": "Cockpit token and dev server port",
+      "status": "Documented",
+      "configType": "Env Var",
+      "required": "No",
+      "defaultValue": "ORCHESTRA_COCKPIT_TOKEN absent generates a random token; ORCHESTRA_PORT defaults to 4317 for Vite proxy.",
+      "allowedValues": "Trimmed non-empty token string; positive integer dev port.",
+      "usedIn": [
+        "src/core/cockpit/token.ts",
+        "vite.config.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-006"
+      ],
+      "relatedApis": [
+        "API-001"
+      ],
+      "behaviorWhenPresent": "Token is logged/injected for cockpit mutations; Vite proxies to configured daemon port.",
+      "behaviorWhenMissing": "Daemon generates token; Vite dev proxy uses 4317.",
+      "behaviorWhenInvalid": "Whitespace token treated as absent; invalid port falls back.",
+      "validation": "resolveToken and resolveDevPort.",
+      "securitySensitivity": "Secret",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "runCockpit resolves token; vite.config.ts reads ORCHESTRA_PORT.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "DATA-001",
+      "type": "DATA",
+      "name": "Orchestrator state and cockpit snapshot",
+      "status": "Documented",
+      "storageType": "File",
+      "primaryFiles": [
+        "src/core/domain/orchestrator-state.ts",
+        "src/core/orchestrator/state.ts",
+        "src/core/persistence/durable-store.ts",
+        "src/core/observability/snapshot.ts",
+        "src/core/observability/snapshot-wire.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-002",
+        "FEAT-006",
+        "FEAT-007"
+      ],
+      "relatedApis": [
+        "API-001"
+      ],
+      "fieldsShape": "Running/retrying/completed/abandoned state, totals, rate limits, restore/budget/control display fields, snapshot wire projection.",
+      "constraints": "Versioned schema; dates parsed/serialized; atomic temp-file rename; bad checkpoint renamed aside.",
+      "relationships": "Orchestrator state is authoritative; cockpit snapshot is derived.",
+      "indexes": "In-memory maps keyed by issue identifier.",
+      "lifecycle": "Loaded at boot, mutated by owner fiber, debounced persisted, final flush on shutdown.",
+      "validationRules": "Schema.parseJson for persisted state; tests cover restore/reconcile.",
+      "dataIntegrityRisks": "Corrupt state, stale running entries, duplicate issue identifiers.",
+      "privacySecurityConsiderations": "No secrets in state/snapshot.",
+      "migrationNotes": "Forward-only migration expected for persisted schema changes.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "layerDurableOrchestratorStore is wired in appLayer.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "DATA-002",
+      "type": "DATA",
+      "name": "Normalized issue and agent event domain objects",
+      "status": "Documented",
+      "storageType": "Other",
+      "primaryFiles": [
+        "src/core/domain/issue.ts",
+        "src/core/domain/agent-event.ts",
+        "src/core/domain/run-attempt.ts",
+        "src/core/domain/retry-entry.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-002",
+        "FEAT-005"
+      ],
+      "relatedApis": [
+        "API-002",
+        "API-003"
+      ],
+      "fieldsShape": "Schema-validated Issue, AgentEvent, RunAttempt, RetryEntry, and related state references.",
+      "constraints": "Strict TypeScript and Effect Schema decode at trust boundaries.",
+      "relationships": "Tracker adapter normalizes issues; Copilot adapter normalizes events; orchestrator stores attempts/retries.",
+      "indexes": "Issue identifier keys in runtime registry and store.",
+      "lifecycle": "Created from external inputs, consumed during one or more poll/worker cycles.",
+      "validationRules": "Schema.decodeUnknown / tagged domain constructors.",
+      "dataIntegrityRisks": "Malformed external payload or missing issue identity.",
+      "privacySecurityConsiderations": "Error payloads must not include secret values.",
+      "migrationNotes": "Internal shape can change with in-repo callers updated.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "Domain types are imported by adapters/orchestrator/tests.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "RULE-001",
+      "type": "RULE",
+      "ruleName": "Core I/O uses Effect and typed errors",
+      "status": "Documented",
+      "ruleType": "Business",
+      "primaryFiles": [
+        "AGENTS.md",
+        "docs/effect-guide.md",
+        "src/core/errors.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-001",
+        "FEAT-002",
+        "FEAT-003"
+      ],
+      "relatedApis": [],
+      "relatedDataModels": [],
+      "ruleDescription": "Everything that can fail, block, or touch I/O in core is modeled as Effect with tagged errors.",
+      "inputs": "Core operations and adapter boundaries.",
+      "allowedConditions": "Effect.sync/try/tryPromise at edges, Context.Tag ports, Layer wiring.",
+      "rejectedConditions": "Bare async/Promise in src/core business logic.",
+      "errorFailureBehavior": "Typed Data.TaggedError failures.",
+      "clientSideEnforcement": "No",
+      "serverSideEnforcement": "Typecheck and tests.",
+      "databaseEnforcement": "No",
+      "edgeCases": "Adapter edges may use tryPromise; tests use fakes/TestClock.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "AGENTS.md and source imports enforce the project convention.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "RULE-002",
+      "type": "RULE",
+      "ruleName": "Single state owner",
+      "status": "Documented",
+      "ruleType": "State Transition",
+      "primaryFiles": [
+        "src/core/orchestrator/loop.ts",
+        "src/core/orchestrator/command.ts",
+        "src/core/orchestrator/state.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-002",
+        "FEAT-006"
+      ],
+      "relatedApis": [
+        "API-001"
+      ],
+      "relatedDataModels": [
+        "DATA-001"
+      ],
+      "ruleDescription": "Only the orchestrator owner fiber mutates orchestrator state; cockpit commands enter through CommandBus.",
+      "inputs": "Worker outcomes, retry timers, cockpit commands.",
+      "allowedConditions": "Messages posted to mailbox/command bus and processed by owner fiber.",
+      "rejectedConditions": "Direct cockpit or worker mutation of state.",
+      "errorFailureBehavior": "Command failures return typed command results.",
+      "clientSideEnforcement": "Cockpit uses API client only.",
+      "serverSideEnforcement": "Module structure and tests.",
+      "databaseEnforcement": "No",
+      "edgeCases": "Concurrent commands, worker completion during pause, retry timer while paused.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "runCockpit receives CommandBus; no direct store mutation in cockpit handlers beyond command path.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "RULE-003",
+      "type": "RULE",
+      "ruleName": "Secrets never serialize to public state, logs, errors, or agent env unintentionally",
+      "status": "Documented",
+      "ruleType": "Permission",
+      "primaryFiles": [
+        "src/core/workflow/var.ts",
+        "src/adapters/agent-copilot/copilot-runner.ts",
+        "src/core/cockpit/handlers.ts",
+        "src/core/cockpit/token.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-003",
+        "FEAT-005",
+        "FEAT-006",
+        "FEAT-007"
+      ],
+      "relatedApis": [
+        "API-001",
+        "API-002",
+        "API-003"
+      ],
+      "relatedDataModels": [
+        "DATA-001"
+      ],
+      "ruleDescription": "Resolved tracker/Copilot/cockpit secrets are protected from serialization and accidental inheritance.",
+      "inputs": "Env vars, config, cockpit token, child process env.",
+      "allowedConditions": "Use references or generated process-local token; scrub child env.",
+      "rejectedConditions": "Writing resolved tokens to WORKFLOW.md, snapshot, error payloads, or tracker-exposed agent env.",
+      "errorFailureBehavior": "Secret missing/auth failures are reported without secret value.",
+      "clientSideEnforcement": "Cockpit receives only cockpit mutation token, injected same-origin.",
+      "serverSideEnforcement": "Settings whitelist and env scrub.",
+      "databaseEnforcement": "No",
+      "edgeCases": "Whitespace token, malicious Host, invalid settings patch, ambient env inheritance.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "README security model and tests cover token handling.",
+      "externalBoundary": "external",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "RULE-004",
+      "type": "RULE",
+      "ruleName": "Workspace path containment",
+      "status": "Documented",
+      "ruleType": "Validation",
+      "primaryFiles": [
+        "src/core/workspace/safety.ts",
+        "src/adapters/workspace/workspace-manager.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-004"
+      ],
+      "relatedApis": [
+        "API-003"
+      ],
+      "relatedDataModels": [],
+      "ruleDescription": "Issue workspace paths are sanitized and contained under the configured workspace root.",
+      "inputs": "Issue identifier and workspace root.",
+      "allowedConditions": "Sanitized path beneath workspace root.",
+      "rejectedConditions": "Traversal or cwd outside issue workspace.",
+      "errorFailureBehavior": "Workspace safety error.",
+      "clientSideEnforcement": "No",
+      "serverSideEnforcement": "Path helper and workspace manager.",
+      "databaseEnforcement": "No",
+      "edgeCases": "Unicode/symbol identifiers, duplicate sanitized names, absolute path input.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "WorkspaceManager uses computeWorkspacePath/sanitizeWorkspaceKey.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    },
+    {
+      "id": "RULE-005",
+      "type": "RULE",
+      "ruleName": "Cockpit host, auth, and settings mutation guard",
+      "status": "Documented",
+      "ruleType": "Permission",
+      "primaryFiles": [
+        "src/core/cockpit/security.ts",
+        "src/core/cockpit/auth.ts",
+        "src/core/cockpit/handlers.ts",
+        "src/core/workflow/workflow-file.ts"
+      ],
+      "relatedFeatures": [
+        "FEAT-006"
+      ],
+      "relatedApis": [
+        "API-001"
+      ],
+      "relatedDataModels": [],
+      "ruleDescription": "Local cockpit requests must satisfy loopback host checks; mutations also require bearer auth and whitelisted payloads.",
+      "inputs": "HTTP Host/Origin/Auth headers and settings patch.",
+      "allowedConditions": "Loopback Host with valid token for mutations; whitelisted settings keys only.",
+      "rejectedConditions": "Non-loopback Host, invalid token, unapproved config keys.",
+      "errorFailureBehavior": "403/401/validation failure.",
+      "clientSideEnforcement": "Cockpit API client sends injected token.",
+      "serverSideEnforcement": "Server guard and CockpitAuth.",
+      "databaseEnforcement": "No",
+      "edgeCases": "DNS rebinding, top-level navigation without Origin, missing token, invalid JSON.",
+      "relatedTestCases": [],
+      "relatedDefects": [],
+      "runtimeRegistrationEvidence": "runCockpit routes all API/static traffic through host guard.",
+      "externalBoundary": "internal",
+      "discoveryConfidence": "High",
+      "obsoleteSupersededBy": "",
+      "cleanupRequired": "No",
+      "notes": ""
+    }
+  ],
+  "tests": {
+    "cases": [],
+    "runs": []
+  },
+  "remediation": {
+    "defects": [],
+    "fixes": [],
+    "regressions": []
+  },
+  "reviews": [],
+  "readiness": {
+    "verdict": "Pending",
+    "confidence": 20,
+    "assessment": null,
+    "risks": [
+      {
+        "id": "RISK-001",
+        "title": "Agent subprocesses are intentionally unsandboxed",
+        "status": "Open",
+        "severity": "Informational",
+        "affectedIds": [
+          "FEAT-004",
+          "FEAT-005",
+          "API-003"
+        ],
+        "descriptionEvidence": "README Security & trust posture says agents run unsandboxed with --allow-all-tools; workspace and credentials are the intended v1 boundaries.",
+        "impact": "Operators must run the daemon in a low-privilege OS/container boundary when processing untrusted issues.",
+        "mitigationPlan": "Preserve the documented boundary and verify credential/workspace separation; do not mark as a repo defect unless code contradicts the documented v1 trust model.",
+        "owner": "Project/operator",
+        "notes": "Architecture decision, not a current defect."
+      }
+    ],
+    "waivers": [],
+    "assumptions": [
+      {
+        "id": "ASSUME-001",
+        "assumption": "This run may edit repository-owned quality artifacts and code but must not edit gitignored WORKFLOW.md or protected tool directories unless explicitly required.",
+        "status": "Open",
+        "basisEvidence": "AGENTS.md says do not edit WORKFLOW.md, .impeccable/, .claude/, .deepsec/, or .cockpit-shots/.",
+        "confidence": "High",
+        "whatWouldInvalidate": "User explicitly asks to modify one of those surfaces.",
+        "relatedIds": [
+          "FEAT-001",
+          "CONFIG-001"
+        ]
+      },
+      {
+        "id": "ASSUME-002",
+        "assumption": "Quality-autonomy parallel lanes are run serially in this session because the active multi-agent instruction forbids spawning sub-agents unless explicitly requested.",
+        "status": "Closed",
+        "basisEvidence": "Developer instruction in this thread: do not spawn sub-agents unless the user explicitly asks for sub-agents, delegation, or parallel agent work.",
+        "confidence": "High",
+        "whatWouldInvalidate": "User explicitly authorizes sub-agents or parallel agent work.",
+        "relatedIds": [],
+        "notes": "Superseded: the user explicitly allowed subagents and Codex sessions on 2026-07-03."
+      },
+      {
+        "id": "ASSUME-003",
+        "assumption": "Codex in-app browser canvas opening is unavailable in this session, but the local canvas server is attached and serving the tracker on loopback.",
+        "status": "Open",
+        "basisEvidence": "Browser plugin listed only a Chrome extension backend; selecting iab returned \"Browser is not available: iab\". The canvas server is running on a loopback URL with an ephemeral token omitted from the tracker.",
+        "confidence": "High",
+        "whatWouldInvalidate": "The Codex in-app browser backend becomes available and the tokened URL opens there.",
+        "relatedIds": []
+      }
+    ],
+    "blockers": []
+  }
+}

@@ -4,6 +4,9 @@
 packages:
   - "packages/*"
 
+overrides:
+  esbuild: 0.28.1
+
 # Supply-chain hardening: installs ignore newly-published package versions until
 # they have had five days to be vetted, and reject trust-signal downgrades.
 minimumReleaseAge: 7200
