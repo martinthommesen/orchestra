@@ -44,6 +44,9 @@ docs/sprint-*/captured-*.raw
 /.cockpit-fleet.png
 /.playwright-mcp/
 
+# Local tool cache
+/.impeccable/hook.cache.json
+
 # deepsec generated output
 .deepsec/.env*.local
 .deepsec/data/*/files/
@@ -59,6 +62,9 @@ reports/
 
 # Goals framework working directory (orchestrator-managed)
 .goals/
+
+# Conductor workspace context
+.context/
 
 # Editor / OS
 .DS_Store
