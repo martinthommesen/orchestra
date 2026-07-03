@@ -44,7 +44,7 @@ export const DispatchControl = ({
     <div className="dispatch-control">
       <div className="dispatch-control__state">
         <span
-          className={`dispatch-control__dot ${pause.dispatchPaused ? "is-paused" : "is-running"}`}
+          className={`statusdot ${pause.dispatchPaused ? "is-paused" : "is-running"}`}
           aria-hidden="true"
         />
         <div>

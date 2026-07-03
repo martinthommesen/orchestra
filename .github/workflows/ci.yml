@@ -61,3 +61,19 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # Informational-only APM audit — verifies agent package integrity and policy
+  # compliance on every PR. Never blocks the merge gate (continue-on-error: true).
+  apm-audit:
+    name: APM agent package audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Audit APM agent packages
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1
+        with:
+          audit-report: "true"

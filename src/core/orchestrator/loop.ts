@@ -11,6 +11,7 @@ import {
 } from "effect";
 import type { AgentEvent, Usage } from "../domain/agent-event";
 import { Issue, type IssueStateRef, normalizeState } from "../domain/issue";
+import type { OrchestratorState } from "../domain/orchestrator-state";
 import type { RetryEntry } from "../domain/retry-entry";
 import { RunAttempt } from "../domain/run-attempt";
 import type { WorkflowDefinition } from "../domain/workflow";
@@ -35,6 +36,7 @@ import { Observer, type RetryKind } from "./observer";
 import { preflight } from "./preflight";
 import {
   type AbandonedView,
+  classifyTrackerOnly,
   planReconciliation,
   type ReconcileAction,
   type RetryingView,
@@ -502,6 +504,27 @@ export const runOrchestrator = (
       const cleanupWorkspace = (issueId: string, identifier: string, ws: Workspace) =>
         Effect.forkScoped(cleanupWorkspaceEffect(issueId, identifier, ws));
 
+      /** Drop a claimed registry entry, interrupt its fibers, then apply the durable
+       *  transition — the canonical kill-and-forget dance, extracted from the three
+       *  sites (TerminalKill / NeitherKill / CancelSession) that share it verbatim.
+       *  Ordering is load-bearing: delete FIRST (suppresses spurious WorkerDone and
+       *  stale RetryDue), then interrupt worker, then timer, then persist the state
+       *  change.  All caller-specific follow-up (emits, completions, Deferred) stays
+       *  in the caller. */
+      const killAndForget = (
+        issueId: string,
+        rec: IssueRuntime,
+        transition: (s: OrchestratorState) => OrchestratorState,
+      ): Effect.Effect<void, never, Scope.Scope> =>
+        Effect.gen(function* () {
+          const fiber = rec.workerFiber;
+          const timer = rec.timerFiber;
+          registry.delete(issueId); // FIRST — before any interrupt
+          if (fiber !== null) yield* Fiber.interrupt(fiber);
+          if (timer !== null) yield* Fiber.interrupt(timer);
+          yield* store.update(transition);
+        });
+
       const applyReconcileAction = (
         action: ReconcileAction,
       ): Effect.Effect<void, never, Scope.Scope> =>
@@ -527,20 +550,12 @@ export const runOrchestrator = (
               break;
             }
             case "TerminalKill": {
-              const fiber = rec.workerFiber;
-              const timer = rec.timerFiber;
               const ws = rec.workspace;
-              registry.delete(action.issueId);
-              if (fiber !== null) {
-                yield* Fiber.interrupt(fiber);
-              }
-              if (timer !== null) {
-                yield* Fiber.interrupt(timer);
-              }
-              yield* store.update((s) => markCompleted(s, action.issueId));
+              const identifier = rec.issue.identifier;
+              yield* killAndForget(action.issueId, rec, (s) => markCompleted(s, action.issueId));
               yield* completions.record({
                 issue_id: action.issueId,
-                identifier: rec.issue.identifier,
+                identifier,
                 outcome: "killed",
               });
               yield* observer.emit({
@@ -549,21 +564,12 @@ export const runOrchestrator = (
                 reason: "terminal",
               });
               if (ws !== null) {
-                yield* cleanupWorkspace(action.issueId, rec.issue.identifier, ws);
+                yield* cleanupWorkspace(action.issueId, identifier, ws);
               }
               break;
             }
             case "NeitherKill": {
-              const fiber = rec.workerFiber;
-              const timer = rec.timerFiber;
-              registry.delete(action.issueId);
-              if (fiber !== null) {
-                yield* Fiber.interrupt(fiber);
-              }
-              if (timer !== null) {
-                yield* Fiber.interrupt(timer);
-              }
-              yield* store.update((s) => release(s, action.issueId));
+              yield* killAndForget(action.issueId, rec, (s) => release(s, action.issueId));
               yield* observer.emit({
                 _tag: "WorkerKilled",
                 issueId: action.issueId,
@@ -700,7 +706,7 @@ export const runOrchestrator = (
           dispatched: toDispatch.map((i) => i.id),
           dispatchSkipped: budget.paused || operatorPaused,
         });
-      });
+      }).pipe(Effect.withSpan("orchestrator.tick"));
 
       // ───────────────────────────── Message handlers ─────────────────────────────
 
@@ -711,12 +717,13 @@ export const runOrchestrator = (
             return;
           }
           rec.lastEventAt = yield* clock.monotonicMillis;
-          if (event._tag === "SessionStarted") {
-            rec.sessionId = event.session_id;
-          }
           const usage: Usage | undefined = event.usage;
           if (usage !== undefined) {
             yield* store.update((s) => addUsage(s, usage));
+          }
+          if (event._tag === "AgentProgress") return; // liveness only — stall clock + usage refreshed above
+          if (event._tag === "SessionStarted") {
+            rec.sessionId = event.session_id;
           }
           yield* store.update((s) => {
             const ra = s.running[issueId];
@@ -795,6 +802,33 @@ export const runOrchestrator = (
           const attempt = rec.pendingAttempt;
           rec.pendingKind = null;
           rec.pendingAttempt = 0;
+          // #81: a handoff can land in the 1s continuation window (CONTINUATION_DELAY_MS), which is far
+          // shorter than the poll interval — so reconcile's mid-backoff terminal check (classifyTrackerOnly
+          // on the `retrying` view) usually cannot run in time and we'd waste a whole turn re-running
+          // COMPLETED work on an issue a human has taken over. Re-check this one issue's tracker state right
+          // before re-dispatching a continuation; terminal → clean up, neither/vanished → release, both via
+          // the same reconcile action. Fail-open on a tracker error (reconcile's refresh-failed semantics):
+          // proceed with the continuation — the next reconcile tick still catches a genuine handoff.
+          // ponytail: continuation only. A failure retry has the same theoretical window, but it re-runs a
+          // FAILED turn (lower value) and its exponential backoff usually spans a poll tick; drop the `kind`
+          // gate to guard that path too if it ever matters.
+          if (kind === "continuation") {
+            const stateResult = yield* Effect.either(tracker.fetchIssueStatesByIds([issueId]));
+            if (Either.isRight(stateResult)) {
+              const refreshed = new Map(stateResult.right.map((r) => [r.id, r] as const));
+              const action = classifyTrackerOnly(issueId, refreshed, activeStates, terminalStates);
+              if (action !== null) {
+                yield* applyReconcileAction(action);
+                return;
+              }
+            } else {
+              yield* observer.emit({
+                _tag: "TrackerError",
+                op: "fetchIssueStatesByIds",
+                message: errLabel(stateResult.left),
+              });
+            }
+          }
           yield* store.update((s) => clearRetry(s, issueId));
           yield* observer.emit({ _tag: "RetryFired", issueId, identifier: rec.issue.identifier });
           if (kind === "continuation") {
@@ -890,17 +924,8 @@ export const runOrchestrator = (
               // it (not a completion — it can be re-picked later) and drop the registry
               // entry. No other worker is touched. Dropping the entry first means the
               // interrupted worker's onExit posts no spurious WorkerDone.
-              const fiber = rec.workerFiber;
-              const timer = rec.timerFiber;
               const identifier = rec.issue.identifier;
-              registry.delete(command.issueId);
-              if (fiber !== null) {
-                yield* Fiber.interrupt(fiber);
-              }
-              if (timer !== null) {
-                yield* Fiber.interrupt(timer);
-              }
-              yield* store.update((s) => release(s, command.issueId));
+              yield* killAndForget(command.issueId, rec, (s) => release(s, command.issueId));
               yield* observer.emit({
                 _tag: "SessionCancelled",
                 issueId: command.issueId,

@@ -1,5 +1,6 @@
-import { Context, Effect, Clock as EffectClock, Layer, Ref } from "effect";
+import { Context, Effect, Layer } from "effect";
 import type { Observation } from "../orchestrator/observer";
+import { makeBoundedRing } from "./bounded-ring";
 import { truncateOneLine } from "./glyphs";
 
 /**
@@ -229,32 +230,13 @@ export class RecentEvents extends Context.Tag("orchestra/RecentEvents")<
   }
 >() {}
 
-interface RingState {
-  readonly seq: number;
-  readonly buffer: ReadonlyArray<EventEnvelope>;
-}
-
 /** Build a recent-events ring bounded to `cap`. */
 export const makeRecentEvents = (
   cap: number = RECENT_EVENTS_CAP,
 ): Effect.Effect<Context.Tag.Service<RecentEvents>> =>
-  Effect.gen(function* () {
-    const ref = yield* Ref.make<RingState>({ seq: 0, buffer: [] });
-    return {
-      append: (draft) =>
-        Effect.gen(function* () {
-          const ms = yield* EffectClock.currentTimeMillis;
-          const emittedAt = new Date(ms).toISOString();
-          yield* Ref.update(ref, (st) => {
-            const seq = st.seq + 1;
-            const next = [...st.buffer, finalize(draft, seq, emittedAt)];
-            const buffer = next.length > cap ? next.slice(next.length - cap) : next;
-            return { seq, buffer };
-          });
-        }),
-      list: Ref.get(ref).pipe(Effect.map((st) => st.buffer)),
-    };
-  });
+  makeBoundedRing<EventEnvelope, EventDraft>(cap, (draft, seq, ms) =>
+    finalize(draft, seq, new Date(ms).toISOString()),
+  ).pipe(Effect.map((ring) => ({ append: ring.record, list: ring.list })));
 
 /** Layer providing an empty {@link RecentEvents} ring at the default cap. */
 export const RecentEventsLive: Layer.Layer<RecentEvents> = Layer.effect(

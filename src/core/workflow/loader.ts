@@ -21,29 +21,48 @@ import { resolveOptionalValue } from "./var";
  * logic fully unit-testable without touching disk.
  */
 
+/** The result of scanning a `WORKFLOW.md` for its front-matter fence boundaries. */
+export interface FrontMatterScan {
+  readonly lines: readonly string[];
+  readonly eol: "\r\n" | "\n";
+  readonly hasOpeningFence: boolean;
+  /** Index of the closing `---` line, or -1 if none (only meaningful when hasOpeningFence). */
+  readonly closeIndex: number;
+}
+
+/** Pure fence scan: split into lines, detect EOL, locate the opening and closing `---`. */
+export const findFrontMatterBounds = (content: string): FrontMatterScan => {
+  const eol: "\r\n" | "\n" = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(/\r?\n/);
+  const hasOpeningFence = (lines[0] ?? "").trim() === "---";
+  let closeIndex = -1;
+  if (hasOpeningFence) {
+    for (let i = 1; i < lines.length; i++) {
+      if ((lines[i] ?? "").trim() === "---") {
+        closeIndex = i;
+        break;
+      }
+    }
+  }
+  return { lines, eol, hasOpeningFence, closeIndex };
+};
+
 /** Split a raw `WORKFLOW.md` into YAML front matter (or null) and the trimmed body. */
 export const splitFrontMatter = (
   content: string,
 ): { readonly frontMatter: string | null; readonly body: string } => {
-  const lines = content.split(/\r?\n/);
-  if ((lines[0] ?? "").trim() !== "---") {
+  const { lines, hasOpeningFence, closeIndex } = findFrontMatterBounds(content);
+  if (!hasOpeningFence) {
     return { frontMatter: null, body: content.trim() };
   }
-  let closing = -1;
-  for (let i = 1; i < lines.length; i++) {
-    if ((lines[i] ?? "").trim() === "---") {
-      closing = i;
-      break;
-    }
-  }
-  if (closing === -1) {
+  if (closeIndex === -1) {
     // Unterminated fence: treat everything after the opening `---` as front matter.
     return { frontMatter: lines.slice(1).join("\n"), body: "" };
   }
   return {
-    frontMatter: lines.slice(1, closing).join("\n"),
+    frontMatter: lines.slice(1, closeIndex).join("\n"),
     body: lines
-      .slice(closing + 1)
+      .slice(closeIndex + 1)
       .join("\n")
       .trim(),
   };

@@ -1,4 +1,5 @@
-import { Context, Effect, Clock as EffectClock, Layer, Ref } from "effect";
+import { Context, type Effect, Layer } from "effect";
+import { makeBoundedRing } from "./bounded-ring";
 
 /**
  * Sprint 3 / #37 — **rich completion history**. The authoritative `completed` list in
@@ -45,26 +46,12 @@ export class RecentCompletions extends Context.Tag("orchestra/RecentCompletions"
 const makeRecentCompletions = (
   cap: number = RECENT_COMPLETIONS_CAP,
 ): Effect.Effect<Context.Tag.Service<RecentCompletions>> =>
-  Effect.gen(function* () {
-    const ref = yield* Ref.make<ReadonlyArray<RecentCompletion>>([]);
-    return {
-      record: (input) =>
-        Effect.gen(function* () {
-          const ms = yield* EffectClock.currentTimeMillis;
-          const entry: RecentCompletion = {
-            issue_id: input.issue_id,
-            identifier: input.identifier,
-            finished_at: new Date(ms).toISOString(),
-            outcome: input.outcome,
-          };
-          yield* Ref.update(ref, (prev) => {
-            const next = [...prev, entry];
-            return next.length > cap ? next.slice(next.length - cap) : next;
-          });
-        }),
-      list: Ref.get(ref),
-    };
-  });
+  makeBoundedRing<RecentCompletion, CompletionInput>(cap, (input, _seq, ms) => ({
+    issue_id: input.issue_id,
+    identifier: input.identifier,
+    finished_at: new Date(ms).toISOString(),
+    outcome: input.outcome,
+  }));
 
 /** Layer providing an empty {@link RecentCompletions} ring at the default cap. */
 export const RecentCompletionsLive: Layer.Layer<RecentCompletions> = Layer.effect(

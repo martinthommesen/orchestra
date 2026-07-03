@@ -28,7 +28,9 @@ describe("describeError", () => {
 
   it("omits the appended detail when the server message merely repeats the guidance", () => {
     const msg = describeError(new ApiError(503, "service_unavailable", ""));
-    expect(msg).toBe("The daemon is busy or the command timed out — try again.");
+    expect(msg).toBe(
+      "The daemon is busy or the command timed out. It may still be processing — wait a moment and retry.",
+    );
     expect(msg).not.toContain("(");
   });
 

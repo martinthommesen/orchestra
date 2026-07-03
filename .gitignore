@@ -54,9 +54,16 @@ docs/sprint-*/captured-*.raw
 .deepsec/findings/
 .deepsec/findings.json
 
+# Generated readiness reports (not source; regenerated on demand)
+reports/
+
+# Goals framework working directory (orchestrator-managed)
+.goals/
+
 # Editor / OS
 .DS_Store
 .idea/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+!.vscode/mcp.json

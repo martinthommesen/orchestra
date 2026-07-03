@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { parseRoute, type Route, routeHref } from "./router";
+import { parseRoute, ROUTE_LABELS, type Route, routeHref } from "./router";
 
 /**
  * DOM binding for the hash router (#68). Keeps React state in sync with `location.hash` and
@@ -18,6 +18,10 @@ export const useRoute = (): { route: Route; navigate: (route: Route) => void } =
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
+
+  useEffect(() => {
+    document.title = `${ROUTE_LABELS[route]} — Orchestra Cockpit`;
+  }, [route]);
 
   return { route, navigate };
 };

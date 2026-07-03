@@ -5,7 +5,7 @@ import { CST, isMap, isScalar, parseDocument } from "yaml";
 import { NonNegativeInt, PositiveInt, ServiceConfig } from "../domain/workflow";
 import { type LoadWorkflowError, SettingsRejected } from "../errors";
 import { errorMessage } from "../util/error";
-import { loadWorkflow } from "./loader";
+import { findFrontMatterBounds, loadWorkflow } from "./loader";
 
 /**
  * Sprint 6 / #66 — the `WorkflowFile` service (DD-4): the cockpit's settings read/persist
@@ -123,28 +123,20 @@ const project = (c: ServiceConfig): EditableSettings => ({
 const splitForEdit = (
   content: string,
 ): Effect.Effect<{ frontMatter: string; body: string; eol: string }, SettingsRejected> => {
-  const eol = content.includes("\r\n") ? "\r\n" : "\n";
-  const lines = content.split(/\r?\n/);
-  if ((lines[0] ?? "").trim() !== "---") {
+  const { lines, eol, hasOpeningFence, closeIndex } = findFrontMatterBounds(content);
+  if (!hasOpeningFence) {
     return Effect.fail(
       new SettingsRejected({ message: "WORKFLOW.md has no front matter to edit" }),
     );
   }
-  let close = -1;
-  for (let i = 1; i < lines.length; i++) {
-    if ((lines[i] ?? "").trim() === "---") {
-      close = i;
-      break;
-    }
-  }
-  if (close === -1) {
+  if (closeIndex === -1) {
     return Effect.fail(
       new SettingsRejected({ message: "WORKFLOW.md front matter is unterminated" }),
     );
   }
   return Effect.succeed({
-    frontMatter: lines.slice(1, close).join(eol),
-    body: lines.slice(close + 1).join(eol),
+    frontMatter: lines.slice(1, closeIndex).join(eol),
+    body: lines.slice(closeIndex + 1).join(eol),
     eol,
   });
 };

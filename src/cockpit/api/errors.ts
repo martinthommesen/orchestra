@@ -9,14 +9,18 @@ import { ApiError, type ApiErrorCode } from "./client";
  */
 
 const GUIDANCE: Record<ApiErrorCode, string> = {
-  unauthorized: "Not authorized — the operator token is missing or invalid.",
-  forbidden: "Forbidden — this token isn't allowed to do that.",
-  bad_request: "The daemon rejected that request as invalid.",
-  service_unavailable: "The daemon is busy or the command timed out — try again.",
-  not_found: "Not found — the daemon has no record of that.",
-  server_error: "The daemon hit an internal error.",
-  network: "Can't reach the daemon — is it running?",
-  unknown: "Something went wrong.",
+  unauthorized:
+    "Not authorized — the operator token is missing or invalid. Check that the token in the browser matches the one the daemon printed at startup.",
+  forbidden: "Forbidden — this token isn't allowed to perform that action.",
+  bad_request: "The daemon rejected that request as invalid — check the value and try again.",
+  service_unavailable:
+    "The daemon is busy or the command timed out. It may still be processing — wait a moment and retry.",
+  not_found: "Not found — the daemon has no record of that resource. It may have been cleaned up.",
+  server_error:
+    "The daemon hit an internal error. Check the terminal running `orchestra` for a stack trace.",
+  network:
+    "Can't reach the daemon — is it still running? Check the terminal for errors or restart it.",
+  unknown: "Something unexpected went wrong. Check the daemon's terminal output for details.",
 };
 
 /** Turn any thrown value into an actionable, operator-facing message. */

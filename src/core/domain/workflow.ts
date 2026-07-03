@@ -21,6 +21,7 @@ import { Schema } from "effect";
 
 export const PositiveInt = Schema.Int.pipe(Schema.positive());
 export const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+export const PositiveNumber = Schema.Number.pipe(Schema.positive());
 
 /** `tracker` block (SPEC §5.3.1), GitHub-flavored. */
 const TrackerConfig = Schema.Struct({
@@ -158,20 +159,39 @@ const PersistenceConfig = Schema.Struct({
 export type PersistenceConfig = typeof PersistenceConfig.Type;
 
 /**
- * `budget` block (Sprint 5 / #53) — an optional spend guardrail. Additive and
- * all-defaults so an unchanged `WORKFLOW.md` still decodes; an empty block configures
+ * `budget` block (Sprint 5 / #53, Sprint 6 / #77) — an optional spend guardrail. Additive
+ * and all-defaults so an unchanged `WORKFLOW.md` still decodes; an empty block configures
  * **no** ceiling and the dispatch guard stays inert (identical to pre-#53 behavior).
  *
- * `max_total_tokens` is the (only) ceiling: once cumulative `agent_totals.total_tokens`
- * reaches it, the orchestrator **pauses NEW dispatch** — in-flight workers, retries, and
- * reconciliation are never affected (Sprint 5 constraint #2). The cap is intentionally a
- * single, concrete token ceiling; a derived USD ceiling is deliberately deferred rather
- * than shipped as a half-wired knob (clean-code mandate: minimal-but-complete).
+ * Two ceiling types are available and can be combined — the guard pauses on whichever is hit
+ * first:
+ * - `max_total_tokens`: pause NEW dispatch once cumulative `agent_totals.total_tokens` reaches it.
+ * - `max_cost_usd` + `usd_per_million_tokens`: pause NEW dispatch once cumulative token spend
+ *   (priced at `usd_per_million_tokens` per million tokens) reaches `max_cost_usd`. Both knobs
+ *   **must be present together** — `max_cost_usd` without a rate is rejected at config load (it
+ *   cannot be priced, so silently ignoring it would be a money-path foot-gun).
+ *
+ * An empty block (no ceilings) leaves the guard fully inert.
+ *
+ * // ponytail: USD ceiling is load-time; add the knobs to EditableSettings/SettingsPatch
+ * // (+cockpit Settings form) if operators need to tune it hot, like max_total_tokens.
  */
 export const BudgetConfig = Schema.Struct({
   /** Token ceiling. Absent → unlimited (guard inert). Pause NEW dispatch once spend ≥ this. */
   max_total_tokens: Schema.optional(PositiveInt),
-}).annotations({ identifier: "BudgetConfig" });
+  /** USD price per million tokens. Required together with `max_cost_usd` to price the cost ceiling. */
+  usd_per_million_tokens: Schema.optional(PositiveNumber),
+  /** USD spend ceiling. Requires `usd_per_million_tokens` to be priced; rejected at load without it. */
+  max_cost_usd: Schema.optional(PositiveNumber),
+})
+  .pipe(
+    Schema.filter((b) =>
+      b.max_cost_usd !== undefined && b.usd_per_million_tokens === undefined
+        ? "budget.max_cost_usd requires budget.usd_per_million_tokens to price it"
+        : undefined,
+    ),
+  )
+  .annotations({ identifier: "BudgetConfig" });
 export type BudgetConfig = typeof BudgetConfig.Type;
 
 /**
