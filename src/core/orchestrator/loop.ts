@@ -551,10 +551,11 @@ export const runOrchestrator = (
             }
             case "TerminalKill": {
               const ws = rec.workspace;
+              const identifier = rec.issue.identifier;
               yield* killAndForget(action.issueId, rec, (s) => markCompleted(s, action.issueId));
               yield* completions.record({
                 issue_id: action.issueId,
-                identifier: rec.issue.identifier,
+                identifier,
                 outcome: "killed",
               });
               yield* observer.emit({
@@ -563,7 +564,7 @@ export const runOrchestrator = (
                 reason: "terminal",
               });
               if (ws !== null) {
-                yield* cleanupWorkspace(action.issueId, rec.issue.identifier, ws);
+                yield* cleanupWorkspace(action.issueId, identifier, ws);
               }
               break;
             }
