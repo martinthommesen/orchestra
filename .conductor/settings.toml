@@ -1,0 +1,46 @@
+#:schema https://conductor.build/schemas/settings.repo.schema.json
+
+# Shared Conductor config for Orchestra (pnpm 11 workspace, Node >=22).
+# See CONTRIBUTING.md for the documented local dev loop this mirrors.
+
+# Copy the per-workspace operator config + secrets into every new workspace.
+# Both are gitignored (see .gitignore), so git will not carry them into new worktrees.
+# Conductor's Files to copy setting is the right mechanism for this workspace-local state.
+# Set them once in the repo root and every workspace inherits:
+#   - .env / .env.*  : GITHUB_TOKEN, ORCHESTRA_COCKPIT_TOKEN, etc. (.env.example is committed)
+#   - WORKFLOW.md    : the operator config the daemon needs (`pnpm dev ./WORKFLOW.md`)
+# This overrides Conductor's default `.env*` pattern, so `.env*` is re-listed here.
+file_include_globs = ".env*\nWORKFLOW.md\n"
+
+# The `dev` run script serves the cockpit on $CONDUCTOR_PORT, so point Conductor's
+# built-in browser at it — the cockpit opens there when you run the app.
+[[preview_urls]]
+url = "http://localhost:$CONDUCTOR_PORT"
+name = "Cockpit"
+
+[scripts]
+# Documented setup command (CONTRIBUTING.md). pnpm runs zero third-party postinstall
+# scripts (allowBuilds all-false in pnpm-workspace.yaml) and installs the pinned lockfile
+# versions, so a fresh workspace is deterministic and supply-chain safe.
+setup = "pnpm install --frozen-lockfile"
+
+# The daemon binds $CONDUCTOR_PORT (never a fixed port) and there is no shared local DB,
+# Docker stack, or other single-instance resource — vitest binds no ports either — so
+# multiple workspaces can run in parallel.
+run_mode = "concurrent"
+
+# Run the orchestrator daemon (serves the cockpit UI + JSON API) on the workspace's port.
+[scripts.run.dev]
+command = "pnpm dev ./WORKFLOW.md --port $CONDUCTOR_PORT"
+default = true
+icon = "rocket"
+
+# Vitest in watch mode — the inner dev loop.
+[scripts.run.test]
+command = "pnpm test:watch"
+icon = "test-tube"
+
+# Full pre-commit gate: typecheck + biome/prettier + vitest + react-doctor score.
+[scripts.run.check]
+command = "pnpm check"
+icon = "wrench"
