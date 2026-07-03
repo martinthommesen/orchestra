@@ -4,8 +4,9 @@
 # See CONTRIBUTING.md for the documented local dev loop this mirrors.
 
 # Copy the per-workspace operator config + secrets into every new workspace.
-# Both are gitignored (see .gitignore), so they are NOT carried in by git — Files to copy
-# is the right mechanism. Set them once in the repo root and every workspace inherits:
+# Both are gitignored (see .gitignore), so git will not carry them into new worktrees.
+# Conductor's Files to copy setting is the right mechanism for this workspace-local state.
+# Set them once in the repo root and every workspace inherits:
 #   - .env / .env.*  : GITHUB_TOKEN, ORCHESTRA_COCKPIT_TOKEN, etc. (.env.example is committed)
 #   - WORKFLOW.md    : the operator config the daemon needs (`pnpm dev ./WORKFLOW.md`)
 # This overrides Conductor's default `.env*` pattern, so `.env*` is re-listed here.
@@ -21,7 +22,7 @@ name = "Cockpit"
 # Documented setup command (CONTRIBUTING.md). pnpm runs zero third-party postinstall
 # scripts (allowBuilds all-false in pnpm-workspace.yaml) and installs the pinned lockfile
 # versions, so a fresh workspace is deterministic and supply-chain safe.
-setup = "pnpm install"
+setup = "pnpm install --frozen-lockfile"
 
 # The daemon binds $CONDUCTOR_PORT (never a fixed port) and there is no shared local DB,
 # Docker stack, or other single-instance resource — vitest binds no ports either — so
