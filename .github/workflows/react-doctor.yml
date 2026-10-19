@@ -36,7 +36,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - id: react-doctor
-        uses: millionco/react-doctor@0b4f4f4bd248a154e64eb508a48347f71154b3f3
+        uses: millionco/react-doctor@695e46eee203a5d1855020191aa7e9c010a1250e
         with:
           blocking: warning
           scope: full
