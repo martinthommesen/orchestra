@@ -42,7 +42,7 @@
     "@opentelemetry/sdk-trace-node": "^2.8.0",
     "@opentelemetry/sdk-trace-web": "^2.8.0",
     "@opentelemetry/semantic-conventions": "^1.41.1",
-    "effect": "^3.21.4",
+    "effect": "^3.22.1",
     "liquidjs": "^10.27.0",
     "lucide-react": "^1.21.0",
     "react": "^19.2.7",
